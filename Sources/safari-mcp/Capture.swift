@@ -167,6 +167,35 @@ enum Capture {
         return (data, dims[0], dims[1])
     }
 
+    /// Crops and scales a JPEG of the viewport (from the extension's capture of the visible tab).
+    /// `region` is [x, y, w, h] in viewport px. `k` is viewport px per output image px.
+    static func recode(_ jpeg: Data, viewport: CGSize, region: [Double]?, maxWidth: Int) -> (data: Data, width: Int, height: Int, k: Double)? {
+        guard let src = CGImageSourceCreateWithData(jpeg as CFData, nil),
+              var img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return nil }
+        let vw = viewport.width > 0 ? Double(viewport.width) : Double(img.width)
+        let s = Double(img.width) / vw
+        var rw = vw
+        if let r = region, r.count == 4 {
+            let rect = CGRect(x: r[0] * s, y: r[1] * s, width: r[2] * s, height: r[3] * s).integral
+                .intersection(CGRect(x: 0, y: 0, width: img.width, height: img.height))
+            guard !rect.isEmpty, let c = img.cropping(to: rect) else { return nil }
+            img = c
+            rw = Double(rect.width) / s
+        }
+        let ow = min(img.width, max(maxWidth, 1))
+        let oh = max(1, Int((Double(img.height) * Double(ow) / Double(img.width)).rounded()))
+        guard let ctx = CGContext(data: nil, width: ow, height: oh, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.draw(img, in: CGRect(x: 0, y: 0, width: ow, height: oh))
+        guard let out = ctx.makeImage() else { return nil }
+        let data = NSMutableData()
+        guard let dst = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dst, out, [kCGImageDestinationLossyCompressionQuality: 0.75] as CFDictionary)
+        guard CGImageDestinationFinalize(dst) else { return nil }
+        return (data as Data, ow, oh, rw / Double(ow))
+    }
+
     /// Entry point of the helper process: prints "width height" on success, or the error.
     static func helperMain(_ json: String) -> Int32 {
         func rect(_ v: Any?) -> CGRect? {

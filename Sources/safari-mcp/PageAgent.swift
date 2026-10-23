@@ -2,6 +2,90 @@ enum PageAgent {
     /// Returned by the call wrapper when the agent is not in the page yet.
     static let absent = "__smcp_absent__"
 
+    /// Runs in the page's own JavaScript world: hooks console, fetch and XHR, answers
+    /// dialogs, and runs `js` code. With the extension it is main.js, injected at
+    /// document_start in every frame; with Apple Events it is injected with `source`.
+    /// The agent reaches it directly, or through `__smcp_q`/`__smcp_r` events from the
+    /// extension's isolated world.
+    static let mainSource = #"""
+    (function(){
+    if(window.__smcpM)return;
+    var M=window.__smcpM={con:null,net:null,slots:{}};
+    function clip(s,k){s=String(s==null?'':s).replace(/\s+/g,' ').trim();return s.length>k?s.slice(0,k-1)+'…':s}
+    function fmt(v){if(typeof v==='string')return v;if(v instanceof Error)return v.name+': '+v.message;try{return JSON.stringify(v)}catch(e){return String(v)}}
+    function push(arr,x){arr.push(x);arr.t=(arr.t||0)+1;if(arr.length>300)arr.shift()}
+    // Bodies of text/JSON responses, kept for the last 50 requests.
+    var BOD=new Map();
+    function keep(id,ct,b){if(!/json|text|xml|javascript|html|csv/i.test(ct||''))return;BOD.set(id,{c:ct,b:String(b).slice(0,4000)});if(BOD.size>50)BOD.delete(BOD.keys().next().value)}
+    function hook(){if(M.con)return false;M.con=[];M.net=[];M.nn=0;M.cur={};
+      ['log','info','warn','error','debug'].forEach(function(l){var o=console[l];console[l]=function(){try{push(M.con,l+' '+[].map.call(arguments,fmt).join(' '))}catch(e){}return o.apply(console,arguments)}});
+      addEventListener('error',function(e){push(M.con,'exception '+(e.message||(e.target&&(e.target.src||e.target.href))||'')+(e.filename?' @'+e.filename.split('/').pop()+':'+e.lineno:''))},true);
+      addEventListener('unhandledrejection',function(e){push(M.con,'rejection '+fmt(e.reason))});
+      var f=window.fetch;
+      if(f)window.fetch=function(i,o){var u=typeof i==='string'?i:(i&&i.url)||String(i),m=(o&&o.method)||(i&&i.method)||'GET',t=performance.now(),id='n'+(++M.nn);
+        return f.apply(this,arguments).then(function(r){push(M.net,id+' '+m+' '+r.status+' '+u+' '+Math.round(performance.now()-t)+'ms');
+          try{var ct=r.headers.get('content-type');if(/json|text|xml|javascript|html|csv/i.test(ct||''))r.clone().text().then(function(b){keep(id,ct,b)},function(){})}catch(e){}return r},
+          function(e){push(M.net,id+' '+m+' ERR '+u+' '+e);throw e})};
+      var xo=XMLHttpRequest.prototype.open,xs=XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.open=function(m,u){this.__q=[m,u];return xo.apply(this,arguments)};
+      XMLHttpRequest.prototype.send=function(){var x=this,t=performance.now(),id='n'+(++M.nn);
+        x.addEventListener('loadend',function(){if(!x.__q)return;push(M.net,id+' '+x.__q[0]+' '+(x.status||'ERR')+' '+x.__q[1]+' '+Math.round(performance.now()-t)+'ms');
+          try{if(x.responseType===''||x.responseType==='text')keep(id,x.getResponseHeader('content-type'),x.responseText)}catch(e){}});return xs.apply(this,arguments)};
+      return true}
+    var STATIC=/^(img|css|link|script|font|video|audio|image|icon|stylesheet|media)$/;
+    function logs(a){var fresh=hook(),net=a.kind==='network',kind=net?'net':'con',arr=net?M.net:M.con,note='';
+      if(net&&a.id){var b=BOD.get(a.id),l=M.net.find(function(x){return x.indexOf(a.id+' ')===0});
+        if(!l)return'no request '+a.id+' in the log';
+        return clip(l,300)+(b?'\n'+b.c+'\n'+b.b.slice(0,(a.limit||40)*100):'\n(no body kept: only text/JSON bodies of the last 50 requests)')}
+      var from=a.new&&M.cur[kind]!=null?arr.length-Math.min(arr.length,arr.t-M.cur[kind]):0;M.cur[kind]=arr.t||0;arr=arr.slice(from);
+      // With the extension, wr is every request of the tab since it started loading (from webRequest).
+      if(net&&a.wr){var all=a.wr,from0=a.new?Math.min(M.wrc||0,all.length):0,hid=0;M.wrc=all.length;
+        var w=all.slice(from0).filter(function(l){var t=l.split(' ')[0];if(/^(xmlhttprequest|fetch|ping|beacon)$/.test(t))return false;if(!a.pattern&&STATIC.test(t)){hid++;return false}return true});
+        arr=w.concat(arr);if(hid)note='('+hid+' images/scripts/styles hidden; pass pattern to include them)\n'}
+      else if(net&&!M.nseen){M.nseen=1;var hid=0,res=performance.getEntriesByType('resource').filter(function(e){if(!a.pattern&&STATIC.test(e.initiatorType)){hid++;return false}return true});
+        arr=res.map(function(e){return(e.initiatorType||'res')+' '+(e.responseStatus||'-')+' '+e.name+' '+Math.round(e.duration)+'ms'}).concat(arr);
+        note='(fetch/XHR capture starts now; below: what this page loaded so far'+(hid?', without '+hid+' images/scripts/styles (pass pattern to include them)':'')+')\n'}
+      else if(fresh)note='(capture starts now; earlier console output is not available)\n';
+      if(!net&&a.level){var lv=a.level==='error'?/^(error|exception|rejection) /:/^(error|exception|rejection|warn) /;arr=arr.filter(function(l){return lv.test(l)})}
+      if(a.pattern){var re;try{re=new RegExp(a.pattern,'i')}catch(e){}var p=a.pattern.toLowerCase();arr=arr.filter(function(l){return re?re.test(l):l.toLowerCase().indexOf(p)>=0})}
+      var out=arr.slice(-(a.limit||30)).map(function(l){return clip(l,180)}).join('\n');
+      if(a.clear){M.con.length=0;M.net.length=0;BOD.clear()}
+      return note+(out||(a.new?'(nothing new)':'(no entries)'))}
+
+    // Page dialogs would block Apple Events until someone clicks them. Answer them here instead:
+    // alert is acknowledged; confirm and prompt are dismissed unless act dialog chose otherwise.
+    // Only pages the server works in are armed: everywhere else (the user's own browsing)
+    // dialogs stay Safari's own. Arming reaches child frames by postMessage, and their
+    // answered dialogs are reported back to the top frame.
+    // The flag survives same-site navigations in the tab, so a dialog during the next load is answered too.
+    M.dlg=[];M.dp=null;M.armed=false;try{M.armed=sessionStorage.getItem('__smcp_armed')==='1'}catch(e){}
+    function arm(dp){M.armed=true;try{sessionStorage.setItem('__smcp_armed','1')}catch(e){}if(dp!==undefined)M.dp=dp;for(var i=0;i<frames.length;i++)try{frames[i].postMessage({__smcp:'arm',dp:dp},'*')}catch(e){}}
+    addEventListener('message',function(e){var d=e.data;if(!d||typeof d!=='object')return;
+      if(d.__smcp==='arm'&&e.source===parent&&window!==top)arm(d.dp);
+      else if(d.__smcp==='dlg'&&window===top&&typeof d.r==='string')M.dlg.push(d.r)});
+    ['alert','confirm','prompt'].forEach(function(t){var orig=window[t];window[t]=function(m,d){if(!M.armed)return orig.apply(window,arguments);
+      var p=M.dp,acc=t==='alert'||(p!=null&&p!=='dismiss'),v;M.dp=null;
+      if(t==='confirm')v=acc;else if(t==='prompt')v=acc?(p&&p!=='accept'?p:d==null?'':String(d)):null;
+      var r=t+' '+JSON.stringify(clip(m,120))+' \u2192 '+(t==='prompt'&&acc?JSON.stringify(v):acc?'accepted':'dismissed');
+      if(window===top)M.dlg.push(r);else try{top.postMessage({__smcp:'dlg',r:'(frame) '+r},'*')}catch(e){}
+      return v}});
+    M.arm=function(){if(!M.armed)arm()};
+    function ser(v){if(v===undefined)return'undefined';if(v instanceof Element)return el(v);if(typeof v==='function')return String(v).slice(0,200);
+      try{var j=JSON.stringify(v,function(k,x){return x instanceof Element?el(x):typeof x==='bigint'?String(x):x});return j===undefined?String(v):j}catch(e){return String(v)}}
+    function el(e){return'<'+e.tagName.toLowerCase()+(e.id?'#'+e.id:'')+'> '+JSON.stringify(clip(e.innerText||e.textContent||e.value||'',50))}
+    M.logs=logs;
+    M.dlgTake=function(){return M.dlg.splice(0)};
+    M.policy=function(p){arm(p)};
+    // Page CSP may forbid compiling code here; the caller then runs it in its own world.
+    M.run=function(id,code){var f;try{f=new Function('return(async function(){'+code+'\n})()')}catch(e){return e instanceof SyntaxError?'syntax: '+e.message:'csp'}
+      var s=M.slots[id]={d:0};try{f().then(function(v){s.d=1;s.v=ser(v)},function(e){s.d=1;s.e=String(e)})}catch(e){s.d=1;s.e=String(e)}return'ok'};
+    M.take=function(id){var s=M.slots[id];if(!s)return'{"x":1}';if(!s.d)return'{"p":1}';delete M.slots[id];return JSON.stringify(s.e?{e:s.e}:{v:s.v})};
+    document.addEventListener('__smcp_q',function(e){var r;try{var q=JSON.parse(e.detail);M.arm();r={v:M[q.op].apply(null,q.a||[])}}catch(x){r={e:String(x&&x.message||x)}}
+      document.dispatchEvent(new CustomEvent('__smcp_r',{detail:JSON.stringify(r)}))});
+    hook();
+    })()
+    """#
+
     /// Injected once per page. Everything the tools need from the DOM lives here so a
     /// normal call is a single Apple Event carrying a few bytes.
     static let source = #"""
@@ -272,60 +356,26 @@ enum PageAgent {
         case'select':return pick(a);
         case'scroll':return scroll(a);
         case'upload':return upload(a);
-        case'dialog':S.dp=a.text==null?'accept':String(a.text);return'next dialog: '+(S.dp==='accept'||S.dp==='dismiss'?S.dp:'answer '+JSON.stringify(S.dp));
+        case'dialog':var dp=a.text==null?'accept':String(a.text);try{mcall('policy',[dp])}catch(e){throw new Error('dialogs cannot be answered on this page until it is reloaded')}return'next dialog: '+(dp==='accept'||dp==='dismiss'?dp:'answer '+JSON.stringify(dp));
         default:throw new Error('unknown action '+a.action)}}
     function geom(a){var t=target(a),g={iw:innerWidth,ih:innerHeight};
       if(t){g.x=t.x;g.y=t.y;g.d=desc(t.el);if(t.r)g.r=[t.r.left,t.r.top,t.r.width,t.r.height]}return g}
 
-    function fmt(v){if(typeof v==='string')return v;if(v instanceof Error)return v.name+': '+v.message;try{return JSON.stringify(v)}catch(e){return String(v)}}
-    function push(arr,x){arr.push(x);arr.t=(arr.t||0)+1;if(arr.length>300)arr.shift()}
-    // Bodies of text/JSON responses, kept for the last 50 requests.
-    var BOD=new Map();
-    function keep(id,ct,b){if(!/json|text|xml|javascript|html|csv/i.test(ct||''))return;BOD.set(id,{c:ct,b:String(b).slice(0,4000)});if(BOD.size>50)BOD.delete(BOD.keys().next().value)}
-    function hook(){if(S.con)return false;S.con=[];S.net=[];S.nn=0;S.cur={};
-      ['log','info','warn','error','debug'].forEach(function(l){var o=console[l];console[l]=function(){try{push(S.con,l+' '+[].map.call(arguments,fmt).join(' '))}catch(e){}return o.apply(console,arguments)}});
-      addEventListener('error',function(e){push(S.con,'exception '+(e.message||(e.target&&(e.target.src||e.target.href))||'')+(e.filename?' @'+e.filename.split('/').pop()+':'+e.lineno:''))},true);
-      addEventListener('unhandledrejection',function(e){push(S.con,'rejection '+fmt(e.reason))});
-      var f=window.fetch;
-      if(f)window.fetch=function(i,o){var u=typeof i==='string'?i:(i&&i.url)||String(i),m=(o&&o.method)||(i&&i.method)||'GET',t=performance.now(),id='n'+(++S.nn);
-        return f.apply(this,arguments).then(function(r){push(S.net,id+' '+m+' '+r.status+' '+u+' '+Math.round(performance.now()-t)+'ms');
-          try{var ct=r.headers.get('content-type');if(/json|text|xml|javascript|html|csv/i.test(ct||''))r.clone().text().then(function(b){keep(id,ct,b)},function(){})}catch(e){}return r},
-          function(e){push(S.net,id+' '+m+' ERR '+u+' '+e);throw e})};
-      var xo=XMLHttpRequest.prototype.open,xs=XMLHttpRequest.prototype.send;
-      XMLHttpRequest.prototype.open=function(m,u){this.__q=[m,u];return xo.apply(this,arguments)};
-      XMLHttpRequest.prototype.send=function(){var x=this,t=performance.now(),id='n'+(++S.nn);
-        x.addEventListener('loadend',function(){if(!x.__q)return;push(S.net,id+' '+x.__q[0]+' '+(x.status||'ERR')+' '+x.__q[1]+' '+Math.round(performance.now()-t)+'ms');
-          try{if(x.responseType===''||x.responseType==='text')keep(id,x.getResponseHeader('content-type'),x.responseText)}catch(e){}});return xs.apply(this,arguments)};
-      return true}
-    var STATIC=/^(img|css|link|script|font|video|audio|image|icon)$/;
-    function logs(a){var fresh=hook(),net=a.kind==='network',kind=net?'net':'con',arr=net?S.net:S.con,note='';
-      if(net&&a.id){var b=BOD.get(a.id),l=S.net.find(function(x){return x.indexOf(a.id+' ')===0});
-        if(!l)return'no request '+a.id+' in the log';
-        return clip(l,300)+(b?'\n'+b.c+'\n'+b.b.slice(0,(a.limit||40)*100):'\n(no body kept: only text/JSON bodies of the last 50 requests)')}
-      var from=a.new&&S.cur[kind]!=null?arr.length-Math.min(arr.length,arr.t-S.cur[kind]):0;S.cur[kind]=arr.t||0;arr=arr.slice(from);
-      if(net&&!S.nseen){S.nseen=1;var hid=0,res=performance.getEntriesByType('resource').filter(function(e){if(!a.pattern&&STATIC.test(e.initiatorType)){hid++;return false}return true});
-        arr=res.map(function(e){return(e.initiatorType||'res')+' '+(e.responseStatus||'-')+' '+e.name+' '+Math.round(e.duration)+'ms'}).concat(arr);
-        note='(fetch/XHR capture starts now; below: what this page loaded so far'+(hid?', without '+hid+' images/scripts/styles (pass pattern to include them)':'')+')\n'}
-      else if(fresh)note='(capture starts now; earlier console output is not available)\n';
-      if(!net&&a.level){var lv=a.level==='error'?/^(error|exception|rejection) /:/^(error|exception|rejection|warn) /;arr=arr.filter(function(l){return lv.test(l)})}
-      if(a.pattern){var re;try{re=new RegExp(a.pattern,'i')}catch(e){}var p=a.pattern.toLowerCase();arr=arr.filter(function(l){return re?re.test(l):l.toLowerCase().indexOf(p)>=0})}
-      var out=arr.slice(-(a.limit||30)).map(function(l){return clip(l,180)}).join('\n');
-      if(a.clear){S.con.length=0;S.net.length=0;BOD.clear()}
-      return note+(out||(a.new?'(nothing new)':'(no entries)'))}
-
+    // The main-world part: the same object when injected together (Apple Events), else
+    // reached through synchronous DOM events from the extension's isolated world.
+    function mcall(op,args){var M=window.__smcpM;if(M){M.arm();return M[op].apply(null,args||[])}
+      var r=null,h=function(e){r=e.detail};document.addEventListener('__smcp_r',h);
+      document.dispatchEvent(new CustomEvent('__smcp_q',{detail:JSON.stringify({op:op,a:args||[]})}));document.removeEventListener('__smcp_r',h);
+      if(r==null)throw new Error('NOMAIN');r=JSON.parse(r);if(r.e)throw new Error(r.e);return r.v}
+    function logs(a){try{return mcall('logs',[a])}catch(e){if(e.message==='NOMAIN')return'(this page was loaded before the Safari MCP extension; reload it to capture logs)';throw e}}
+    S.mrun=function(id,code){try{return mcall('run',[id,code])}catch(e){return'nomain'}};
     function ser(v){if(v===undefined)return'undefined';if(v instanceof Element)return desc(v);if(typeof v==='function')return String(v).slice(0,200);
       try{var j=JSON.stringify(v,function(k,x){return x instanceof Element?desc(x):typeof x==='bigint'?String(x):x});return j===undefined?String(v):j}catch(e){return String(v)}}
-    // Page dialogs would block Apple Events until someone clicks them. Answer them here instead:
-    // alert is acknowledged; confirm and prompt are dismissed unless act dialog chose otherwise.
-    S.dlg=[];S.dp=null;
-    ['alert','confirm','prompt'].forEach(function(t){window[t]=function(m,d){var p=S.dp,acc=t==='alert'||(p!=null&&p!=='dismiss'),v;S.dp=null;
-      if(t==='confirm')v=acc;else if(t==='prompt')v=acc?(p&&p!=='accept'?p:d==null?'':String(d)):null;
-      S.dlg.push(t+' '+JSON.stringify(clip(m,120))+' \u2192 '+(t==='prompt'&&acc?JSON.stringify(v):acc?'accepted':'dismissed'));return v}});
     addEventListener('beforeunload',function(){S.bye=Date.now()});addEventListener('pageshow',function(){S.bye=0});
     S.slot=function(id){var s=S.slots[id]={d:0};return{done:function(v){s.d=1;s.v=ser(v)},fail:function(e){s.d=1;s.e=String(e)}}};
-    S.take=function(id){var s=S.slots[id];if(!s)return'{"x":1}';if(!s.d)return'{"p":1}';delete S.slots[id];return JSON.stringify(s.e?{e:s.e}:{v:s.v})};
+    S.take=function(id){var s=S.slots[id];if(!s){try{return mcall('take',[id])}catch(e){return'{"x":1}'}}if(!s.d)return'{"p":1}';delete S.slots[id];return JSON.stringify(s.e?{e:s.e}:{v:s.v})};
     S.call=function(a){if(a.h!==S.h)return JSON.stringify({m:S.h||''});
-      try{var v=a.op==='read'?read(a):a.op==='act'?act(a):a.op==='geom'?geom(a):a.op==='logs'?logs(a):a.op==='has'?has(a):null,o={v:v,u:location.href,r:document.readyState};if(S.dlg.length)o.d=S.dlg.splice(0);return JSON.stringify(o)}
+      try{var v=a.op==='read'?read(a):a.op==='act'?act(a):a.op==='geom'?geom(a):a.op==='logs'?logs(a):a.op==='has'?has(a):null,o={v:v,u:location.href,r:document.readyState},d;try{d=mcall('dlgTake')}catch(e){}if(d&&d.length)o.d=d;return JSON.stringify(o)}
       catch(e){return JSON.stringify({e:String(e&&e.message||e)})}};
     })()
     """#

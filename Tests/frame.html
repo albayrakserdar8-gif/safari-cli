@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>fixture frame</title></head>
+<body>
+  <!-- Loaded in an iframe by fixture.html to test frame reads, frame refs and dialogs in frames. -->
+  <h3>Inside the frame</h3>
+  <p>Frame paragraph text.</p>
+  <label>Frame field <input name="ff"></label>
+  <button onclick="document.getElementById('fo').textContent='frame confirm '+confirm('Frame sure?')">Frame confirm</button>
+  <p id="fo"></p>
+</body></html>

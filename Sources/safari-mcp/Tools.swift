@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
@@ -62,7 +63,39 @@ final class Tools {
         var handle: String?
     }
 
-    private lazy var safari = Safari()
+    private lazy var apple = Safari()
+    private let bridge = Bridge()
+    private lazy var ext = ExtBrowser(bridge)
+    private var usingExt: Bool?
+
+    /// Safari through the extension when it is connected, else through Apple Events.
+    private var safari: Browser {
+        let e = bridge.ready()
+        if let u = usingExt, u != e { switched(toExtension: e) }
+        usingExt = e
+        return e ? ext : apple
+    }
+
+    /// Window ids and positions differ between the two backends. Carry over the tabs whose
+    /// URL is unique on both sides; the rest get new ids at the next sync.
+    private func switched(toExtension e: Bool) {
+        log(e ? "using the Safari extension" : "extension not connected; using Apple Events")
+        let list = (try? (e ? ext : apple as Browser).listTabs()) ?? []
+        var fresh: [Int: Tab] = [:]
+        for t in tabs.values where tabs.values.filter({ $0.url == t.url }).count == 1 {
+            let hits = list.filter { $0.url == t.url }
+            guard hits.count == 1 else { continue }
+            var n = t
+            n.pos = hits[0].ref
+            n.visible = hits[0].current
+            fresh[t.id] = n
+        }
+        tabs = fresh
+        counts = [:]
+    }
+
+    /// Window server id for a tab's window, for capture, real input and native dialogs.
+    private func cg(_ wid: Int) -> Int { safari.cgWindow(wid) ?? -1 }
     private var tabs: [Int: Tab] = [:]
     /// Ids in Safari's order: windows front to back, tabs left to right.
     private var order: [Int] = []
@@ -88,7 +121,7 @@ final class Tools {
             // Most likely a dialog the page agent could not intercept (shown before it was injected).
             guard let id = current else { throw e }
             blocked.insert(id)
-            if let t = tabs[id], t.visible, let msg = Capture.dialog(wid: t.pos.wid, answer: nil) {
+            if let t = tabs[id], t.visible, let msg = Capture.dialog(wid: cg(t.pos.wid), answer: nil) {
                 throw ToolError("The page shows a dialog: \(jsonString(clip(msg, 200))). Answer it with act dialog, text accept or dismiss.")
             }
             throw ToolError(e.msg + " If so, act dialog (text accept or dismiss) answers it; it needs Accessibility permission and shows the tab.")
@@ -115,7 +148,12 @@ final class Tools {
         case "act": return [.text(try act(a))]
         case "js": return [.text(try js(a))]
         case "screenshot": return try screenshot(a)
-        case "logs": return [.text(try page("logs", a, ["kind", "level", "new", "pattern", "id", "limit", "clear"]))]
+        case "logs":
+            var la = a
+            if a["kind"] as? String == "network", a["id"] == nil, safari.isExtension, let t = tabs[try resolve(a)], let wr = ext.requests(t.pos) {
+                la["wr"] = wr
+            }
+            return [.text(try page("logs", la, ["kind", "level", "new", "pattern", "id", "limit", "clear", "wr"]))]
         case "batch": return try batch(a)
         default: throw ToolError("Unknown tool \(name)")
         }
@@ -294,7 +332,9 @@ final class Tools {
             let r = try exec(id, "(function(){if(!window.__smcp)return '\(PageAgent.absent)';\(body(h ?? ""))})()")
             if r == PageAgent.absent {
                 let nh = h ?? nextID("h")
-                guard try exec(id, PageAgent.source + ";__smcp.h=\(jsonString(nh));'ok'") == "ok" else {
+                // With the extension, the main-world part is already in the page as main.js.
+                let src = safari.isExtension ? PageAgent.source : PageAgent.mainSource + ";" + PageAgent.source
+                guard try exec(id, src + ";__smcp.h=\(jsonString(nh));'ok'") == "ok" else {
                     throw ToolError("Could not run script in this tab (still loading, showing a dialog, or not a web page).")
                 }
                 tabs[id]?.handle = nh
@@ -351,7 +391,65 @@ final class Tools {
         let id = try resolve(a)
         var o = pick(a, keys)
         o["op"] = op
-        return try agentCall(id, o)["v"] as? String ?? ""
+        let frame = try frameOf(&o)
+        var v = try inFrame(frame) { try agentCall(id, o)["v"] as? String ?? "" }
+        if op == "read", frame == 0, a["ref"] == nil, a["selector"] == nil, safari.isExtension { v += frameBlocks(id, o) }
+        return v
+    }
+
+    // MARK: frames (extension only)
+
+    /// Refs like f12e5 point into child frame 12. Strips the frame from `ref` (or from the
+    /// keys of `fields`) so the frame's own agent understands it, and returns the frame.
+    private func frameOf(_ o: inout [String: Any]) throws -> Int {
+        func split(_ r: String) -> (Int, String)? {
+            guard let m = r.wholeMatch(of: #/f(\d+)(e\d+)/#), let f = Int(m.1) else { return nil }
+            return (f, String(m.2))
+        }
+        var frame = 0
+        if let r = o["ref"] as? String, let (f, rr) = split(r) { frame = f; o["ref"] = rr }
+        if let fields = o["fields"] as? [String: Any] {
+            var out: [String: Any] = [:]
+            var seen = Set<Int>()
+            for (k, v) in fields {
+                if let (f, rr) = split(k) { seen.insert(f); out[rr] = v } else { seen.insert(0); out[k] = v }
+            }
+            guard seen.count <= 1 else { throw ToolError("fields must all be in the same frame") }
+            frame = seen.first ?? 0
+            o["fields"] = out
+        }
+        if frame != 0 && !safari.isExtension { throw ToolError("Frame refs (f12e5) need the Safari MCP extension.") }
+        return frame
+    }
+
+    private func inFrame<T>(_ f: Int, _ body: () throws -> T) rethrows -> T {
+        guard f != 0 else { return try body() }
+        ext.frame = f
+        defer { ext.frame = 0 }
+        return try body()
+    }
+
+    /// The same read in each child frame, as `--- frame f12 <url>` blocks with frame refs.
+    private func frameBlocks(_ id: Int, _ o: [String: Any]) -> String {
+        guard let t = tabs[id], let frames = try? ext.frames(t.pos, expect(t)), !frames.isEmpty else { return "" }
+        var fo = o
+        fo["max_chars"] = min((o["max_chars"] as? Int ?? 6000) / 2, 3000)
+        var out = ""
+        for f in frames.prefix(8) where f.url.hasPrefix("http") || f.url.hasPrefix("file") {
+            guard let body = try? inFrame(f.id, { try agentCall(id, fo)["v"] as? String }) else { continue }
+            let lines = body.split(separator: "\n", omittingEmptySubsequences: false).dropFirst()
+            guard let first = lines.first, !first.isEmpty,
+                  !["(nothing", "no match", "no link", "(no links", "no changes", "no text"].contains(where: { first.hasPrefix($0) }) else { continue }
+            let pre = "f\(f.id)"
+            let fixed = lines.map { l -> String in
+                if l.hasPrefix("- e") && l.split(separator: " ").dropFirst().allSatisfy({ $0.wholeMatch(of: #/e\d+/#) != nil }) {
+                    return "-" + l.split(separator: " ").dropFirst().map { " " + pre + $0 }.joined()
+                }
+                return String(l).replacing(#/^([+~] )?(e\d+ )/#) { m in (m.1.map(String.init) ?? "") + pre + m.2 }
+            }
+            out += "\n--- frame \(pre) \(clip(f.url, 120))\n" + fixed.joined(separator: "\n")
+        }
+        return out
     }
 
     // MARK: loading
@@ -431,7 +529,8 @@ final class Tools {
         if stuck { note = " (no navigation happened)" }
         else if last.ready == "old" && !inPage { note = " (the new page has not arrived yet)" }
         else if last.ready != "complete" && last.ready != "old" { note = " (still loading)" }
-        if last.status >= 400 { note += " (HTTP \(last.status))" }
+        let status = last.status != 0 ? last.status : tabs[id].map { safari.status($0.pos) } ?? 0
+        if status >= 400 { note += " (HTTP \(status))" }
         return ((last.title.isEmpty ? "" : clip(last.title, 80) + " | ") + clip(last.url, 200) + note, stuck)
     }
 
@@ -548,7 +647,8 @@ final class Tools {
         } else {
             var o = pick(a, ["action", "ref", "x", "y", "text", "key", "dy", "fields"])
             o["op"] = "act"
-            env = try agentCall(id, o)
+            let frame = try frameOf(&o)
+            env = try inFrame(frame) { try agentCall(id, o) }
             result = env["v"] as? String ?? "ok"
         }
         if ["hover", "scroll", "dialog"].contains(action) || a["fields"] != nil { return result }
@@ -564,7 +664,7 @@ final class Tools {
             return nil
         }
         if t.visible {
-            if let msg = Capture.dialog(wid: t.pos.wid, answer: answer) {
+            if let msg = Capture.dialog(wid: cg(t.pos.wid), answer: answer) {
                 blocked.remove(id)
                 return "answered dialog \(jsonString(clip(msg, 120))) (\(answer))"
             }
@@ -575,7 +675,7 @@ final class Tools {
         let back = tabs.values.first { $0.pos.wid == t.pos.wid && $0.visible }
         try guardedOp(id) { try safari.select($0, $1) }
         usleep(400_000)
-        let msg = Capture.dialog(wid: t.pos.wid, answer: answer)
+        let msg = Capture.dialog(wid: cg(t.pos.wid), answer: answer)
         if let back { try? guardedOp(back.id) { try safari.select($0, $1) } }
         try? sync()
         blocked.remove(id)
@@ -589,12 +689,13 @@ final class Tools {
         var o = pick(a, ["ref", "selector", "text"])
         guard !o.isEmpty else { throw ToolError("wait needs text, ref or selector") }
         o["op"] = "has"
+        let frame = try frameOf(&o)
         let gone = a["gone"] as? Bool == true
         let limit = min(max(a["timeout"] as? Double ?? 10, 0.5), 30)
         let what = (a["text"] as? String).map { "text " + jsonString($0) } ?? (a["ref"] as? String ?? (a["selector"] as? String).map { "selector " + $0 } ?? "")
         let start = Date()
         while true {
-            if let env = try? agentCall(id, o), let v = env["v"] as? Bool, v != gone {
+            if let env = try? inFrame(frame, { try agentCall(id, o) }), let v = env["v"] as? Bool, v != gone {
                 return "\(what) \(gone ? "gone" : "present") after \(String(format: "%.1f", Date().timeIntervalSince(start)))s"
             }
             if Date().timeIntervalSince(start) > limit {
@@ -631,7 +732,8 @@ final class Tools {
         let iw = g["iw"] as? Double ?? 0, ih = g["ih"] as? Double ?? 0
 
         try guardedOp(id) { try safari.raise($0, $1) }
-        guard let wid = tabs[id]?.pos.wid else { throw gone(id) }
+        guard let w = tabs[id]?.pos.wid else { throw gone(id) }
+        let wid = cg(w)
         var tries = 0
         while !Capture.onScreen(wid) && tries < 20 { usleep(100_000); tries += 1 }
         usleep(250_000)
@@ -683,7 +785,26 @@ final class Tools {
         // A bare expression is the common case; fall back to statements if it does not parse.
         while let last = code.last, last == ";" || last.isWhitespace { code.removeLast() }
         let hasReturn = code.range(of: #"(^|[^.\w$])return\b"#, options: .regularExpression) != nil
-        do {
+        var note = ""
+        var inMain = false
+        if safari.isExtension {
+            // The extension's own scripts cannot see page globals; run in the page via main.js.
+            func startMain(_ src: String) throws -> String {
+                let env = try agent(id) { h in
+                    "if(__smcp.h!==\(jsonString(h)))return JSON.stringify({m:__smcp.h||''});var u=location.href;return JSON.stringify({v:__smcp.mrun('\(slot)',\(jsonString(src))),u:u})"
+                }
+                href = env["u"] as? String ?? ""
+                return env["v"] as? String ?? ""
+            }
+            var v = try startMain(hasReturn ? code : "return (\n\(code)\n)")
+            if v.hasPrefix("syntax") && !hasReturn { v = try startMain(code) }
+            if v.hasPrefix("syntax") { throw ToolError("SyntaxError: " + v.dropFirst(8)) }
+            if v == "ok" { inMain = true } else {
+                note = v == "csp" ? " (page CSP blocks eval: ran in the extension's context, page globals not visible)"
+                    : " (page loaded before the extension: ran in the extension's context, page globals not visible; reload the page)"
+            }
+        }
+        if !inMain { do {
             try start(hasReturn ? code : "return (\n\(code)\n)")
         } catch is ScriptEmpty {
             do {
@@ -692,7 +813,7 @@ final class Tools {
                 let why = poll(id, "(function(){try{new Function(\(jsonString(code)))}catch(e){return e instanceof SyntaxError?String(e):''}return ''})()")?.result ?? ""
                 throw ToolError(why.isEmpty ? "The script did not run (page still loading, showing a dialog, or not a web page)." : why)
             }
-        }
+        } }
 
         let before = verifiedURL
         let started = Date()
@@ -708,7 +829,7 @@ final class Tools {
             if let e = env["e"] as? String { throw ToolError(clip(e, 600)) }
             let v = env["v"] as? String ?? "undefined"
             let max = a["max_chars"] as? Int ?? 4000
-            var out = v.count > max ? String(v.prefix(max)) + "\n… \(v.count - max) more chars" : v
+            var out = (v.count > max ? String(v.prefix(max)) + "\n… \(v.count - max) more chars" : v) + note
             // The script sent the tab somewhere else: wait, so the next call sees the new page.
             var navigated = r.url != before
             if !navigated, code.range(of: #"location|history\.|\.submit\(|\.click\(|\.open\("#, options: .regularExpression) != nil {
@@ -733,20 +854,27 @@ final class Tools {
         var o = pick(a, ["ref"])
         o["op"] = "geom"
         let g = try agentCall(id, o)["v"] as? [String: Any] ?? [:]
-        guard let wid = tabs[id]?.pos.wid else { throw gone(id) }
+        guard let w = tabs[id]?.pos.wid else { throw gone(id) }
         let iw = g["iw"] as? Double ?? 0, ih = g["ih"] as? Double ?? 0
+        var region = g["r"] as? [Double]
+        if region == nil, let r = a["region"] as? [NSNumber] { region = r.map(\.doubleValue) }
+        let maxWidth = a["max_width"] as? Int ?? 1024
+
+        // The extension captures the visible tab itself: no Screen Recording permission needed.
+        if let jpeg = safari.capture(w), let shot = Capture.recode(jpeg, viewport: CGSize(width: iw, height: ih), region: region, maxWidth: maxWidth) {
+            return [.image(base64: shot.data.base64EncodedString(), mime: "image/jpeg"), .text(shotNote(shot.width, shot.height, k: shot.k, region: region))]
+        }
+
+        let wid = cg(w)
         let (view, bounds) = try Capture.viewport(wid: wid, iw: iw, ih: ih)
         let z = iw > 0 ? Double(view.width) / iw : 1
 
-        var region = g["r"] as? [Double]
-        if region == nil, let r = a["region"] as? [NSNumber] { region = r.map(\.doubleValue) }
         var crop = view
         var origin = (x: 0.0, y: 0.0)
         if let r = region, r.count == 4 {
             crop = CGRect(x: Double(view.minX) + r[0] * z, y: Double(view.minY) + r[1] * z, width: r[2] * z, height: r[3] * z).intersection(view)
             origin = (r[0], r[1])
         }
-        let maxWidth = a["max_width"] as? Int ?? 1024
         let shot: (data: Data, width: Int, height: Int)
         var raised = false
         if Capture.onScreen(wid) {
@@ -754,11 +882,11 @@ final class Tools {
         } else {
             // macOS only renders windows on the active Space. Show Safari for a moment, then
             // go back and let the Space switch finish so the next capture is not mid-animation.
-            let front = safari.frontApp()
+            let front = NSWorkspace.shared.frontmostApplication
             try guardedOp(id) { try safari.raise($0, $1) }
             defer {
-                if let front, !front.contains("Safari") {
-                    safari.activate(app: front)
+                if let front, front.bundleIdentifier != "com.apple.Safari" {
+                    front.activate()
                     usleep(700_000)
                 }
             }
@@ -771,13 +899,20 @@ final class Tools {
 
         // Tell the model how image pixels map to the viewport px that act expects.
         let k = Double(crop.width) / z / Double(shot.width)
-        var note = "\(shot.width)x\(shot.height)"
-        if abs(k - 1) > 0.01 || origin.x != 0 || origin.y != 0 {
-            note += "; viewport px = image px × \(String(format: "%.2f", k))"
-            if origin.x != 0 || origin.y != 0 { note += " + (\(Int(origin.x)),\(Int(origin.y)))" }
-        }
+        var note = shotNote(shot.width, shot.height, k: k, region: origin.x != 0 || origin.y != 0 ? [origin.x, origin.y] : nil)
         if raised { note += "; Safari was brought forward briefly to capture" }
         return [.image(base64: shot.data.base64EncodedString(), mime: "image/jpeg"), .text(note)]
+    }
+
+    /// Tells the model how image pixels map to the viewport px that act expects.
+    private func shotNote(_ w: Int, _ h: Int, k: Double, region: [Double]?) -> String {
+        var note = "\(w)x\(h)"
+        let ox = region?.first ?? 0, oy = region.map { $0.count > 1 ? $0[1] : 0 } ?? 0
+        if abs(k - 1) > 0.01 || ox != 0 || oy != 0 {
+            note += "; viewport px = image px × \(String(format: "%.2f", k))"
+            if ox != 0 || oy != 0 { note += " + (\(Int(ox)),\(Int(oy)))" }
+        }
+        return note
     }
 
     private func batch(_ a: [String: Any]) throws -> [Content] {

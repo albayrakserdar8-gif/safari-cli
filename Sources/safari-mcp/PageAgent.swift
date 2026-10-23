@@ -73,7 +73,8 @@ enum PageAgent {
       o.split('\n').forEach(function(l){var k=dk(l),v=om.get(k);if(v)v.push(l);else om.set(k,[l])});
       b.split('\n').forEach(function(l){var k=dk(l),v=om.get(k),p=v&&v.shift();if(v&&!v.length)om.delete(k);
         if(p===undefined)out.push('+ '+l);else if(p===l)same++;else out.push('~ '+l)});
-      om.forEach(function(v,k){v.forEach(function(l){out.push('- '+(k===l?clip(l,80):k+' '+clip(l.slice(k.length+1),50)))})});
+      var gone=[];om.forEach(function(v,k){v.forEach(function(l){if(k===l)out.push('- '+clip(l,80));else gone.push(k)})});
+      if(gone.length)out.push('- '+gone.join(' '));
       return(out.length?out.join('\n')+'\n':'no changes ')+'('+same+' unchanged)'}
 
     // Markdown of the readable content. Links become text[n] with the URLs listed once at the end.
@@ -84,7 +85,8 @@ enum PageAgent {
     function md(root,fit){
       var lines=[],U=new Map(),buf='',pf='',ind='',c=0,il=0;
       function flush(){var t=buf.replace(/[ \t\n\r ]+/g,' ').trim();buf='';if(t){lines.push(pf+t);pf=ind}}
-      function url(h){var s=short(h);if(!s)return 0;if(!U.has(s))U.set(s,U.size+1);return U.get(s)}
+      var here=location.pathname+location.search;
+      function url(h){var s=short(h);if(!s||s.indexOf(here+'#')===0||s[0]==='#')return 0;if(!U.has(s))U.set(s,U.size+1);return U.get(s)}
       function kids(el){var s=el.tagName==='SLOT'&&el.assignedNodes({flatten:true});return s&&s.length?s:el.shadowRoot?el.shadowRoot.childNodes:el.childNodes}
       function inner(el){var b=buf;buf='';il++;walk(el);il--;var t=buf.replace(/[ \t\n\r ]+/g,' ').trim();buf=b;return t}
       function walk(n){var ks=kids(n);for(var i=0;i<ks.length;i++)node(ks[i])}
@@ -94,6 +96,7 @@ enum PageAgent {
         var t=n.tagName,ro=n.getAttribute('role');
         if(SKIP[t]||/^(INPUT|SELECT|TEXTAREA|BUTTON|OPTION|IFRAME|CANVAS|VIDEO|AUDIO|DIALOG)$/.test(t)||n.getAttribute('aria-hidden')==='true')return;
         if(n.checkVisibility&&!n.checkVisibility({visibilityProperty:true,checkVisibilityCSS:true})&&getComputedStyle(n).display!=='contents')return;
+        if(n!==root&&(t==='NAV'||ro==='navigation'))return;
         if(fit&&(NOISE[t]||NOISE[ro]))return;
         if(il){if(t==='IMG'){if(n.alt)buf+=' '+n.alt+' '}else{walk(n);if(BLK[t]||/^(LI|TD|TH)$/.test(t))buf+=' '}return}
         var h=/^H([1-6])$/.exec(t);
@@ -130,24 +133,24 @@ enum PageAgent {
       sc.sort(function(x,y){return y.s-x.s});
       var pick=new Set(),size=0;
       for(var k=0;k<sc.length&&k<30;k++){var len=L[sc[k].i].length;if(size+len>max&&pick.size)break;pick.add(sc[k].i);size+=len}
-      var out=[],used=new Set(),hd=-1,prev=-2;
+      var out=[],hd=-1,prev=-2;
       [...pick].sort(function(x,y){return x-y}).forEach(function(i){
         for(var h=i;h>=0;h--)if(/^\s*#/.test(L[h]))break;
         if(h>=0&&h!==hd&&h!==i){out.push(L[h]);hd=h}else if(prev>=0&&i!==prev+1)out.push('…');
-        out.push(L[i]);prev=i;L[i].replace(/\[(\d+)\]/g,function(_,n){used.add(+n)})});
-      return out.join('\n')+foot(m,used)}
+        out.push(L[i]);prev=i});
+      return out.join('\n')}
     function links(root,q){
-      var seen=new Set(),inn=[],ext=[],ws=q?q.toLowerCase().split(/\s+/).filter(Boolean):[];
+      var seen=new Set(),inn=[],ws=q?q.toLowerCase().split(/\s+/).filter(Boolean):[];
       root.querySelectorAll('a[href]').forEach(function(el){var u=short(el.getAttribute('href'));if(!u||seen.has(u))return;
         if(el.checkVisibility&&!el.checkVisibility({visibilityProperty:true,checkVisibilityCSS:true}))return;
         var nm=name(el,60),hay=(nm+' '+u).toLowerCase();if(ws.some(function(w){return hay.indexOf(w)<0}))return;
-        seen.add(u);(/^[a-z]+:/.test(u)?ext:inn).push(ref(el)+' '+JSON.stringify(nm)+' '+u)});
-      return inn.concat(ext.length?['external:'].concat(ext):[]).join('\n')||(q?'no link matches '+JSON.stringify(q):'(no links)')}
+        seen.add(u);inn.push(ref(el)+' '+JSON.stringify(nm)+' '+u)});
+      return inn.join('\n')||(q?'no link matches '+JSON.stringify(q):'(no links)')}
 
     function read(a){
       var root=a.ref?get(a.ref):a.selector?document.querySelector(a.selector):null;
       if(a.selector&&!root)throw new Error('selector matched nothing');
-      var body,qm=a.query&&a.mode!=='text'&&a.mode!=='links';
+      var body,md0=null,qm=a.query&&a.mode!=='text'&&a.mode!=='links';
       if(qm){
         var q=a.query.toLowerCase().trim(),ws=q.split(/\s+/).filter(Boolean),hits=[];
         var wb=ws.map(function(w){return new RegExp('(^|[^a-z0-9])'+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'($|[^a-z0-9])')});
@@ -161,7 +164,7 @@ enum PageAgent {
         hits.sort(function(p,r){return r.sc-p.sc});
         body=hits.slice(0,10).map(function(h){var x=h.x;return(x.el?x.s:ref(x.tel)+' text '+JSON.stringify(clip(x.s,100)))+(x.inv?'':' (offscreen)')}).join('\n')||'no match for '+JSON.stringify(a.query);
       }else if(a.mode==='text'){
-        var m=text(root);body=a.query?rank(m,a.query,a.max_chars||6000):m.lines.join('\n')+foot(m,null);
+        md0=text(root);body=a.query?rank(md0,a.query,a.max_chars||6000):md0.lines.join('\n');
       }else if(a.mode==='links'){
         body=links(root||document.body,a.query);
       }else{
@@ -172,6 +175,8 @@ enum PageAgent {
         if(a.diff)body=old==null?'(first read of this page in this mode; full result)\n'+body:diff(old,body)}
       var off=a.offset||0,max=a.max_chars||6000,tot=body.length,cut=body.slice(off,off+max);
       if(off+max<tot){var nl=cut.lastIndexOf('\n');if(nl>max*0.6)cut=cut.slice(0,nl);cut+='\n\u2026 '+(tot-off-cut.length)+' more chars; offset='+(off+cut.length)}
+      // Each chunk lists the URLs of the [n] links it contains.
+      if(md0){var used=new Set();cut.replace(/\[(\d+)\]/g,function(_,n){used.add(+n)});cut+=foot(md0,used)}
       var de=document.documentElement;
       return(document.title?clip(document.title,80)+' | ':'')+location.href.slice(0,200)+' | scroll '+Math.round(scrollY)+'/'+Math.max(0,de.scrollHeight-innerHeight)+(document.readyState==='complete'?'':' | still loading')+'\n'+cut}
 

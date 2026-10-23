@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>safari-mcp fixture</title>
+<!-- Manual test page: open it with `tabs new` (file:// URL) and exercise read, act and logs. -->
+</head>
+<body>
+<header><nav><a href="#home">Home</a> <a href="https://example.com/about">About</a></nav></header>
+<main>
+  <h1>Fixture</h1>
+  <p>Intro paragraph with a <a href="#details">details link</a> and <code>inline code</code>.</p>
+  <h2>List</h2>
+  <ul>
+    <li>Apples</li>
+    <li>Pears
+      <ol><li>Conference</li><li>Williams</li></ol>
+    </li>
+  </ul>
+  <h2>Table</h2>
+  <table>
+    <tr><th>Fruit</th><th>Price</th></tr>
+    <tr><td>Apple</td><td>1.20</td></tr>
+    <tr><td>Pear | green</td><td>0.90</td></tr>
+  </table>
+  <pre>line one
+line two</pre>
+  <h2>Form</h2>
+  <form id="f" onsubmit="event.preventDefault();document.getElementById('out').textContent='submitted '+new FormData(this).get('name')">
+    <label>Name <input name="name"></label>
+    <label>Size <select name="size"><option>Small</option><option>Large</option></select></label>
+    <label><input type="checkbox" name="news"> Newsletter</label>
+    <label><input type="radio" name="c" value="r"> Red</label>
+    <label><input type="radio" name="c" value="b"> Blue</label>
+    <label>File <input type="file" name="doc" multiple></label>
+    <button>Send</button>
+  </form>
+  <p id="out"></p>
+  <h2>Dialogs</h2>
+  <button onclick="document.getElementById('dlg').textContent='alert done';alert('Hello')">Alert</button>
+  <button onclick="document.getElementById('dlg').textContent='confirm '+confirm('Delete it?')">Confirm</button>
+  <button onclick="document.getElementById('dlg').textContent='prompt '+prompt('Your name?','anon')">Prompt</button>
+  <p id="dlg"></p>
+  <h2>Later</h2>
+  <button onclick="setTimeout(function(){var p=document.createElement('p');p.id='late';p.textContent='Arrived late';document.body.appendChild(p)},1000)">Add later</button>
+  <button onclick="var l=document.getElementById('late');if(l)setTimeout(function(){l.remove()},800)">Remove later</button>
+  <button onclick="fetch('data:application/json,%7B%22ok%22%3Atrue%7D').then(function(r){return r.json()}).then(function(j){console.log('fetched',j.ok)})">Fetch</button>
+  <button onclick="console.warn('careful');console.error('broken')">Log</button>
+</main>
+<footer>Footer text <a href="https://example.org/">Elsewhere</a></footer>
+</body>
+</html>

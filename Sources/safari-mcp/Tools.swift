@@ -8,10 +8,11 @@ final class Tools {
             "url": str, "tab": str,
         ]),
         tool("navigate", "Load a URL, or back / forward / reload, and wait for the page.", ["url": str, "tab": str], ["url"]),
-        tool("read", "Read the page. interactive (default): visible controls with refs. all: adds headings and text. text: readable text only. query finds elements and text by words on the whole page.", [
-            "mode": ["type": "string", "enum": ["interactive", "all", "text"]],
+        tool("read", "Read the page. interactive (default): visible controls with refs. all: adds headings and text. text: main content as markdown, links as [n]. links: link refs and URLs. query finds elements by words on the whole page; with text or links it filters those.", [
+            "mode": ["type": "string", "enum": ["interactive", "all", "text", "links"]],
             "query": str, "ref": str, "selector": str,
             "full": ["type": "boolean", "description": "include off-screen elements"],
+            "diff": ["type": "boolean", "description": "only lines changed since the last read in this mode"],
             "max_chars": int, "offset": int, "tab": str,
         ]),
         tool("act", "Act on an element by ref (from read) or x,y viewport px. text is for type/fill/select; key is like Enter or cmd+a; scroll dy is px, negative = up.", [
@@ -78,7 +79,7 @@ final class Tools {
         switch name {
         case "tabs": return [.text(try tabsTool(a))]
         case "navigate": return [.text(try navigate(a))]
-        case "read": return [.text(try page("read", a, ["mode", "query", "ref", "selector", "full", "max_chars", "offset"]))]
+        case "read": return [.text(try page("read", a, ["mode", "query", "ref", "selector", "full", "diff", "max_chars", "offset"]))]
         case "act": return [.text(try act(a))]
         case "js": return [.text(try js(a))]
         case "screenshot": return try screenshot(a)

@@ -10,7 +10,8 @@ Claude in Chrome yalnızca Chromium tarayıcılarda çalıştığı için yazıl
 |---|---|---|
 | Tarayıcı | Senin açık Safari'n, kendi oturumlarınla | Kendi başlattığı ayrı tarayıcı |
 | Girdi | Varsayılan sayfa içi olaylar; istenirse gerçek fare/klavye | Tarayıcı düzeyinde gerçek olaylar |
-| iframe, iletişim kutusu, dosya yükleme, ağ müdahalesi | Yok | Var |
+| İletişim kutusu, dosya yükleme | Var | Var |
+| iframe, ağ müdahalesi | Yok | Var |
 | Platform | macOS 14+ | macOS, Windows, Linux |
 
 Giriş yapmış olduğun sitelerde okuma, arama, form doldurma ve gezinme gibi günlük işler için uygundur. Web uygulaması testi, CI ve tekrarlanabilir otomasyon için Playwright daha doğru araçtır.
@@ -60,14 +61,28 @@ Kurulumdan sonra Claude Code'a doğrudan iş söylemek yeterlidir:
 |---|---|
 | `tabs` | Sekmeleri listeler, açar, kapatır, seçer |
 | `navigate` | URL'ye gider ya da `back` / `forward` / `reload`; yüklenmeyi bekler |
-| `read` | Sayfayı okur: etkileşimli öğeler (varsayılan), `all`, `text`; `query` ile öğe ve metin arar |
-| `act` | `click`, `dblclick`, `hover`, `type`, `fill`, `select`, `key`, `scroll` |
+| `read` | Sayfayı okur: etkileşimli öğeler (varsayılan), `all`, `text` (markdown), `links`; `query` ile öğe arar ya da metni ve bağlantıları süzer; `diff` yalnızca değişeni döner |
+| `act` | `click`, `dblclick`, `hover`, `type`, `fill` (`fields` ile çok alan), `select`, `key`, `scroll`, `wait`, `upload`, `dialog` |
 | `js` | Sayfada JavaScript çalıştırır (async işlev gövdesi, `return` ile değer döner, 15 sn sınırı) |
 | `screenshot` | Görünüm alanının, bir öğenin ya da bölgenin JPEG görüntüsü |
-| `logs` | Konsol ve ağ kayıtları |
+| `logs` | Konsol ve ağ kayıtları; `level`, yalnızca yeniler (`new`), `id` ile yanıt gövdesi |
 | `batch` | Birden çok çağrıyı tek turda çalıştırır |
 
-`read` her öğeye `e12` gibi bir ref verir; `act` bu ref'le ya da `x,y` ile çalışır. Sayfa değişince ref'ler geçersiz olur.
+`read` her öğeye `e12` gibi bir ref verir; `act` bu ref'le ya da `x,y` ile çalışır. Aynı sayfada bir öğe ref'ini korur; başka sayfaya geçince ref'ler geçersiz olur. `diff: true` aynı kipteki önceki okumadan bu yana eklenen (`+`), değişen (`~`) ve kaybolan (`-`) satırları döner.
+
+`text` kipi ana içeriği markdown olarak verir: başlıklar, listeler, tablolar ve kod blokları korunur, bağlantılar `metin[3]` biçiminde yazılır ve her parçanın sonunda o parçadaki bağlantıların adresleri listelenir. `query` ile birlikte yalnızca sorguya en uygun bloklar (BM25) döner. `links` kipi bağlantıları ref'leri ve adresleriyle sayfa sırasında listeler.
+
+## Bekleme, formlar, dosyalar
+
+- `act wait`: `text`, `ref` ya da `selector` görünene kadar bekler (`gone: true` ile kaybolana kadar; `timeout` saniye, varsayılan 10, en çok 30). Gezinme sırasında da bekler.
+- `act fill` + `fields: {"e4": "Ada", "e6": true}`: birden çok alanı tek çağrıda doldurur; açılır listede seçeneği seçer, onay kutularını `true`/`false` ile ayarlar.
+- `act upload`: `text` ile verilen yerel dosyaları (virgülle ayrılmış, toplam en çok 10 MB) dosya alanına koyar.
+
+## İletişim kutuları
+
+Sayfadaki `alert`, `confirm` ve `prompt` sunucunun sayfaya yerleştirdiği betik tarafından yanıtlanır, böylece Safari takılmaz. `alert` onaylanır; `confirm` ve `prompt` varsayılan olarak reddedilir. Bir sonraki kutuyu onaylatmak için önce `act dialog` ile `text: "accept"` (ya da `prompt` için yanıt metni) verilir. Yanıtlanan her kutu sonuçta `⚠ dialog confirm "…" → dismissed` gibi bir satırla bildirilir.
+
+Betik yerleşmeden önce açılan kutular Safari'de yerel olarak görünür ve çağrılar 20 saniye sonra zaman aşımına uğrar. Bu durumda `act dialog` kutuyu Erişilebilirlik üzerinden yanıtlar; sekme arka plandaysa onu kısa süre öne alır, sonra önceki sekmeye döner.
 
 Sayfayı değiştiren çağrılar (`act`, `navigate`, yönlendiren `js`) yeni sayfanın yüklenmesini bekler ve sonucu `→ başlık | adres` olarak bildirir. Bir tıklama ya da tuş hiçbir şeyi değiştirmediyse sonuçta `(no change on the page yet)` yazar.
 
@@ -97,7 +112,7 @@ Tek bir Mac'te ölçülen değerler:
 
 | | |
 |---|---|
-| Araç şemaları | Yaklaşık 730 token |
+| Araç şemaları | Yaklaşık 875 token |
 | Varsayılan `read` çıktısı | Wikipedia ana sayfasında yaklaşık 500, Hacker News'te yaklaşık 1.100 token |
 | Çağrı süresi | `read` 7-60 ms, `js` 20-45 ms, `act` 170-470 ms, `screenshot` 0,9-2,1 sn |
 | Bellek | Safari kullanılmadan 9 MB, kullanıldıktan sonra yaklaşık 34 MB |
@@ -114,16 +129,18 @@ Sunucu, küçük bir modelin (Claude Haiku) araçları yalnızca açıklamaları
 
 Bu, bir günde ve tek bir makinede yapılmış bir sınamadır; geniş bir site yelpazesinde denenmedi.
 
+Markdown, `links`, `diff`, `wait`, `fill fields`, `upload`, iletişim kutuları ve ağ gövdeleri sonradan eklendi; bunlar `Tests/fixture.html` üzerinde ve Wikipedia ile Hacker News'te elle sınandı, model turlarına girmedi.
+
 ## Sınırlar
 
 - Bir sekme bu oturumun dışında başka bir siteye giderse ve aynı anda pencerede sekme açılıp kapanırsa sunucu o sekmeyi kaybedebilir. Bu durumda hata döner; `tabs` ile yeni kimlik alınır.
 - Sayfa içi olaylar CSS `:hover` stilini tetikleyemez ve bazı siteler bu olayları yok sayar; bu durumlarda `os: true` gerekir.
 - Erişilebilirlik izni yokken ekran görüntüsü kırpması, kenar çubuğunun solda, araç çubuğunun üstte olduğunu ve sayfa yakınlaştırmasının %100 olduğunu varsayar.
-- Konsol ve ağ kayıtları ilk `logs` çağrısından sonrasını kapsar. İlk ağ çağrısı o ana kadar yüklenmiş kaynakları durum kodu olmadan listeler.
+- Konsol ve ağ kayıtları ilk `logs` çağrısından sonrasını kapsar. İlk ağ çağrısı o ana kadar yüklenmiş kaynakları durum kodu olmadan listeler; resim, betik ve stil dosyalarını `pattern` verilmedikçe göstermez. Yanıt gövdeleri yalnızca fetch/XHR'ın metin ve JSON yanıtları için, son 50 istekte ve ilk 4 KB'ye kadar tutulur.
 - iframe içerikleri ve kapalı shadow DOM okunmaz.
-- Sayfa `alert` gibi bir iletişim kutusu gösterirken çağrılar zaman aşımına uğrar.
-- HTTP durum kodu (404 gibi) bildirilmez; Safari'nin hiç açamadığı adresler hata döner.
-- Dosya yükleme yoktur.
+- Betik yerleşmeden önce ya da bir iframe'den açılan iletişim kutuları çağrıları 20 saniye bekletir; `act dialog` bunları yalnızca Erişilebilirlik izniyle yanıtlayabilir.
+- HTTP durum kodu (404 gibi) bildirilmez, çünkü Safari bunu sayfaya vermez; Safari'nin hiç açamadığı adresler hata döner.
+- `text` kipi bağlantı metinlerini ve tablo hücrelerini kırpar; çok sütunlu ya da iç içe tablolu sayfalarda düzen kaybolabilir.
 
 ## Test
 
@@ -131,7 +148,9 @@ Bu, bir günde ve tek bir makinede yapılmış bir sınamadır; geniş bir site 
 Tests/smoke.sh
 ```
 
-Protokol düzeyinde bir duman testidir; Safari izni gerektirmez.
+Protokol düzeyinde bir duman testidir; Safari izni gerektirmez. Şema boyutunun 900 token altında kaldığını da denetler.
+
+`Tests/fixture.html` elle sınama için yerel bir sayfadır: form, iletişim kutusu düğmeleri, gecikmeli öğe, tablo ve fetch içerir. `tabs new` ile `file://` adresinden açılır.
 
 ## Lisans
 

@@ -16,7 +16,7 @@ Tests/smoke.sh                  # protocol test, needs no Safari permission
 Tests/smoke.sh .build/debug/safari-mcp
 ```
 
-Only Command Line Tools are installed (no Xcode), so there is no XCTest target; `Tests/smoke.sh` is the only automated test and covers the JSON-RPC layer only.
+Only Command Line Tools are installed (no Xcode), so there is no XCTest target; `Tests/smoke.sh` is the only automated test and covers the JSON-RPC layer only. `Tests/fixture.html` is a local page (form, dialogs, delayed element, table, fetch) for manual checks through `tabs new` with its `file://` URL.
 
 The page script is a JS string inside Swift. Syntax-check it after editing:
 
@@ -69,12 +69,16 @@ Safari only addresses tabs by `window id` + index, which shifts when tabs open, 
 
 ### Page agent (`PageAgent.swift`)
 
-Injected once per document (`window.__smcp`), then each call is one small Apple Event. It owns: the element scan behind `read` (modes `interactive`/`all`/`text`, `query` search), the ref map (`e12` → `WeakRef`), synthetic input for `act`, console/fetch/XHR hooks for `logs`, and result slots for async `js`.
+Injected once per document (`window.__smcp`), then each call is one small Apple Event. It owns: the element scan behind `read` (modes `interactive`/`all`, `query` search), the markdown walker `md` behind `text` (with BM25 `rank` for `text`+`query`) and `links`, the ref map (`e12` → `WeakRef`), synthetic input for `act`, console/fetch/XHR hooks for `logs`, and result slots for async `js`.
 
 - Every `__smcp.call` carries the tab's handle and is a no-op on mismatch.
 - `do JavaScript` does not await promises, so `js` starts the code, stores the result in a slot and polls `__smcp.take`.
 - User code for `js` is embedded as an async function body, never `eval`'d (page CSP would block it).
 - Clicks are dispatched to the innermost element under the target's centre (including through open shadow roots), as a real click would be.
+- Refs are per element (WeakMap), so an element keeps its ref across reads of one document. `diff` relies on this: `S.last` keeps the previous body per mode/root/query and lines are matched by ref, else by text.
+- `text` output ends each returned chunk with the URLs of the `[n]` links in that chunk; same-page fragment links get no number.
+- The agent replaces `alert`/`confirm`/`prompt` at injection: alert is acknowledged, confirm/prompt are dismissed unless `act dialog` set `S.dp`. Answered dialogs travel in the call envelope (`d`) and `Tools.call` appends them as `⚠ dialog` lines. Dialogs opened before injection, or from an iframe, are native: Apple Events time out after 20 s (`-1712`), the tab is put in `blocked`, and `act dialog` answers through Accessibility (`Capture.dialog`), selecting a background tab first because Safari only shows a dialog in the visible tab. While a native dialog is up, Safari's AX window list can be empty; use the focused window.
+- Network lines carry ids (`n4`); text/JSON bodies of the last 50 fetch/XHR responses are kept for `logs id`.
 
 ### Screenshots (`Capture.swift`)
 
@@ -88,6 +92,6 @@ Hosted at `github.com/sadopc/safari-mcp` (public), default branch `main`. `READM
 
 ## Design constraints
 
-- Token cost is a primary goal. Tool descriptions and schemas are sent every session (about 730 tokens total; `Tests/smoke.sh` prints the size). Tool results are terse single lines, `read` is capped by `max_chars` with an `offset` continuation, and screenshots are opt-in JPEGs. Keep additions equally short.
+- Token cost is a primary goal. Tool descriptions and schemas are sent every session (about 875 tokens total; `Tests/smoke.sh` prints the size and fails above 3600 chars). Tool results are terse single lines, `read` is capped by `max_chars` with an `offset` continuation, and screenshots are opt-in JPEGs. Keep additions equally short.
 - No dependencies and no Xcode-only APIs. Deployment target is macOS 14 (ScreenCaptureKit screenshot API).
 - stdout carries only JSON-RPC messages, one per line; anything else goes to stderr.

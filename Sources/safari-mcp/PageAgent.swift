@@ -17,7 +17,7 @@ enum PageAgent {
     var PROSE={P:1,BLOCKQUOTE:1,PRE:1,FIGCAPTION:1,DD:1,LI:2,TD:2,TH:2,DT:2};
     var TR={BUTTON:'button',SELECT:'combobox',TEXTAREA:'textbox',SUMMARY:'button',A:'link'};
     function role(el){var r=el.getAttribute('role');if(r)return r;var t=el.tagName;
-      if(t==='INPUT'){var y=(el.type||'text').toLowerCase();return y==='checkbox'||y==='radio'?y:/^(submit|button|reset|image)$/.test(y)?'button':y==='range'?'slider':y==='search'?'searchbox':'textbox'}
+      if(t==='INPUT'){var y=(el.type||'text').toLowerCase();return y==='checkbox'||y==='radio'||y==='file'?y:/^(submit|button|reset|image)$/.test(y)?'button':y==='range'?'slider':y==='search'?'searchbox':'textbox'}
       return TR[t]||t.toLowerCase()}
     function native(el){var t=el.tagName;return t==='BUTTON'||t==='SELECT'||t==='TEXTAREA'||t==='SUMMARY'||(t==='A'&&el.hasAttribute('href'))||(t==='INPUT'&&el.type!=='hidden')}
     function secret(el){return (el.type||'').toLowerCase()==='password'||/cc-|one-time|password/.test(el.getAttribute('autocomplete')||'')}
@@ -238,16 +238,36 @@ enum PageAgent {
       var dy=a.dy==null?Math.round(innerHeight*0.8):a.dy,t=target(a),el=t&&t.el;
       while(el&&el!==document.body&&el!==de){var cs=getComputedStyle(el);if(el.scrollHeight>el.clientHeight+1&&/auto|scroll/.test(cs.overflowY)){el.scrollBy(0,dy);return'scrolled '+desc(el)+' to '+Math.round(el.scrollTop)+'/'+(el.scrollHeight-el.clientHeight)}el=el.parentElement}
       scrollBy(0,dy);return pos()}
+    function checked(el){return el.type==='checkbox'||el.type==='radio'?el.checked:el.getAttribute('aria-checked')==='true'}
+    function form(f){return Object.keys(f).map(function(r){try{var v=f[r],el=get(r),y=(el.type||'').toLowerCase();
+        if(typeof v==='boolean'||y==='checkbox'||y==='radio'||el.getAttribute('role')==='checkbox'){var want=v===true||v==='true'||v==='on';
+          if(checked(el)!==want)press(target({ref:r}));return(checked(el)===want?'':'! not changed: ')+desc(el)+(checked(el)?' checked':' unchecked')}
+        if(el.tagName==='SELECT')return pick({ref:r,text:v});
+        return edit({action:'fill',ref:r,text:v})}catch(e){return'! '+r+': '+(e.message||e)}}).join('\n')}
+    function upload(a){var el=need(a).el;
+      if(el.tagName!=='INPUT'||el.type!=='file')throw new Error(desc(el)+' is not a file input');
+      var dt=new DataTransfer();(a.files||[]).forEach(function(f){var b=atob(f.b),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);dt.items.add(new File([u],f.n,{type:f.t}))});
+      el.files=dt.files;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
+      return'set '+el.files.length+' file(s) on '+desc(el)}
+    // For waits: is the text, ref or selector present (and visible)?
+    function has(a){var el;
+      if(a.ref){var w=R.get(a.ref);el=w&&w.deref();if(el&&!el.isConnected)el=null}
+      else if(a.selector)el=document.querySelector(a.selector);
+      else return(document.body.innerText||'').toLowerCase().indexOf(String(a.text||'').toLowerCase())>=0;
+      return!!el&&(!el.checkVisibility||el.checkVisibility({visibilityProperty:true,checkVisibilityCSS:true}))}
     function act(a){var t;S.fx=1;
       if(a.action==='click'||a.action==='dblclick'||a.action==='key')watch();
       switch(a.action){
         case'click':t=need(a);if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.to.tagName)||t.to.isContentEditable)S.fx=1;press(t);return'clicked '+desc(t.el);
         case'dblclick':t=need(a);press(t);press(t,{detail:2});mev(t.to,'dblclick',t.x,t.y,{detail:2});return'double-clicked '+desc(t.el);
         case'hover':t=need(a);['pointerover','mouseover','pointerenter','mouseenter','pointermove','mousemove'].forEach(function(e){mev(t.to,e,t.x,t.y)});return'hover events sent to '+desc(t.el)+' (CSS :hover styles need os:true)';
-        case'type':case'fill':return edit(a);
+        case'type':return edit(a);
+        case'fill':return a.fields?form(a.fields):edit(a);
         case'key':return key(a);
         case'select':return pick(a);
         case'scroll':return scroll(a);
+        case'upload':return upload(a);
+        case'dialog':S.dp=a.text==null?'accept':String(a.text);return'next dialog: '+(S.dp==='accept'||S.dp==='dismiss'?S.dp:'answer '+JSON.stringify(S.dp));
         default:throw new Error('unknown action '+a.action)}}
     function geom(a){var t=target(a),g={iw:innerWidth,ih:innerHeight};
       if(t){g.x=t.x;g.y=t.y;g.d=desc(t.el);if(t.r)g.r=[t.r.left,t.r.top,t.r.width,t.r.height]}return g}
@@ -276,11 +296,17 @@ enum PageAgent {
 
     function ser(v){if(v===undefined)return'undefined';if(v instanceof Element)return desc(v);if(typeof v==='function')return String(v).slice(0,200);
       try{var j=JSON.stringify(v,function(k,x){return x instanceof Element?desc(x):typeof x==='bigint'?String(x):x});return j===undefined?String(v):j}catch(e){return String(v)}}
+    // Page dialogs would block Apple Events until someone clicks them. Answer them here instead:
+    // alert is acknowledged; confirm and prompt are dismissed unless act dialog chose otherwise.
+    S.dlg=[];S.dp=null;
+    ['alert','confirm','prompt'].forEach(function(t){window[t]=function(m,d){var p=S.dp,acc=t==='alert'||(p!=null&&p!=='dismiss'),v;S.dp=null;
+      if(t==='confirm')v=acc;else if(t==='prompt')v=acc?(p&&p!=='accept'?p:d==null?'':String(d)):null;
+      S.dlg.push(t+' '+JSON.stringify(clip(m,120))+' \u2192 '+(t==='prompt'&&acc?JSON.stringify(v):acc?'accepted':'dismissed'));return v}});
     addEventListener('beforeunload',function(){S.bye=Date.now()});addEventListener('pageshow',function(){S.bye=0});
     S.slot=function(id){var s=S.slots[id]={d:0};return{done:function(v){s.d=1;s.v=ser(v)},fail:function(e){s.d=1;s.e=String(e)}}};
     S.take=function(id){var s=S.slots[id];if(!s)return'{"x":1}';if(!s.d)return'{"p":1}';delete S.slots[id];return JSON.stringify(s.e?{e:s.e}:{v:s.v})};
     S.call=function(a){if(a.h!==S.h)return JSON.stringify({m:S.h||''});
-      try{var v=a.op==='read'?read(a):a.op==='act'?act(a):a.op==='geom'?geom(a):a.op==='logs'?logs(a):null;return JSON.stringify({v:v,u:location.href,r:document.readyState})}
+      try{var v=a.op==='read'?read(a):a.op==='act'?act(a):a.op==='geom'?geom(a):a.op==='logs'?logs(a):a.op==='has'?has(a):null,o={v:v,u:location.href,r:document.readyState};if(S.dlg.length)o.d=S.dlg.splice(0);return JSON.stringify(o)}
       catch(e){return JSON.stringify({e:String(e&&e.message||e)})}};
     })()
     """#

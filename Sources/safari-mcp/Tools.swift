@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 final class Tools {
     // Descriptions are sent to the model every session; keep them terse.
@@ -15,9 +16,10 @@ final class Tools {
             "diff": ["type": "boolean", "description": "only lines changed since the last read in this mode"],
             "max_chars": int, "offset": int, "tab": str,
         ]),
-        tool("act", "Act on an element by ref (from read) or x,y viewport px. text is for type/fill/select; key is like Enter or cmd+a; scroll dy is px, negative = up.", [
-            "action": ["type": "string", "enum": ["click", "dblclick", "hover", "type", "fill", "select", "key", "scroll"]],
+        tool("act", "Act on an element by ref (from read) or x,y viewport px. text is for type/fill/select; key is like Enter or cmd+a; scroll dy is px, negative = up. fill with fields {ref: value} sets many fields (true/false for checkboxes). wait: until text, ref or selector appears (gone: disappears). upload: text = file path(s), comma-separated. dialog: text accept/dismiss/answer for the next alert/confirm/prompt (default: dismissed).", [
+            "action": ["type": "string", "enum": ["click", "dblclick", "hover", "type", "fill", "select", "key", "scroll", "wait", "upload", "dialog"]],
             "ref": str, "x": num, "y": num, "text": str, "key": str, "dy": num,
+            "fields": ["type": "object"], "selector": str, "gone": ["type": "boolean"], "timeout": num,
             "os": ["type": "boolean", "description": "real mouse/keyboard; use when the page ignores the default synthetic events"],
             "tab": str,
         ], ["action"]),
@@ -76,6 +78,34 @@ final class Tools {
     private var verifiedURL = ""
 
     func call(_ name: String, _ a: [String: Any]) throws -> [Content] {
+        dialogs = []
+        var out: [Content]
+        do {
+            out = try dispatch(name, a)
+        } catch let e as ToolError where e.msg.hasPrefix("Safari did not answer in time") {
+            // Most likely a dialog the page agent could not intercept (shown before it was injected).
+            guard let id = current else { throw e }
+            blocked.insert(id)
+            if let t = tabs[id], t.visible, let msg = Capture.dialog(wid: t.pos.wid, answer: nil) {
+                throw ToolError("The page shows a dialog: \(jsonString(clip(msg, 200))). Answer it with act dialog, text accept or dismiss.")
+            }
+            throw ToolError(e.msg + " If so, act dialog (text accept or dismiss) answers it; it needs Accessibility permission and shows the tab.")
+        }
+        if !dialogs.isEmpty {
+            let note = dialogs.map { "⚠ dialog " + $0 }.joined(separator: "\n")
+            if let i = out.lastIndex(where: { if case .text = $0 { return true } else { return false } }), case .text(let t) = out[i] {
+                out[i] = .text(t + "\n" + note)
+            } else { out.append(.text(note)) }
+        }
+        return out
+    }
+
+    /// Dialogs the page agent answered during this call.
+    private var dialogs: [String] = []
+    /// Tabs whose last call timed out, probably behind a native dialog.
+    private var blocked: Set<Int> = []
+
+    private func dispatch(_ name: String, _ a: [String: Any]) throws -> [Content] {
         switch name {
         case "tabs": return [.text(try tabsTool(a))]
         case "navigate": return [.text(try navigate(a))]
@@ -290,6 +320,7 @@ final class Tools {
                 }
                 continue
             }
+            if let d = env["d"] as? [String] { dialogs += d }
             if let e = env["e"] as? String { throw ToolError(e) }
             return env
         }
@@ -499,19 +530,91 @@ final class Tools {
     private func act(_ a: [String: Any]) throws -> String {
         guard let action = a["action"] as? String else { throw ToolError("action required") }
         let id = try resolve(a)
+        if action == "wait" { return try waitFor(id, a) }
+        if action == "dialog", let r = try nativeDialog(id, a["text"] as? String ?? "accept") { return r }
         let result: String
-        let env: [String: Any]
-        if a["os"] as? Bool == true {
+        var env: [String: Any]
+        if action == "upload" {
+            var o = pick(a, ["ref", "x", "y"])
+            o["op"] = "act"
+            o["action"] = "upload"
+            o["files"] = try files(a["text"] as? String ?? "")
+            env = try agentCall(id, o)
+            result = env["v"] as? String ?? "ok"
+        } else if a["os"] as? Bool == true {
             (result, env) = try osAct(id, action, a)
         } else {
-            var o = pick(a, ["action", "ref", "x", "y", "text", "key", "dy"])
+            var o = pick(a, ["action", "ref", "x", "y", "text", "key", "dy", "fields"])
             o["op"] = "act"
             env = try agentCall(id, o)
             result = env["v"] as? String ?? "ok"
         }
-        if action == "hover" || action == "scroll" { return result }
+        if ["hover", "scroll", "dialog"].contains(action) || a["fields"] != nil { return result }
         return settle(id, result, href: env["u"] as? String ?? "", tabURL: verifiedURL,
                       wasReady: env["r"] as? String == "complete", twice: action == "click" || action == "dblclick" || action == "key")
+    }
+
+    /// Answers a dialog Safari shows natively, via Accessibility. Only tried when the tab's last
+    /// call timed out or the visible tab shows one; otherwise act dialog sets the agent's answer.
+    private func nativeDialog(_ id: Int, _ answer: String) throws -> String? {
+        guard Input.trusted(prompt: false), let t = tabs[id] else {
+            if blocked.contains(id) { throw ToolError("Answering this dialog needs Accessibility permission for the app running this server (System Settings > Privacy & Security > Accessibility), or answer it in Safari.") }
+            return nil
+        }
+        if t.visible {
+            if let msg = Capture.dialog(wid: t.pos.wid, answer: answer) {
+                blocked.remove(id)
+                return "answered dialog \(jsonString(clip(msg, 120))) (\(answer))"
+            }
+            return nil
+        }
+        guard blocked.contains(id) else { return nil }
+        // Safari only shows a background tab's dialog once the tab is selected.
+        let back = tabs.values.first { $0.pos.wid == t.pos.wid && $0.visible }
+        try guardedOp(id) { try safari.select($0, $1) }
+        usleep(400_000)
+        let msg = Capture.dialog(wid: t.pos.wid, answer: answer)
+        if let back { try? guardedOp(back.id) { try safari.select($0, $1) } }
+        try? sync()
+        blocked.remove(id)
+        guard let msg else { return "no dialog found in t\(id)" }
+        return "answered dialog \(jsonString(clip(msg, 120))) (\(answer))" + (back.map { "; t\($0.id) is visible again" } ?? "")
+    }
+
+    /// Polls the page until the text, ref or selector appears (or with gone, disappears).
+    /// Keeps going across navigations, so it also works for "wait for the next page".
+    private func waitFor(_ id: Int, _ a: [String: Any]) throws -> String {
+        var o = pick(a, ["ref", "selector", "text"])
+        guard !o.isEmpty else { throw ToolError("wait needs text, ref or selector") }
+        o["op"] = "has"
+        let gone = a["gone"] as? Bool == true
+        let limit = min(max(a["timeout"] as? Double ?? 10, 0.5), 30)
+        let what = (a["text"] as? String).map { "text " + jsonString($0) } ?? (a["ref"] as? String ?? (a["selector"] as? String).map { "selector " + $0 } ?? "")
+        let start = Date()
+        while true {
+            if let env = try? agentCall(id, o), let v = env["v"] as? Bool, v != gone {
+                return "\(what) \(gone ? "gone" : "present") after \(String(format: "%.1f", Date().timeIntervalSince(start)))s"
+            }
+            if Date().timeIntervalSince(start) > limit {
+                throw ToolError("timed out after \(Int(limit))s waiting for \(what) to \(gone ? "disappear" : "appear")")
+            }
+            usleep(150_000)
+        }
+    }
+
+    /// Files for an upload, base64-encoded for the page agent.
+    private func files(_ list: String) throws -> [[String: String]] {
+        let paths = list.split(separator: ",").map { NSString(string: $0.trimmingCharacters(in: .whitespaces)).expandingTildeInPath }
+        guard !paths.isEmpty else { throw ToolError("upload needs text: the file path(s)") }
+        var total = 0
+        return try paths.map { p in
+            guard let data = FileManager.default.contents(atPath: p) else { throw ToolError("cannot read \(p)") }
+            total += data.count
+            guard total <= 10_000_000 else { throw ToolError("upload is limited to 10 MB in total") }
+            let ext = (p as NSString).pathExtension
+            let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
+            return ["n": (p as NSString).lastPathComponent, "t": mime, "b": data.base64EncodedString()]
+        }
     }
 
     private func osAct(_ id: Int, _ action: String, _ a: [String: Any]) throws -> (String, [String: Any]) {

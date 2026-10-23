@@ -64,6 +64,45 @@ enum Capture {
         return nil
     }
 
+    /// The JavaScript dialog (alert, confirm, prompt) shown in the window's visible tab, found via
+    /// Accessibility. With `answer` ("accept", "dismiss", or text for a prompt) it is also answered.
+    /// Returns the dialog's message, or nil when there is none or permission is missing.
+    static func dialog(wid: Int, answer: String?) -> String? {
+        guard AXIsProcessTrusted(), let (bounds, pid) = window(wid) else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 2)
+        // While a dialog is up Safari can report an empty window list; the focused window still works.
+        var wins = attr(app, kAXWindowsAttribute) as? [AXUIElement] ?? []
+        if let f = attr(app, kAXFocusedWindowAttribute) { wins.append(f as! AXUIElement) }
+        guard let win = wins.first(where: { w in
+            guard let f = frame(w) else { return false }
+            return abs(f.minX - bounds.minX) < 2 && abs(f.minY - bounds.minY) < 2 && abs(f.width - bounds.width) < 2
+        }) else { return nil }
+        var queue = [(win, 0)], head = 0
+        var found: AXUIElement?
+        while head < queue.count && head < 400 {
+            let (el, depth) = queue[head]
+            head += 1
+            if attr(el, kAXSubroleAttribute) as? String == "AXDialog" { found = el; break }
+            if depth < 5, attr(el, kAXRoleAttribute) as? String != "AXWebArea", let kids = attr(el, kAXChildrenAttribute) as? [AXUIElement] {
+                for k in kids { queue.append((k, depth + 1)) }
+            }
+        }
+        guard let dlg = found else { return nil }
+        let msg = attr(dlg, kAXValueAttribute) as? String ?? ""
+        guard let answer else { return msg }
+        let kids = attr(dlg, kAXChildrenAttribute) as? [AXUIElement] ?? []
+        let buttons = kids.filter { attr($0, kAXRoleAttribute) as? String == "AXButton" }
+        if answer != "accept" && answer != "dismiss",
+           let field = kids.first(where: { attr($0, kAXRoleAttribute) as? String == "AXTextField" }) {
+            AXUIElementSetAttributeValue(field, kAXValueAttribute as CFString, answer as CFString)
+        }
+        // Safari lists Cancel before OK; an alert has only one button.
+        guard let button = answer == "dismiss" ? buttons.first : buttons.last else { return nil }
+        AXUIElementPerformAction(button, kAXPressAction as CFString)
+        return msg
+    }
+
     /// Viewport rect in screen points. Falls back to assuming all browser chrome is on the
     /// top and left, with no page zoom, when Accessibility is not granted.
     static func viewport(wid: Int, iw: Double, ih: Double) throws -> (rect: CGRect, bounds: CGRect) {

@@ -160,6 +160,7 @@ Eklenti yolu da sonradan eklendi ve elle sınandı:
 - Wikipedia'da 404 durum kodunun bildirildiği ve GitHub'ın katı CSP'sinde `js`'in çalıştığı görüldü.
 - Aynı anda iki sunucu süreciyle sınandı.
 - Eklenti yeniden imzalanıp kurulduktan sonra kendiliğinden yeniden bağlandı.
+- Ücretsiz Apple ID ile imzalanan eklenti, Safari kapatılıp açıldıktan sonra "Allow unsigned extensions" açılmadan etkin kaldı ve kendiliğinden bağlandı (macOS 27, tek Mac).
 
 ## Sınırlar
 

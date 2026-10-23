@@ -17,6 +17,8 @@ struct TabInfo {
     let current: Bool
     let title: String
     let url: String
+    /// Safari's own tab id, only known through the extension. It never changes while the tab is open.
+    var xid: Int? = nil
 }
 
 /// What the caller believes about a tab position. Safari checks it in the same Apple Event
@@ -242,7 +244,7 @@ final class Safari {
     func select(_ tab: TabRef, _ e: Expect) throws -> Bool { try guarded("selecttab", tab, e) != nil }
     func raise(_ tab: TabRef, _ e: Expect) throws -> Bool { try guarded("raisetab", tab, e) != nil }
 
-    func newTab(in wid: Int?, url: String) throws -> TabRef {
+    func openTab(in wid: Int?, url: String) throws -> TabRef {
         if let wid, let idx = Int((try? run("newtab", [wid, url])) ?? "") { return TabRef(wid, idx) }
         guard let w = Int(try run("newdoc", [url])) else { throw ToolError("Could not open a Safari window.") }
         return TabRef(w, 1)

@@ -15,12 +15,14 @@ final class Bridge {
     private let started = Date()
     private let token: Data
 
-    // Guarded by `q`.
-    private var conn: NWConnection?
-    private var authed = false
-    private var nonce = ""
+    // Guarded by `q`. Safari can run two copies of the extension for a while (after an
+    // update), each with its own tab ids. All authenticated connections are kept, but
+    // requests always go to the oldest one, so ids stay consistent; `generation` changes
+    // whenever that connection changes, which tells Tools to re-match its tabs.
+    private var conns: [NWConnection] = []
+    private var gen = 0
     private var seq = 0
-    private var pending: [Int: (DispatchSemaphore, Box)] = [:]
+    private var pending: [Int: (sem: DispatchSemaphore, box: Box, via: NWConnection)] = [:]
 
     private final class Box { var value: [String: Any]? }
 
@@ -30,7 +32,8 @@ final class Bridge {
         if port == 0 { log("no free port in \(Bridge.ports); extension bridge disabled") }
     }
 
-    var connected: Bool { q.sync { authed && conn != nil } }
+    var connected: Bool { q.sync { !conns.isEmpty } }
+    var generation: Int { q.sync { gen } }
 
     /// True once the extension is connected. Shortly after start it waits a little, since the
     /// extension retries every 2 s and the first tool call usually comes right away.
@@ -53,9 +56,9 @@ final class Bridge {
         let sem = DispatchSemaphore(value: 0)
         let box = Box()
         let id: Int = try q.sync {
-            guard authed, let c = conn else { throw BridgeDown() }
+            guard let c = conns.first else { throw BridgeDown() }
             seq += 1
-            pending[seq] = (sem, box)
+            pending[seq] = (sem, box, c)
             var m = args
             m["id"] = seq
             m["op"] = op
@@ -120,12 +123,14 @@ final class Bridge {
     }
 
     private func drop(_ c: NWConnection) {
-        guard conn === c else { return }
-        conn = nil
-        authed = false
-        for (_, (sem, _)) in pending { sem.signal() }
-        pending.removeAll()
-        log("extension disconnected")
+        guard let i = conns.firstIndex(where: { $0 === c }) else { return }
+        conns.remove(at: i)
+        if i == 0 { gen += 1 }
+        for (id, p) in pending where p.via === c {
+            pending[id] = nil
+            p.sem.signal()
+        }
+        if conns.isEmpty { log("extension disconnected") }
     }
 
     private func receive(_ c: NWConnection, nonce: String, authed ok: Bool) {
@@ -143,14 +148,12 @@ final class Bridge {
                         return
                     }
                     ok = true
-                    if let old = self.conn, old !== c { old.cancel() }
-                    self.conn = c
-                    self.authed = true
+                    if self.conns.isEmpty { log("extension connected on port \(self.port)"); self.gen += 1 }
+                    self.conns.append(c)
                     self.send(c, ["auth": self.hmac("srv:" + theirs)])
-                    log("extension connected on port \(self.port)")
-                } else if let id = m["id"] as? Int, let (sem, box) = self.pending.removeValue(forKey: id) {
-                    box.value = m
-                    sem.signal()
+                } else if let id = m["id"] as? Int, let p = self.pending.removeValue(forKey: id) {
+                    p.box.value = m
+                    p.sem.signal()
                 }
             }
             self.receive(c, nonce: nonce, authed: ok)

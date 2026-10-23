@@ -12,7 +12,7 @@ protocol Browser: AnyObject {
     func close(_ tab: TabRef, _ e: Expect) throws -> Bool
     func select(_ tab: TabRef, _ e: Expect) throws -> Bool
     func raise(_ tab: TabRef, _ e: Expect) throws -> Bool
-    func newTab(in wid: Int?, url: String) throws -> TabRef
+    func newTab(in wid: Int?, url: String) throws -> (ref: TabRef, xid: Int?)
     /// HTTP status of the tab's last top-level load, 0 when unknown.
     func status(_ tab: TabRef) -> Int
     /// Window server id of the window, for screen capture and real input.
@@ -23,6 +23,7 @@ protocol Browser: AnyObject {
 }
 
 extension Safari: Browser {
+    func newTab(in wid: Int?, url: String) throws -> (ref: TabRef, xid: Int?) { (try openTab(in: wid, url: url), nil) }
     func status(_ tab: TabRef) -> Int { 0 }
     func cgWindow(_ wid: Int) -> Int? { wid }
     func capture(_ wid: Int) -> Data? { nil }
@@ -53,7 +54,7 @@ final class ExtBrowser: Browser {
         let r = try bridge.call("tabs")
         return (r["ok"] as? [[String: Any]] ?? []).compactMap { t in
             guard let w = t["w"] as? Int, let i = t["i"] as? Int else { return nil }
-            return TabInfo(ref: TabRef(w, i), current: t["cur"] as? Bool ?? false, title: t["title"] as? String ?? "", url: t["url"] as? String ?? "")
+            return TabInfo(ref: TabRef(w, i), current: t["cur"] as? Bool ?? false, title: t["title"] as? String ?? "", url: t["url"] as? String ?? "", xid: t["id"] as? Int)
         }
     }
 
@@ -81,12 +82,12 @@ final class ExtBrowser: Browser {
         return true
     }
 
-    func newTab(in wid: Int?, url: String) throws -> TabRef {
+    func newTab(in wid: Int?, url: String) throws -> (ref: TabRef, xid: Int?) {
         var a: [String: Any] = ["url": url]
         if let wid { a["w"] = wid }
         let r = try bridge.call("newtab", a)
         guard let w = r["w"] as? Int, let i = r["i"] as? Int else { throw ToolError("Could not open a Safari tab.") }
-        return TabRef(w, i)
+        return (TabRef(w, i), r["tab"] as? Int)
     }
 
     /// Every request the tab made since its page started loading, as log lines.

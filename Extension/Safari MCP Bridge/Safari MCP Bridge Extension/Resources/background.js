@@ -27,12 +27,13 @@ const reqs = new Map();     // tab id -> recent requests, as log lines
 const started = new Map();  // request id -> start time
 browser.webRequest.onBeforeRequest.addListener((d) => {
   if (d.tabId < 0) return;
-  if (d.type === 'main_frame') reqs.set(d.tabId, []);
+  // Safari can label iframe loads main_frame too; only frame 0 is the tab's document.
+  if (d.type === 'main_frame' && d.frameId === 0) reqs.set(d.tabId, []);
   started.set(d.requestId, d.timeStamp);
 }, { urls: ['<all_urls>'] });
 function done(d, st) {
   if (d.tabId < 0) return;
-  if (d.type === 'main_frame') status.set(d.tabId, st);
+  if (d.type === 'main_frame' && d.frameId === 0) status.set(d.tabId, st);
   const t0 = started.get(d.requestId); started.delete(d.requestId);
   const list = reqs.get(d.tabId) || []; reqs.set(d.tabId, list);
   list.push(`${d.type} ${st || 'ERR'} ${d.url} ${t0 ? Math.round(d.timeStamp - t0) : 0}ms`);
@@ -59,7 +60,7 @@ const ops = {
     wins.sort((a, b) => (b.focused ? 1 : 0) - (a.focused ? 1 : 0));
     const out = [];
     for (const w of wins) for (const t of w.tabs.sort((a, b) => a.index - b.index)) {
-      out.push({ w: w.id, i: t.index + 1, cur: t.active, title: t.title || '', url: t.url || '' });
+      out.push({ id: t.id, w: w.id, i: t.index + 1, cur: t.active, title: t.title || '', url: t.url || '' });
     }
     return { ok: out };
   },
@@ -91,10 +92,10 @@ const ops = {
   },
   async newtab(m) {
     if (m.w != null) {
-      try { const t = await browser.tabs.create({ windowId: m.w, url: m.url, active: false }); return { w: t.windowId, i: t.index + 1 }; } catch (e) { /* window gone */ }
+      try { const t = await browser.tabs.create({ windowId: m.w, url: m.url, active: false }); return { tab: t.id, w: t.windowId, i: t.index + 1 }; } catch (e) { /* window gone */ }
     }
     const w = await browser.windows.create({ url: m.url, focused: false });
-    return { w: w.id, i: 1 };
+    return { tab: w.tabs && w.tabs[0] && w.tabs[0].id, w: w.id, i: 1 };
   },
   async status(m) { const t = await tabAt({ w: m.w, i: m.i, n: -1 }); return { ok: (t && status.get(t.id)) || 0 }; },
   async reqs(m) { const t = await tabAt({ w: m.w, i: m.i, n: -1 }); return { ok: (t && reqs.get(t.id)) || [] }; },
@@ -132,7 +133,7 @@ function connect(port) {
       }
       return;
     }
-    const reply = (o) => { try { ws.send(JSON.stringify(Object.assign({ id: m.id }, o))); } catch (e) { /* closed */ } };
+    const reply = (o) => { try { ws.send(JSON.stringify(Object.assign({}, o, { id: m.id }))); } catch (e) { /* closed */ } };
     const f = ops[m.op];
     if (!f) { reply({ err: 'unknown op ' + m.op }); return; }
     try { reply(await f(m)); } catch (e) { reply({ err: String((e && e.message) || e) }); }

@@ -61,18 +61,23 @@ final class Tools {
         var visible: Bool
         /// Stamped into the page's agent once we have worked in the tab.
         var handle: String?
+        /// Safari's tab id when the extension is in use; matched before anything else.
+        var xid: Int? = nil
     }
 
     private lazy var apple = Safari()
     private let bridge = Bridge()
     private lazy var ext = ExtBrowser(bridge)
     private var usingExt: Bool?
+    private var extGeneration = 0
 
     /// Safari through the extension when it is connected, else through Apple Events.
     private var safari: Browser {
         let e = bridge.ready()
-        if let u = usingExt, u != e { switched(toExtension: e) }
+        let g = e ? bridge.generation : extGeneration
+        if let u = usingExt, u != e || (e && g != extGeneration) { switched(toExtension: e) }
         usingExt = e
+        extGeneration = g
         return e ? ext : apple
     }
 
@@ -88,6 +93,7 @@ final class Tools {
             var n = t
             n.pos = hits[0].ref
             n.visible = hits[0].current
+            n.xid = hits[0].xid
             fresh[t.id] = n
         }
         tabs = fresh
@@ -208,15 +214,21 @@ final class Tools {
             t.url = list[li].url
             t.title = list[li].title
             t.visible = list[li].current
+            t.xid = list[li].xid
             result[t.id] = t
             slot[li] = t.id
         }
 
+        // With the extension every tab has a fixed id: no guessing needed for those.
+        var byXid: [Int: Int] = [:]
+        for li in list.indices { if let x = list[li].xid { byXid[x] = li } }
+        for old in tabs.values { if let x = old.xid, let li = byXid[x] { assign(old, li) } }
+
         var wids: [Int] = []
         for t in list where !wids.contains(t.ref.wid) { wids.append(t.ref.wid) }
         for wid in wids {
-            let news = list.indices.filter { list[$0].ref.wid == wid }
-            let olds = tabs.values.filter { $0.pos.wid == wid }.sorted { $0.pos.idx < $1.pos.idx }
+            let news = list.indices.filter { list[$0].ref.wid == wid && slot[$0] == nil }
+            let olds = tabs.values.filter { $0.pos.wid == wid && result[$0.id] == nil && $0.xid == nil }.sorted { $0.pos.idx < $1.pos.idx }
             var po = 0, pn = 0
             for (oi, ni) in lcs(olds.map(\.url), news.map { list[$0].url }) + [(olds.count, news.count)] {
                 let go = Array(olds[po..<oi]), gn = Array(news[pn..<ni])
@@ -231,7 +243,7 @@ final class Tools {
             }
         }
 
-        let looseOld = tabs.values.filter { result[$0.id] == nil && $0.handle != nil }.sorted { $0.id < $1.id }
+        let looseOld = tabs.values.filter { result[$0.id] == nil && $0.handle != nil && $0.xid == nil }.sorted { $0.id < $1.id }
         if !looseOld.isEmpty {
             var probed: [Int: String] = [:]
             for old in looseOld {
@@ -244,7 +256,7 @@ final class Tools {
             }
         }
         for li in list.indices where slot[li] == nil {
-            let t = Tab(id: nextTab, pos: list[li].ref, url: list[li].url, title: list[li].title, visible: list[li].current, handle: nil)
+            let t = Tab(id: nextTab, pos: list[li].ref, url: list[li].url, title: list[li].title, visible: list[li].current, handle: nil, xid: list[li].xid)
             nextTab += 1
             result[t.id] = t
             slot[li] = t.id
@@ -268,7 +280,11 @@ final class Tools {
                 throw ToolError("Bad tab id \(s); use an id from tabs, like t3.")
             }
             if tabs[id] == nil { try sync() }
-            guard tabs[id] != nil else { throw gone(id) }
+            guard tabs[id] != nil else {
+                // Never let later calls without a tab fall back to the user's visible tab instead.
+                if current == nil { defaultLost = true }
+                throw gone(id)
+            }
             current = id
             defaultLost = false
             return id
@@ -391,7 +407,7 @@ final class Tools {
         let id = try resolve(a)
         var o = pick(a, keys)
         o["op"] = op
-        let frame = try frameOf(&o)
+        let frame = try frameOf(&o, id)
         var v = try inFrame(frame) { try agentCall(id, o)["v"] as? String ?? "" }
         if op == "read", frame == 0, a["ref"] == nil, a["selector"] == nil, safari.isExtension { v += frameBlocks(id, o) }
         return v
@@ -401,7 +417,10 @@ final class Tools {
 
     /// Refs like f12e5 point into child frame 12. Strips the frame from `ref` (or from the
     /// keys of `fields`) so the frame's own agent understands it, and returns the frame.
-    private func frameOf(_ o: inout [String: Any]) throws -> Int {
+    /// Safari's frame ids are long; the model sees f1, f2… per tab instead.
+    private var frameIDs: [Int: [Int]] = [:]
+
+    private func frameOf(_ o: inout [String: Any], _ tab: Int) throws -> Int {
         func split(_ r: String) -> (Int, String)? {
             guard let m = r.wholeMatch(of: #/f(\d+)(e\d+)/#), let f = Int(m.1) else { return nil }
             return (f, String(m.2))
@@ -418,8 +437,10 @@ final class Tools {
             frame = seen.first ?? 0
             o["fields"] = out
         }
-        if frame != 0 && !safari.isExtension { throw ToolError("Frame refs (f12e5) need the Safari MCP extension.") }
-        return frame
+        if frame == 0 { return 0 }
+        if !safari.isExtension { throw ToolError("Frame refs (f2e5) need the Safari MCP extension.") }
+        guard let list = frameIDs[tab], frame >= 1, frame <= list.count else { throw ToolError("frame f\(frame) is unknown; call read again") }
+        return list[frame - 1]
     }
 
     private func inFrame<T>(_ f: Int, _ body: () throws -> T) rethrows -> T {
@@ -437,10 +458,13 @@ final class Tools {
         var out = ""
         for f in frames.prefix(8) where f.url.hasPrefix("http") || f.url.hasPrefix("file") {
             guard let body = try? inFrame(f.id, { try agentCall(id, fo)["v"] as? String }) else { continue }
+            var list = frameIDs[id] ?? []
+            if !list.contains(f.id) { list.append(f.id); frameIDs[id] = list }
+            let alias = list.firstIndex(of: f.id)! + 1
             let lines = body.split(separator: "\n", omittingEmptySubsequences: false).dropFirst()
             guard let first = lines.first, !first.isEmpty,
                   !["(nothing", "no match", "no link", "(no links", "no changes", "no text"].contains(where: { first.hasPrefix($0) }) else { continue }
-            let pre = "f\(f.id)"
+            let pre = "f\(alias)"
             let fixed = lines.map { l -> String in
                 if l.hasPrefix("- e") && l.split(separator: " ").dropFirst().allSatisfy({ $0.wholeMatch(of: #/e\d+/#) != nil }) {
                     return "-" + l.split(separator: " ").dropFirst().map { " " + pre + $0 }.joined()
@@ -557,7 +581,7 @@ final class Tools {
             let wid = current.flatMap { tabs[$0]?.pos.wid } ?? order.first.flatMap { tabs[$0]?.pos.wid }
             let pos = try safari.newTab(in: wid, url: url)
             try sync()
-            guard let id = tabs.values.first(where: { $0.pos == pos })?.id else { throw ToolError("Opened a tab but lost track of it; run tabs.") }
+            guard let id = (tabs.values.first { pos.xid != nil && $0.xid == pos.xid } ?? tabs.values.first { $0.pos == pos.ref })?.id else { throw ToolError("Opened a tab but lost track of it; run tabs.") }
             current = id
             defaultLost = false
             return "opened t\(id)" + (url.isEmpty ? "" : ": " + waitLoad(id, marked: false, from: "about:blank", timeout: 15, grace: 8).text)
@@ -633,7 +657,7 @@ final class Tools {
         let id = try resolve(a)
         if action == "wait" { return try waitFor(id, a) }
         if action == "dialog", let r = try nativeDialog(id, a["text"] as? String ?? "accept") { return r }
-        let result: String
+        var result: String
         var env: [String: Any]
         if action == "upload" {
             var o = pick(a, ["ref", "x", "y"])
@@ -647,9 +671,15 @@ final class Tools {
         } else {
             var o = pick(a, ["action", "ref", "x", "y", "text", "key", "dy", "fields"])
             o["op"] = "act"
-            let frame = try frameOf(&o)
+            let frame = try frameOf(&o, id)
             env = try inFrame(frame) { try agentCall(id, o) }
             result = env["v"] as? String ?? "ok"
+            if frame != 0, let alias = frameIDs[id]?.firstIndex(of: frame).map({ "f\($0 + 1)" }) {
+                // Report frame refs as the model knows them, and judge page changes by the top document.
+                result = result.replacing(#/\be(\d+)\b/#) { alias + "e" + $0.1 }
+                env["u"] = tabs[id]?.url ?? ""
+                env["r"] = "complete"
+            }
         }
         if ["hover", "scroll", "dialog"].contains(action) || a["fields"] != nil { return result }
         return settle(id, result, href: env["u"] as? String ?? "", tabURL: verifiedURL,
@@ -689,7 +719,7 @@ final class Tools {
         var o = pick(a, ["ref", "selector", "text"])
         guard !o.isEmpty else { throw ToolError("wait needs text, ref or selector") }
         o["op"] = "has"
-        let frame = try frameOf(&o)
+        let frame = try frameOf(&o, id)
         let gone = a["gone"] as? Bool == true
         let limit = min(max(a["timeout"] as? Double ?? 10, 0.5), 30)
         let what = (a["text"] as? String).map { "text " + jsonString($0) } ?? (a["ref"] as? String ?? (a["selector"] as? String).map { "selector " + $0 } ?? "")

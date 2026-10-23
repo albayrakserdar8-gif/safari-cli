@@ -402,8 +402,10 @@
 		749DFE89308BB24300195437 /* Debug configuration for PBXNativeTarget "Safari MCP Bridge Extension" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Safari MCP Bridge Extension/Extension.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 32PQ3Q9PL3;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -422,7 +424,6 @@
 					"-framework",
 					SafariServices,
 				);
-				CODE_SIGN_ENTITLEMENTS = "Safari MCP Bridge Extension/Extension.entitlements";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.sadopc.safari-mcp.Extension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -437,8 +438,10 @@
 		749DFE8A308BB24300195437 /* Release configuration for PBXNativeTarget "Safari MCP Bridge Extension" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "Safari MCP Bridge Extension/Extension.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 32PQ3Q9PL3;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
@@ -457,7 +460,6 @@
 					"-framework",
 					SafariServices,
 				);
-				CODE_SIGN_ENTITLEMENTS = "Safari MCP Bridge Extension/Extension.entitlements";
 				PRODUCT_BUNDLE_IDENTIFIER = "com.sadopc.safari-mcp.Extension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -477,6 +479,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 32PQ3Q9PL3;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
@@ -519,6 +522,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 32PQ3Q9PL3;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;

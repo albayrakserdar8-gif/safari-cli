@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`safari-mcp`: a local stdio MCP server that lets Claude Code drive the user's real Safari through Apple Events. One Swift binary, no dependencies, no browser extension, no daemon. It is an independent project; do not copy code from Anthropic's Claude in Chrome extension, do not use its OAuth token or bridge, and keep "Claude" out of the product name.
+`safari-mcp`: a local stdio MCP server that lets Claude Code drive the user's real Safari. One Swift binary, no dependencies, no daemon. It talks to Safari through the optional Safari MCP Bridge extension (`Extension/`) when that is connected, else through Apple Events. It is an independent project; do not copy code from Anthropic's Claude in Chrome extension, do not use its OAuth token or bridge, and keep "Claude" out of the product name.
 
 The README is written in Turkish and is the user-facing reference for setup, permissions and known limits.
 
@@ -40,6 +40,8 @@ Real-page behaviour can only be tested against the user's live Safari. Open your
 
 ## Architecture
 
+Two backends behind `protocol Browser` (`Browser.swift`): `ExtBrowser` (the extension, via `Bridge.swift`) and `Safari` (Apple Events). `Tools.safari` picks the extension whenever it is connected. Both take the same `TabRef` + `Expect` and check them in the same step that acts, so everything above them (tab tracking, waits, the page agent) is shared.
+
 Request path: `main.swift` (stdin read on a side thread, requests handled in order on the main thread, whose run loop must stay free when idle or macOS reports the process as "Not Responding") → `MCP.swift` (`Server`: JSON-RPC, lifecycle, tool errors as `isError`) → `Tools.swift` (the 8 tools and all tab/navigation logic) → `Safari.swift` (Apple Events) → `PageAgent.swift` (JS that runs inside the page).
 
 ### Safari bridge (`Safari.swift`)
@@ -74,11 +76,24 @@ Injected once per document (`window.__smcp`), then each call is one small Apple 
 - Every `__smcp.call` carries the tab's handle and is a no-op on mismatch.
 - `do JavaScript` does not await promises, so `js` starts the code, stores the result in a slot and polls `__smcp.take`.
 - User code for `js` is embedded as an async function body, never `eval`'d (page CSP would block it).
+- The main-world part (`mainSource`: console/fetch/XHR hooks, dialog answers, the `js` runner) is separate from `source`. With Apple Events both are injected together; with the extension `mainSource` is `main.js` (MAIN world, `document_start`, all frames) and the agent runs in the isolated world, reaching it with `mcall` over `__smcp_q`/`__smcp_r` DOM events. Dialog answering is armed only once the agent touches the page (and its frames, via postMessage); a sessionStorage flag keeps it armed across same-site navigations, so the user's own browsing keeps native dialogs.
 - Clicks are dispatched to the innermost element under the target's centre (including through open shadow roots), as a real click would be.
 - Refs are per element (WeakMap), so an element keeps its ref across reads of one document. `diff` relies on this: `S.last` keeps the previous body per mode/root/query and lines are matched by ref, else by text.
 - `text` output ends each returned chunk with the URLs of the `[n]` links in that chunk; same-page fragment links get no number.
 - The agent replaces `alert`/`confirm`/`prompt` at injection: alert is acknowledged, confirm/prompt are dismissed unless `act dialog` set `S.dp`. Answered dialogs travel in the call envelope (`d`) and `Tools.call` appends them as `⚠ dialog` lines. Dialogs opened before injection, or from an iframe, are native: Apple Events time out after 20 s (`-1712`), the tab is put in `blocked`, and `act dialog` answers through Accessibility (`Capture.dialog`), selecting a background tab first because Safari only shows a dialog in the visible tab. While a native dialog is up, Safari's AX window list can be empty; use the focused window.
 - Network lines carry ids (`n4`); text/JSON bodies of the last 50 fetch/XHR responses are kept for `logs id`.
+
+### Extension bridge (`Bridge.swift`, `Extension/`)
+
+- `Bridge` listens on a localhost WebSocket (Network.framework) on the first free port in 47391–47399; one per server process. The extension's persistent MV2 background page (`Extension/Safari MCP Bridge/Safari MCP Bridge Extension/Resources/background.js`) tries every port every 2 s.
+- Handshake: both sides sign each other's nonce with HMAC-SHA256 of the token in `~/.config/safari-mcp/token` (created by the server, mode 0600). The extension gets the token from its native handler (`SafariWebExtensionHandler.swift`, sandboxed with a read-only exception for `~/.config/safari-mcp/`). Only `safari-web-extension://` origins may connect.
+- Safari can run two copies of the extension for a while after an update, each with its own tab and window ids. All authenticated connections are kept, requests go to the oldest, and `generation` changes when that one drops, so `Tools` re-matches its tabs (same path as switching backends).
+- Ops mirror the Apple Events handlers (`tabs`, `run`, `seturl`, `close`, `select`, `raise`, `newtab`) plus `status` and `reqs` (webRequest), `frames` (webNavigation), `win` and `shot` (captureVisibleTab). Reply fields must not be named `id`: that is the request id.
+- In extension mode tabs carry `xid` (Safari's tab id) and `sync` matches by it before the URL alignment.
+- `read` appends `--- frame fN <url>` blocks for child frames (`frameBlocks`). Frame refs are `fNeM`; `frameOf` strips them and routes the call through `ext.frame`.
+- `main.js` is generated from `PageAgent.mainSource` by `Extension/gen.sh`; never edit it directly. `Extension/build.sh` regenerates it, builds with automatic signing for the team in the project, and installs to `~/Applications`. `--schedule` adds a weekly launchd job (`com.sadopc.safari-mcp.resign`) because free-account signatures expire.
+- Safari does not let extensions into `file://` pages; serve test pages over HTTP (`python3 -m http.server` in `Tests/`).
+- Test the Apple Events fallback without disabling the extension by holding ports 47391–47399 with plain sockets: the server then logs that the bridge is disabled.
 
 ### Screenshots (`Capture.swift`)
 

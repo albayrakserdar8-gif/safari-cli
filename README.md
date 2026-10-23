@@ -35,6 +35,20 @@ claude mcp add --scope user safari -- "$PWD/.build/release/safari-mcp"
 
 Kayıt ikilinin tam yolunu saklar; klasörü taşırsan komutu yeniden çalıştır. Yeniden derledikten sonra açık Claude Code oturumları eski sürümü çalıştırmaya devam eder; yeni sürüm yeni oturumda geçerli olur.
 
+### Claude Code skill'i (önerilen)
+
+`Skill/safari-browser/SKILL.md`, Claude'a bu araçları nasıl kullanacağını anlatır:
+- kendi sekmesinde çalışmak ve işi bitince kapatmak;
+- ekran görüntüsü yerine `read` kullanmak, işlemlerden sonra `diff` ile yalnızca değişeni okumak;
+- form doldurmak, iletişim kutularını ve iframe ref'lerini doğru kullanmak;
+- sonuçlu işlemlerden (gönderme, satın alma, silme) önce sormak.
+
+Her oturumda yalnızca skill'in adı ve kısa açıklaması yüklenir, içeriği Safari'yle ilgili bir iş gelince okunur. Kurmak için:
+
+```bash
+ln -s "$PWD/Skill/safari-browser" ~/.claude/skills/safari-browser
+```
+
 ### Safari eklentisi (önerilen)
 
 Eklenti kuruluysa sunucu Apple Events kullanmaz, bu yüzden Otomasyon ve "Allow JavaScript from Apple Events" izinleri gerekmez. Ayrıca iframe içeriklerini okur, HTTP durum kodunu (404 gibi) bildirir, ağ kaydını sayfa açıldığı andan itibaren tutar ve ekran görüntüsünü Ekran Kaydı izni olmadan alır. Eklenti bağlı değilken sunucu Apple Events'e geri döner.

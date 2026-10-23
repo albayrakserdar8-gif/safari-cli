@@ -101,6 +101,10 @@ Capture uses ScreenCaptureKit in a child process: the server re-executes itself 
 
 `Input.swift` sends real mouse/keyboard events via CGEvent for `os: true`. It needs Accessibility permission, raises Safari, and maps viewport coordinates to the screen through the page's scroll area found with the Accessibility API. Typed events must clear modifier flags, or a preceding key combo (cmd+a) leaks into them.
 
+## Skill
+
+`Skill/safari-browser/SKILL.md` is the usage guide Claude Code loads for browser tasks (installed by symlink into `~/.claude/skills/`). Keep it in step with tool behaviour: when a tool's arguments, defaults or result notes change, update the skill too.
+
 ## Repository
 
 Hosted at `github.com/sadopc/safari-mcp` (public), default branch `main`. `README.md` is user-facing and in Turkish; keep its "Sınırlar" (limits) and "Sınanma durumu" (what was tested) sections honest when behaviour changes.

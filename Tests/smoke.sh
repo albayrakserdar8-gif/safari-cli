@@ -36,5 +36,6 @@ check("tool input error is isError", by_id[6]["result"]["isError"] is True)
 
 size = len(json.dumps(tools, separators=(",", ":")))
 print(f"tool schemas: {size} chars, about {size // 4} tokens")
+check("tool schemas stay under 3600 chars (about 900 tokens)", size < 3600)
 sys.exit(fail)
 '

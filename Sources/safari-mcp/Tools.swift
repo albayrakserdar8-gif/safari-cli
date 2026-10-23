@@ -9,14 +9,14 @@ final class Tools {
             "url": str, "tab": str,
         ]),
         tool("navigate", "Load a URL, or back / forward / reload, and wait for the page.", ["url": str, "tab": str], ["url"]),
-        tool("read", "Read the page. interactive (default): visible controls with refs. all: adds headings and text. text: main content as markdown, links as [n]. links: link refs and URLs. query finds elements by words on the whole page; with text or links it filters those.", [
+        tool("read", "Read the page. interactive (default): visible controls with refs. all: adds headings and text. text: main content as markdown. links: link refs and URLs. query finds elements by words on the whole page, or filters text/links.", [
             "mode": ["type": "string", "enum": ["interactive", "all", "text", "links"]],
             "query": str, "ref": str, "selector": str,
             "full": ["type": "boolean", "description": "include off-screen elements"],
-            "diff": ["type": "boolean", "description": "only lines changed since the last read in this mode"],
+            "diff": ["type": "boolean", "description": "only changes since the last read"],
             "max_chars": int, "offset": int, "tab": str,
         ]),
-        tool("act", "Act on an element by ref (from read) or x,y viewport px. text is for type/fill/select; key is like Enter or cmd+a; scroll dy is px, negative = up. fill with fields {ref: value} sets many fields (true/false for checkboxes). wait: until text, ref or selector appears (gone: disappears). upload: text = file path(s), comma-separated. dialog: text accept/dismiss/answer for the next alert/confirm/prompt (default: dismissed).", [
+        tool("act", "Act on an element by ref (from read) or x,y viewport px. text: for type/fill/select, file paths for upload, accept/dismiss/answer for the next dialog (default dismiss). key: Enter, cmd+a. dy: scroll px. fields {ref: value} fills many. wait: until text/ref/selector appears (gone: disappears).", [
             "action": ["type": "string", "enum": ["click", "dblclick", "hover", "type", "fill", "select", "key", "scroll", "wait", "upload", "dialog"]],
             "ref": str, "x": num, "y": num, "text": str, "key": str, "dy": num,
             "fields": ["type": "object"], "selector": str, "gone": ["type": "boolean"], "timeout": num,
@@ -29,9 +29,11 @@ final class Tools {
         tool("screenshot", "JPEG of the viewport, an element (ref) or a region [x,y,w,h]. Costs far more tokens than read.", [
             "ref": str, "region": ["type": "array", "items": num], "max_width": int, "tab": str,
         ]),
-        tool("logs", "Console or network lines captured since the first logs call on this page.", [
+        tool("logs", "Console or network lines captured since the first logs call on this page. id (n4) shows a response body.", [
             "kind": ["type": "string", "enum": ["console", "network"]],
-            "pattern": str, "limit": int, "clear": ["type": "boolean"], "tab": str,
+            "level": ["type": "string", "enum": ["error", "warn"]],
+            "new": ["type": "boolean", "description": "only lines since the last logs call"],
+            "pattern": str, "id": str, "limit": int, "clear": ["type": "boolean"], "tab": str,
         ]),
         tool("batch", "Run several tool calls in order in one round trip; stops at the first error.", [
             "steps": ["type": "array", "items": ["type": "object", "properties": ["tool": str, "args": ["type": "object"]], "required": ["tool"]]],
@@ -113,7 +115,7 @@ final class Tools {
         case "act": return [.text(try act(a))]
         case "js": return [.text(try js(a))]
         case "screenshot": return try screenshot(a)
-        case "logs": return [.text(try page("logs", a, ["kind", "pattern", "limit", "clear"]))]
+        case "logs": return [.text(try page("logs", a, ["kind", "level", "new", "pattern", "id", "limit", "clear"]))]
         case "batch": return try batch(a)
         default: throw ToolError("Unknown tool \(name)")
         }
@@ -596,7 +598,7 @@ final class Tools {
                 return "\(what) \(gone ? "gone" : "present") after \(String(format: "%.1f", Date().timeIntervalSince(start)))s"
             }
             if Date().timeIntervalSince(start) > limit {
-                throw ToolError("timed out after \(Int(limit))s waiting for \(what) to \(gone ? "disappear" : "appear")")
+                throw ToolError("timed out after \(String(format: "%g", limit))s waiting for \(what) to \(gone ? "disappear" : "appear")")
             }
             usleep(150_000)
         }

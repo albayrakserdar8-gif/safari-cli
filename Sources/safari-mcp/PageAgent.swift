@@ -273,26 +273,40 @@ enum PageAgent {
       if(t){g.x=t.x;g.y=t.y;g.d=desc(t.el);if(t.r)g.r=[t.r.left,t.r.top,t.r.width,t.r.height]}return g}
 
     function fmt(v){if(typeof v==='string')return v;if(v instanceof Error)return v.name+': '+v.message;try{return JSON.stringify(v)}catch(e){return String(v)}}
-    function push(arr,x){arr.push(x);if(arr.length>300)arr.shift()}
-    function hook(){if(S.con)return false;S.con=[];S.net=[];
+    function push(arr,x){arr.push(x);arr.t=(arr.t||0)+1;if(arr.length>300)arr.shift()}
+    // Bodies of text/JSON responses, kept for the last 50 requests.
+    var BOD=new Map();
+    function keep(id,ct,b){if(!/json|text|xml|javascript|html|csv/i.test(ct||''))return;BOD.set(id,{c:ct,b:String(b).slice(0,4000)});if(BOD.size>50)BOD.delete(BOD.keys().next().value)}
+    function hook(){if(S.con)return false;S.con=[];S.net=[];S.nn=0;S.cur={};
       ['log','info','warn','error','debug'].forEach(function(l){var o=console[l];console[l]=function(){try{push(S.con,l+' '+[].map.call(arguments,fmt).join(' '))}catch(e){}return o.apply(console,arguments)}});
       addEventListener('error',function(e){push(S.con,'exception '+(e.message||(e.target&&(e.target.src||e.target.href))||'')+(e.filename?' @'+e.filename.split('/').pop()+':'+e.lineno:''))},true);
       addEventListener('unhandledrejection',function(e){push(S.con,'rejection '+fmt(e.reason))});
       var f=window.fetch;
-      if(f)window.fetch=function(i,o){var u=typeof i==='string'?i:(i&&i.url)||String(i),m=(o&&o.method)||(i&&i.method)||'GET',t=performance.now();
-        return f.apply(this,arguments).then(function(r){push(S.net,m+' '+r.status+' '+u+' '+Math.round(performance.now()-t)+'ms');return r},function(e){push(S.net,m+' ERR '+u+' '+e);throw e})};
+      if(f)window.fetch=function(i,o){var u=typeof i==='string'?i:(i&&i.url)||String(i),m=(o&&o.method)||(i&&i.method)||'GET',t=performance.now(),id='n'+(++S.nn);
+        return f.apply(this,arguments).then(function(r){push(S.net,id+' '+m+' '+r.status+' '+u+' '+Math.round(performance.now()-t)+'ms');
+          try{var ct=r.headers.get('content-type');if(/json|text|xml|javascript|html|csv/i.test(ct||''))r.clone().text().then(function(b){keep(id,ct,b)},function(){})}catch(e){}return r},
+          function(e){push(S.net,id+' '+m+' ERR '+u+' '+e);throw e})};
       var xo=XMLHttpRequest.prototype.open,xs=XMLHttpRequest.prototype.send;
       XMLHttpRequest.prototype.open=function(m,u){this.__q=[m,u];return xo.apply(this,arguments)};
-      XMLHttpRequest.prototype.send=function(){var x=this,t=performance.now();
-        x.addEventListener('loadend',function(){if(x.__q)push(S.net,x.__q[0]+' '+(x.status||'ERR')+' '+x.__q[1]+' '+Math.round(performance.now()-t)+'ms')});return xs.apply(this,arguments)};
+      XMLHttpRequest.prototype.send=function(){var x=this,t=performance.now(),id='n'+(++S.nn);
+        x.addEventListener('loadend',function(){if(!x.__q)return;push(S.net,id+' '+x.__q[0]+' '+(x.status||'ERR')+' '+x.__q[1]+' '+Math.round(performance.now()-t)+'ms');
+          try{if(x.responseType===''||x.responseType==='text')keep(id,x.getResponseHeader('content-type'),x.responseText)}catch(e){}});return xs.apply(this,arguments)};
       return true}
-    function logs(a){var fresh=hook(),net=a.kind==='network',arr=net?S.net:S.con,note='';
-      if(net&&!S.nseen){S.nseen=1;arr=performance.getEntriesByType('resource').map(function(e){return(e.initiatorType||'res')+' '+(e.responseStatus||'-')+' '+e.name+' '+Math.round(e.duration)+'ms'}).concat(S.net);note='(fetch/XHR status capture starts now; below: everything this page loaded so far)\n'}
+    var STATIC=/^(img|css|link|script|font|video|audio|image|icon)$/;
+    function logs(a){var fresh=hook(),net=a.kind==='network',kind=net?'net':'con',arr=net?S.net:S.con,note='';
+      if(net&&a.id){var b=BOD.get(a.id),l=S.net.find(function(x){return x.indexOf(a.id+' ')===0});
+        if(!l)return'no request '+a.id+' in the log';
+        return clip(l,300)+(b?'\n'+b.c+'\n'+b.b.slice(0,(a.limit||40)*100):'\n(no body kept: only text/JSON bodies of the last 50 requests)')}
+      var from=a.new&&S.cur[kind]!=null?arr.length-Math.min(arr.length,arr.t-S.cur[kind]):0;S.cur[kind]=arr.t||0;arr=arr.slice(from);
+      if(net&&!S.nseen){S.nseen=1;var hid=0,res=performance.getEntriesByType('resource').filter(function(e){if(!a.pattern&&STATIC.test(e.initiatorType)){hid++;return false}return true});
+        arr=res.map(function(e){return(e.initiatorType||'res')+' '+(e.responseStatus||'-')+' '+e.name+' '+Math.round(e.duration)+'ms'}).concat(arr);
+        note='(fetch/XHR capture starts now; below: what this page loaded so far'+(hid?', without '+hid+' images/scripts/styles (pass pattern to include them)':'')+')\n'}
       else if(fresh)note='(capture starts now; earlier console output is not available)\n';
+      if(!net&&a.level){var lv=a.level==='error'?/^(error|exception|rejection) /:/^(error|exception|rejection|warn) /;arr=arr.filter(function(l){return lv.test(l)})}
       if(a.pattern){var re;try{re=new RegExp(a.pattern,'i')}catch(e){}var p=a.pattern.toLowerCase();arr=arr.filter(function(l){return re?re.test(l):l.toLowerCase().indexOf(p)>=0})}
       var out=arr.slice(-(a.limit||30)).map(function(l){return clip(l,180)}).join('\n');
-      if(a.clear){S.con.length=0;S.net.length=0}
-      return note+(out||'(no entries)')}
+      if(a.clear){S.con.length=0;S.net.length=0;BOD.clear()}
+      return note+(out||(a.new?'(nothing new)':'(no entries)'))}
 
     function ser(v){if(v===undefined)return'undefined';if(v instanceof Element)return desc(v);if(typeof v==='function')return String(v).slice(0,200);
       try{var j=JSON.stringify(v,function(k,x){return x instanceof Element?desc(x):typeof x==='bigint'?String(x):x});return j===undefined?String(v):j}catch(e){return String(v)}}

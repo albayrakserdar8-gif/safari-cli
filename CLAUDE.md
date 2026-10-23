@@ -14,9 +14,11 @@ The README is written in Turkish and is the user-facing reference for setup, per
 swift build -c release          # the binary Claude Code runs: .build/release/safari-mcp
 Tests/smoke.sh                  # protocol test, needs no Safari permission
 Tests/smoke.sh .build/debug/safari-mcp
+Extension/build.sh              # regenerate main.js, build, sign and install the Safari extension (needs Xcode)
+(cd Tests && python3 -m http.server 8765 --bind 127.0.0.1)   # serve the test pages
 ```
 
-Only Command Line Tools are installed (no Xcode), so there is no XCTest target; `Tests/smoke.sh` is the only automated test and covers the JSON-RPC layer only. `Tests/fixture.html` is a local page (form, dialogs, delayed element, table, fetch) for manual checks through `tabs new` with its `file://` URL.
+The server is a SwiftPM package with no XCTest target; `Tests/smoke.sh` is the only automated test and covers the JSON-RPC layer only. Xcode is installed, but it is only needed for the extension. `Tests/fixture.html` (form, dialogs, delayed element, table, fetch, and an iframe loading `Tests/frame.html`) is for manual checks with `tabs new`. Open it as `http://127.0.0.1:8765/fixture.html`: the extension cannot reach `file://` pages, so a `file://` URL only tests the Apple Events path.
 
 The page script is a JS string inside Swift. Syntax-check it after editing:
 
@@ -42,7 +44,7 @@ Real-page behaviour can only be tested against the user's live Safari. Open your
 
 Two backends behind `protocol Browser` (`Browser.swift`): `ExtBrowser` (the extension, via `Bridge.swift`) and `Safari` (Apple Events). `Tools.safari` picks the extension whenever it is connected. Both take the same `TabRef` + `Expect` and check them in the same step that acts, so everything above them (tab tracking, waits, the page agent) is shared.
 
-Request path: `main.swift` (stdin read on a side thread, requests handled in order on the main thread, whose run loop must stay free when idle or macOS reports the process as "Not Responding") → `MCP.swift` (`Server`: JSON-RPC, lifecycle, tool errors as `isError`) → `Tools.swift` (the 8 tools and all tab/navigation logic) → `Safari.swift` (Apple Events) → `PageAgent.swift` (JS that runs inside the page).
+Request path: `main.swift` (stdin read on a side thread, requests handled in order on the main thread, whose run loop must stay free when idle or macOS reports the process as "Not Responding") → `MCP.swift` (`Server`: JSON-RPC, lifecycle, tool errors as `isError`) → `Tools.swift` (the 8 tools and all tab/navigation logic) → `Browser.swift` (`ExtBrowser` over `Bridge.swift` to the extension, or `Safari.swift` with Apple Events) → `PageAgent.swift` (JS that runs inside the page).
 
 ### Safari bridge (`Safari.swift`)
 
@@ -71,7 +73,7 @@ Safari only addresses tabs by `window id` + index, which shifts when tabs open, 
 
 ### Page agent (`PageAgent.swift`)
 
-Injected once per document (`window.__smcp`), then each call is one small Apple Event. It owns: the element scan behind `read` (modes `interactive`/`all`, `query` search), the markdown walker `md` behind `text` (with BM25 `rank` for `text`+`query`) and `links`, the ref map (`e12` → `WeakRef`), synthetic input for `act`, console/fetch/XHR hooks for `logs`, and result slots for async `js`.
+Injected once per document (`window.__smcp`), then each call is one small Apple Event or extension message. It owns: the element scan behind `read` (modes `interactive`/`all`, `query` search), the markdown walker `md` behind `text` (with BM25 `rank` for `text`+`query`) and `links`, the ref map (`e12` → `WeakRef`), synthetic input for `act`, console/fetch/XHR hooks for `logs`, and result slots for async `js`.
 
 - Every `__smcp.call` carries the tab's handle and is a no-op on mismatch.
 - `do JavaScript` does not await promises, so `js` starts the code, stores the result in a slot and polls `__smcp.take`.
@@ -80,7 +82,7 @@ Injected once per document (`window.__smcp`), then each call is one small Apple 
 - Clicks are dispatched to the innermost element under the target's centre (including through open shadow roots), as a real click would be.
 - Refs are per element (WeakMap), so an element keeps its ref across reads of one document. `diff` relies on this: `S.last` keeps the previous body per mode/root/query and lines are matched by ref, else by text.
 - `text` output ends each returned chunk with the URLs of the `[n]` links in that chunk; same-page fragment links get no number.
-- The agent replaces `alert`/`confirm`/`prompt` at injection: alert is acknowledged, confirm/prompt are dismissed unless `act dialog` set `S.dp`. Answered dialogs travel in the call envelope (`d`) and `Tools.call` appends them as `⚠ dialog` lines. Dialogs opened before injection, or from an iframe, are native: Apple Events time out after 20 s (`-1712`), the tab is put in `blocked`, and `act dialog` answers through Accessibility (`Capture.dialog`), selecting a background tab first because Safari only shows a dialog in the visible tab. While a native dialog is up, Safari's AX window list can be empty; use the focused window.
+- `mainSource` replaces `alert`/`confirm`/`prompt`; while the page is armed, alert is acknowledged and confirm/prompt are dismissed unless `act dialog` set the answer (`M.dp`, via `M.policy`). Answered dialogs travel in the call envelope (`d`) and `Tools.call` appends them as `⚠ dialog` lines; dialogs in child frames are posted to the top frame and marked `(frame)`. Dialogs the override does not catch (Apple Events mode before injection or in an iframe; extension mode during the first load of a site the agent has not touched) are native: Apple Events time out after 20 s (`-1712`), the tab is put in `blocked`, and `act dialog` answers through Accessibility (`Capture.dialog`), selecting a background tab first because Safari only shows a dialog in the visible tab. While a native dialog is up, Safari's AX window list can be empty; use the focused window.
 - Network lines carry ids (`n4`); text/JSON bodies of the last 50 fetch/XHR responses are kept for `logs id`.
 
 ### Extension bridge (`Bridge.swift`, `Extension/`)
@@ -112,5 +114,5 @@ Hosted at `github.com/sadopc/safari-mcp` (public), default branch `main`. `READM
 ## Design constraints
 
 - Token cost is a primary goal. Tool descriptions and schemas are sent every session (about 875 tokens total; `Tests/smoke.sh` prints the size and fails above 3600 chars). Tool results are terse single lines, `read` is capped by `max_chars` with an `offset` continuation, and screenshots are opt-in JPEGs. Keep additions equally short.
-- No dependencies and no Xcode-only APIs. Deployment target is macOS 14 (ScreenCaptureKit screenshot API).
+- The server has no dependencies and uses no Xcode-only APIs; it must keep building with Command Line Tools alone. Deployment target is macOS 14 (ScreenCaptureKit screenshot API) for the server and the extension app.
 - stdout carries only JSON-RPC messages, one per line; anything else goes to stderr.

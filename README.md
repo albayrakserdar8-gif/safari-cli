@@ -120,7 +120,7 @@ Kutular yalnızca sunucunun çalıştığı sekmelerde yanıtlanır; senin kendi
 
 Eklentisiz modda, betik yerleşmeden önce açılan kutular Safari'de yerel olarak görünür ve çağrılar 20 saniye sonra zaman aşımına uğrar. Bu durumda `act dialog` kutuyu Erişilebilirlik üzerinden yanıtlar; sekme arka plandaysa onu kısa süre öne alır, sonra önceki sekmeye döner.
 
-Sayfayı değiştiren çağrılar (`act`, `navigate`, yönlendiren `js`) yeni sayfanın yüklenmesini bekler ve sonucu `→ başlık | adres` olarak bildirir. Bir tıklama ya da tuş hiçbir şeyi değiştirmediyse sonuçta `(no change on the page yet)` yazar.
+Sayfayı değiştiren çağrılar (`act`, `navigate`, yönlendiren `js`) yeni sayfanın yüklenmesini bekler ve sonucu `→ başlık | adres` olarak bildirir. Bir tıklama ya da tuş hiçbir şeyi değiştirmediyse sonuçta `(no change on the page yet)` yazar. Sayfa yerinde değiştiyse yeni görünen satırlar `· new text: …` ile, bu sırada sunucunun reddettiği ya da başarısız olan istekler `· failed: n7 POST 400 /api/carts` ile eklenir. `act wait` aranan metin zaten sayfadaysa bunu `already present` diye söyler.
 
 ## Sekmeler
 
@@ -133,6 +133,8 @@ Sunucunun açtığı sekmeler arka planda açılır.
 ## Tıklama ve yazma
 
 Varsayılan yol sayfa içi olaylardır: Safari arka planda kalır, imleç sende kalır.
+
+Sayfa içi tuş olayları tarayıcının kendi davranışını tetiklemediği için, sayfa olayı kendisi işlemediyse sunucu alanlardaki düzenleme tuşlarını kendisi uygular: `cmd+a`, `Backspace`, `Delete`, ok tuşları, `Home`/`End` (`shift` ile seçim), tek karakter ve çok satırlı alanlarda `Enter`. Sonuç alanın yeni değerini gösterir. Hedefsiz tuşlar, son hedef alınan iframe'e gider. `type` metni her zaman sona ekler.
 
 `os: true` gerçek fare ve klavye olayı gönderir. Sayfa içi olayları yok sayan siteler ve üzerine gelince (CSS `:hover`) beliren denetimler için gerekir. Erişilebilirlik izni ister, Safari'yi öne getirir ve çalışırken imleci kullanır; tıklamadan sonra imleci eski yerine koyar, `hover` sonrasında öğenin üzerinde bırakır. Çağrı başına yaklaşık bir saniye sürer.
 
@@ -180,6 +182,15 @@ Markdown, `links`, `diff`, `wait`, `fill fields`, `upload`, iletişim kutuları 
 - Slot'a yerleşen shadow DOM metni `all` kipinde görünmüyordu.
 
 En zor 5 görev düzeltmelerden sonra Haiku ile tekrarlandı. İletişim kutuları, Angular formu, SPA geçişleri ve `select` doğrulaması doğru çalıştı. Diyalog/iframe görevi 49 yerine 30 çağrıda bitti. Diğer görevlerde çağrı sayısı pek düşmedi, çünkü ajanlar sonuçları `js` ile ayrıca doğruluyor. Bu turda bulunan bir odak hatası (sayfanın `mousedown` içinde odağı kendisinin taşıması, örneğin kaydırıcılar) da düzeltildi.
+
+Aynı görevler üçüncü kez, bu sefer eklenti modunda koşturuldu. Çağrı sayıları diyalog/iframe görevinde 49 → 30 → 21, the-internet'te 85 → 84 → 66, Toolshop'ta (kayıt, fiyat filtresi, sepet) 170 → 178 → 89 oldu. Bu turda bulunanlar da düzeltildi:
+- düzenleme tuşları (`cmd+a`, `Backspace`, `End`) alanlarda hiçbir şey yapmıyordu ve `type` düzenlenebilir alanlarda metni başa ekliyordu;
+- sunucunun reddettiği istekler (400) tıklama sonucunda görünmüyordu;
+- iframe'den açılan iletişim kutusu bir sonraki çağrıda bildiriliyordu;
+- `wait`, zaten sayfada olan metni yeni gelmiş gibi bildiriyordu;
+- diyalog cevabının biçimi (`answer:test`) yanlış anlaşılabiliyordu.
+
+Bu düzeltmeler `Tests/fixture.html` ve the-internet'in TinyMCE sayfasında elle sınandı.
 
 Eklenti yolu da sonradan eklendi ve elle sınandı:
 - Aynı test sayfası üzerinde, iframe'le birlikte, eklenti modunda sınandı.

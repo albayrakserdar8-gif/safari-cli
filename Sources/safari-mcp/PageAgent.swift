@@ -75,6 +75,10 @@ enum PageAgent {
     function el(e){return'<'+e.tagName.toLowerCase()+(e.id?'#'+e.id:'')+'> '+JSON.stringify(clip(e.innerText||e.textContent||e.value||'',50))}
     M.logs=logs;
     M.dlgTake=function(){return M.dlg.splice(0)};
+    // Requests that failed (4xx/5xx or no response) since the counter was n, for act results.
+    M.ncount=function(){return M.net?M.net.t||0:0};
+    M.fails=function(n){if(!M.net)return'';var k=Math.min(M.net.length,(M.net.t||0)-n);if(k<=0)return'';
+      return M.net.slice(-k).filter(function(l){var s=l.split(' ')[2];return s==='ERR'||+s>=400}).slice(-3).map(function(l){var p=l.split(' ');return p[0]+' '+p[1]+' '+p[2]+' '+clip(p[3].replace(/^https?:\/\/[^\/]+/,''),60)}).join(', ')};
     M.policy=function(p){arm(p)};
     // Page CSP may forbid compiling code here; the caller then runs it in its own world.
     M.run=function(id,code){var f;try{f=new Function('return(async function(){'+code+'\n})()')}catch(e){return e instanceof SyntaxError?'syntax: '+e.message:'csp'}
@@ -282,7 +286,7 @@ enum PageAgent {
         return{el:el,to:h&&inside(el,h)?h:el,x:x,y:y,r:r}}
       if(a.x!=null&&a.y!=null){el=deep(a.x,a.y);if(!el)throw new Error('nothing at '+a.x+','+a.y);return{el:el,to:el,x:a.x,y:a.y}}
       return null}
-    function need(a){var t=target(a);if(!t)throw new Error('pass ref or x,y');return t}
+    function need(a){var t=target(a);if(!t)throw new Error('pass ref, selector or x,y (find the element with read query:"…")'+(a.action==='click'&&a.text!=null?'; text on click only answers a dialog':''));return t}
     function mev(el,type,x,y,more){var P=type.indexOf('pointer')===0,C=P&&window.PointerEvent?PointerEvent:MouseEvent;
       var i={bubbles:!/enter|leave/.test(type),cancelable:true,composed:true,view:window,clientX:x,clientY:y,screenX:x+screenX,screenY:y+screenY,button:0,buttons:/down/.test(type)?1:0,detail:1};
       if(P){i.pointerId=1;i.pointerType='mouse';i.isPrimary=true}
@@ -319,11 +323,12 @@ enum PageAgent {
       foc(el);
       if(fill){if(inp)el.select();else getSelection().selectAllChildren(el)}
       else if(inp)try{el.setSelectionRange(el.value.length,el.value.length)}catch(e){}
+      else{var g=getSelection();g.selectAllChildren(el);g.collapseToEnd()}
       var before=inp?el.value:null,ok=false;
       try{ok=text?document.execCommand('insertText',false,text):(fill?document.execCommand('delete'):true)}catch(e){}
       if(inp){var want=fill?text:before+text;if(!ok||el.value!==want&&el.value===before)setv(el,want)}
       else if(!ok)el.textContent=(fill?'':el.textContent)+text;
-      return(fill?'filled ':'typed into ')+desc(el)+state(el)}
+      return(fill?'filled ':'typed into ')+desc(el)+(inp?state(el):' ='+JSON.stringify(clip(el.innerText,60)))}
     var KC={Enter:13,Tab:9,Escape:27,Backspace:8,Delete:46,' ':32,ArrowLeft:37,ArrowUp:38,ArrowRight:39,ArrowDown:40,Home:36,End:35,PageUp:33,PageDown:34};
     function key(a){var t=target(a),el=t?t.el:(document.activeElement||document.body);
       if(t)foc(el);
@@ -340,8 +345,36 @@ enum PageAgent {
       if(go&&k==='Tab'){var p0=document.activeElement,L=[].filter.call(document.querySelectorAll('a[href],button,input,select,textarea,[tabindex],[contenteditable]'),function(e){return e.tabIndex>=0&&!e.disabled&&(!e.checkVisibility||e.checkVisibility())});
         var j=L.indexOf(el),nx=L.length?L[(j+(i.shiftKey?-1:1)+L.length)%L.length]:null;
         if(nx){try{nx.focus({preventScroll:true})}catch(e){}fsync(p0);if(document.activeElement===nx)moved=' (focus: '+desc(nx)+')'}}
+      var ed=k==='Tab'?'':go?keydef(el,k,i):/^(Backspace|Delete|Enter)$|^.$/.test(k)&&(el.isContentEditable||el.tagName==='TEXTAREA'||el.tagName==='INPUT')?fval(el):'';if(ed)S.fx=1;
       el.dispatchEvent(new KeyboardEvent('keyup',i));
-      return'key '+a.key+(go?'':' (handled by page)')+moved}
+      return'key '+a.key+(go?'':' (handled by page)')+moved+ed}
+    function fval(el){var inp=el.tagName==='INPUT'||el.tagName==='TEXTAREA';return' ='+JSON.stringify(inp&&secret(el)?(el.value?'\u2022\u2022\u2022':''):clip(inp?el.value:el.innerText,60))}
+    // Default actions of editing keys in fields, which dispatched key events do not perform.
+    function keydef(el,k,i){var inp=el.tagName==='TEXTAREA'||el.tagName==='INPUT'&&!/^(checkbox|radio|file|range|color|submit|button|reset|image|hidden)$/i.test(el.type);
+      if(!inp&&!el.isContentEditable)return'';
+      var mod=i.metaKey||i.ctrlKey,sh=i.shiftKey,g=getSelection(),before=inp?el.value:el.innerHTML,ok=false;
+      function val(){return fval(el)}
+      if(!inp&&(!g.rangeCount||!inside(el,g.anchorNode))){g.selectAllChildren(el);g.collapseToEnd()}
+      if(mod&&!i.altKey&&/^a$/i.test(k)){if(inp)el.select();else g.selectAllChildren(el);return' (all selected)'}
+      if(mod||i.altKey){if(!/^(ArrowLeft|ArrowRight)$/.test(k))return''}
+      if(k==='Backspace'||k==='Delete'){try{ok=document.execCommand(k==='Backspace'?'delete':'forwardDelete')}catch(e){}
+        if(inp&&el.value===before){var s=el.selectionStart,e=el.selectionEnd;if(s==null)s=e=el.value.length;
+          if(s===e){if(k==='Backspace')s=Math.max(0,s-1);else e=Math.min(el.value.length,e+1)}
+          if(s!==e){setv(el,el.value.slice(0,s)+el.value.slice(e));try{el.setSelectionRange(s,s)}catch(x){}}}
+        return val()}
+      if(/^(ArrowLeft|ArrowRight|Home|End)$/.test(k)){var back=k==='ArrowLeft'||k==='Home',line=k==='Home'||k==='End'||i.metaKey;
+        if(!inp){try{g.modify(sh?'extend':'move',back?'backward':'forward',line?'lineboundary':i.altKey?'word':'character')}catch(e){}return''}
+        var L=el.value.length,s=el.selectionStart,e=el.selectionEnd;if(s==null)return'';
+        var bw=el.selectionDirection==='backward',f=sh?(bw?s:e):(back?s:e),an=sh?(bw?e:s):null;
+        if(sh||s===e||line)f=line?(back?0:L):Math.max(0,Math.min(L,f+(back?-1:1)));
+        try{if(sh)el.setSelectionRange(Math.min(an,f),Math.max(an,f),f<an?'backward':'forward');else el.setSelectionRange(f,f)}catch(x){}
+        return' (caret '+el.selectionStart+(el.selectionEnd!==el.selectionStart?'-'+el.selectionEnd:'')+'/'+L+')'}
+      if(k==='Enter'){if(el.tagName==='INPUT')return'';try{ok=document.execCommand(inp?'insertText':'insertParagraph',false,'\n')}catch(e){}
+        if(inp&&!ok)setv(el,el.value+'\n');return val()}
+      if(k.length===1){try{ok=document.execCommand('insertText',false,k)}catch(e){}
+        if(inp&&el.value===before){var s=el.selectionStart==null?el.value.length:el.selectionStart,e=el.selectionEnd==null?s:el.selectionEnd;setv(el,el.value.slice(0,s)+k+el.value.slice(e));try{el.setSelectionRange(s+1,s+1)}catch(x){}}
+        return val()}
+      return''}
     function pick(a){var el=need(a).el,want=String(a.text==null?'':a.text);
       if(el.tagName!=='SELECT')throw new Error(desc(el)+' is not a <select>; click it instead');
       var os=[].slice.call(el.options),o=os.find(function(o){return o.value===want||o.text.trim()===want})||os.find(function(o){return o.text.toLowerCase().indexOf(want.toLowerCase())>=0});
@@ -377,12 +410,13 @@ enum PageAgent {
       return!!el&&(!el.checkVisibility||el.checkVisibility({visibilityProperty:true,checkVisibilityCSS:true}))}
     // Visible text lines before a click or key, to report what appeared after it (delta).
     function lines(){return(document.body&&document.body.innerText||'').split('\n').map(function(l){return l.trim()})}
-    function delta(){var t0=S.t0,out=[];S.t0=null;if(!t0)return'';
+    function delta(){var t0=S.t0,out=[],f='';S.t0=null;if(!t0)return{t:'',f:''};
       lines().forEach(function(l){if(out.length<3&&l.length>1&&!t0.has(l)&&out.indexOf(l)<0)out.push(l)});
-      return out.map(function(l){return JSON.stringify(clip(l,100))}).join(' / ')}
-    function act(a){S.note='';var r=act1(a);return r+S.note}
+      if(S.n0!=null)try{f=mcall('fails',[S.n0])}catch(e){}S.n0=null;
+      return{t:out.map(function(l){return JSON.stringify(clip(l,100))}).join(' / '),f:f}}
+    function act(a){S.note='';if(a.text!=null&&(a.action==='dialog'||a.action==='click'))a.text=String(a.text).replace(/^answer\s*[:=]?\s*/i,'');var r=act1(a);return r+S.note}
     function act1(a){var t;S.fx=1;
-      if(a.action==='click'||a.action==='dblclick'||a.action==='key'){watch();S.t0=new Set(lines())}
+      if(a.action==='click'||a.action==='dblclick'||a.action==='key'){watch();S.t0=new Set(lines());S.n0=null;try{S.n0=mcall('ncount')}catch(e){}}
       switch(a.action){
         case'click':t=need(a);if(a.text!=null)try{mcall('policy',[String(a.text)])}catch(e){}if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.to.tagName)||t.to.isContentEditable)S.fx=1;press(t);return'clicked '+desc(t.el);
         case'dblclick':t=need(a);press(t);press(t,{detail:2});mev(t.to,'dblclick',t.x,t.y,{detail:2});return'double-clicked '+desc(t.el);

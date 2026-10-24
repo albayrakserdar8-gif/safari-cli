@@ -17,7 +17,7 @@ final class Tools {
             "diff": ["type": "boolean", "description": "only changes since the last read"],
             "max_chars": int, "offset": int, "tab": str,
         ]),
-        tool("act", "Act on an element by ref (from read), selector or x,y viewport px. text: for type/fill/select, file paths for upload, accept/dismiss/answer for the next dialog (dialog, or the click that opens it; default dismiss). key: Enter, cmd+a. dy: scroll px. fields {ref: value} fills many. wait: until text/ref/selector appears (gone: disappears).", [
+        tool("act", "Act on an element by ref (from read), selector or x,y viewport px. text: for type/fill/select, file paths for upload, accept, dismiss or a prompt reply for the next dialog (dialog, or the click that opens it; default dismiss). key: Enter, cmd+a. dy: scroll px. fields {ref: value} fills many. wait: until text/ref/selector appears (gone: disappears).", [
             "action": ["type": "string", "enum": ["click", "dblclick", "hover", "type", "fill", "select", "key", "scroll", "wait", "upload", "dialog"]],
             "ref": str, "x": num, "y": num, "text": str, "key": str, "dy": num,
             "fields": ["type": "object"], "selector": str, "gone": ["type": "boolean"], "timeout": ["type": "number", "description": "seconds"],
@@ -87,6 +87,7 @@ final class Tools {
     private func switched(toExtension e: Bool) {
         log(e ? "using the Safari extension" : "extension not connected; using Apple Events")
         frameIDs = [:]  // frame ids mean different things in the two backends
+        focusFrame = [:]
         let list = (try? (e ? ext : apple as Browser).listTabs()) ?? []
         var fresh: [Int: Tab] = [:]
         for t in tabs.values where tabs.values.filter({ $0.url == t.url }).count == 1 {
@@ -439,6 +440,8 @@ final class Tools {
     /// keys of `fields`) so the frame's own agent understands it, and returns the frame.
     /// Safari's frame ids are long; the model sees f1, f2… per tab instead.
     private var frameIDs: [Int: [Int]] = [:]
+    /// Per tab, the frame the last targeted act went to: focus is there, so keys without a target follow it.
+    private var focusFrame: [Int: Int] = [:]
 
     private func frameOf(_ o: inout [String: Any], _ tab: Int) throws -> Int {
         func split(_ r: String) -> (Int, String)? {
@@ -740,7 +743,15 @@ final class Tools {
             var o = pick(a, ["action", "ref", "x", "y", "text", "key", "dy", "fields", "selector"])
             o["op"] = "act"
             frame = try frameOf(&o, id)
-            env = try inFrame(frame) { try agentCall(id, o) }
+            let targeted = o["ref"] != nil || o["selector"] != nil || o["x"] != nil || o["fields"] != nil
+            if targeted { focusFrame[id] = frame }
+            if !targeted, action == "key" || action == "type", let f = focusFrame[id], f != 0,
+               let e = try? inFrame(f, { try agentCall(id, o) }) {
+                frame = f
+                env = e
+            } else {
+                env = try inFrame(frame) { try agentCall(id, o) }
+            }
             result = env["v"] as? String ?? "ok"
             if frame != 0, let alias = frameIDs[id]?.firstIndex(of: frame).map({ "f\($0 + 1)" }) {
                 // Report frame refs as the model knows them, and judge page changes by the top document.
@@ -757,11 +768,16 @@ final class Tools {
                          wasReady: env["r"] as? String == "complete", twice: twice)
         // Same page, changed in place (a form result, a message): show the new lines, so the
         // model does not need another read to see what happened.
+        var extra = ""
         if twice, !out.contains(" → "), a["os"] as? Bool != true,
-           let d = try? inFrame(frame, { try agentCall(id, ["op": "delta"])["v"] as? String }), !d.isEmpty {
-            return out + " · new text: " + d
+           let d = try? inFrame(frame, { try agentCall(id, ["op": "delta"])["v"] as? [String: Any] }) {
+            if let t = d["t"] as? String, !t.isEmpty { extra += " · new text: " + t }
+            // Requests the page sent meanwhile that the server refused or that failed.
+            if let f = d["f"] as? String, !f.isEmpty { extra += " · failed: " + f }
         }
-        return out
+        // A dialog in a frame reaches the top document by postMessage, after the frame call returned.
+        if frame != 0 { _ = try? agentCall(id, ["op": "nop"]) }
+        return out + extra
     }
 
     /// Answers a dialog Safari shows natively, via Accessibility. Only tried when the tab's last
@@ -804,10 +820,13 @@ final class Tools {
         limit = min(max(limit, 0.5), 30)
         let what = (a["text"] as? String).map { "text " + jsonString($0) } ?? (a["ref"] as? String ?? (a["selector"] as? String).map { "selector " + $0 } ?? "")
         let start = Date()
+        var first = true
         while true {
             if let env = try? inFrame(frame, { try agentCall(id, o) }), let v = env["v"] as? Bool, v != gone {
+                if first && !gone { return "\(what) already present (it may be from before; wait for something new)" }
                 return "\(what) \(gone ? "gone" : "present") after \(String(format: "%.1f", Date().timeIntervalSince(start)))s"
             }
+            first = false
             if Date().timeIntervalSince(start) > limit {
                 throw ToolError("timed out after \(String(format: "%g", limit))s waiting for \(what) to \(gone ? "disappear" : "appear")")
             }

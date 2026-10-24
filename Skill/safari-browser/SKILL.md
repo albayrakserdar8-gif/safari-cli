@@ -35,19 +35,20 @@ The `mcp__safari__*` tools act in the user's real Safari, with their logins, whi
 
 ## Acting
 
-- `act action:"click" ref:"e12"` (or `selector:"#submit"` instead of a ref; `(1 of N matches)` means it took the first). The result ends with `→ title | url` when the page or its address changed (the wait is already done), `· new text: "…"` with lines that appeared in place (form results, messages), or `(no change on the page yet)` when nothing reacted.
+- `act action:"click" ref:"e12"` (or `selector:"#submit"` instead of a ref; `(1 of N matches)` means it took the first). The result ends with `→ title | url` when the page or its address changed (the wait is already done), `· new text: "…"` with lines that appeared in place (form results, messages), `· failed: n7 POST 400 /api/…` for requests the server refused meanwhile (read the body with `logs id`), or `(no change on the page yet)` when nothing reacted.
 - If nothing reacted: `act action:"wait"` for what you expect, then `read diff:true`. If the page still ignores you, repeat with `os:true` (real mouse/keyboard; needs Accessibility; brings Safari forward). CSS `:hover` menus also need `os:true`.
 - Forms in one call: `act action:"fill" fields:{"e4":"Ada","e5":"Large","e6":true}` (text, `<select>` options by text or value, `true`/`false` for checkboxes and radios). Single field: `fill` (replace) or `type` (append) with `ref` and `text`. Results show the value the field now holds (`="Ada"`). Some forms validate a field only when you leave it; the next click does that.
-- `act action:"key" key:"Enter"` (or `cmd+a`, `Escape`, `Tab`). Enter in a field submits its form.
+- `act action:"key" key:"Enter"` (or `cmd+a`, `Escape`, `Tab`). Enter in a field submits its form. Editing keys work in fields and rich-text editors: `cmd+a` then `Backspace` clears, `Home`/`End`/arrows move the caret (`shift+` selects); the result shows the field's value. A key without `ref` goes to the field you last acted on, inside its iframe too. `type` always appends at the end.
 - `act action:"select" ref text` for one `<select>`. If the page refuses the option, the result says which one it kept.
 - To edit a list item that opens on double-click (todo lists), `dblclick` its text, not its checkbox: find it with `read query:"<item text>"`.
-- Waiting: `act action:"wait" text:"Order placed"` (or `ref`/`selector`, `gone:true` to wait for disappearance, `timeout` in seconds, ≤ 30). Prefer this to sleeping or re-reading in a loop. Wait for something on the page you will be on: a click that navigates replaces the old page and its messages.
+- Waiting: `act action:"wait" text:"Order placed"` (or `ref`/`selector`, `gone:true` to wait for disappearance, `timeout` in seconds, ≤ 30). Prefer this to sleeping or re-reading in a loop. Wait for something on the page you will be on: a click that navigates replaces the old page and its messages. `already present` means the text was there before you waited; wait for something that only the new state has.
 - Upload: `act action:"upload" ref:<file input> text:"/abs/path/a.pdf,/abs/path/b.png"` (≤ 10 MB total).
 
 ## Dialogs (alert / confirm / prompt)
 
 - They are answered automatically in tabs you work in. `alert` is acknowledged; `confirm` and `prompt` are **dismissed** by default. Each answer is reported as a `⚠ dialog …` line.
-- To accept: pass `text:"accept"` (or the prompt's answer) on the click that opens it, or call `act action:"dialog" text:"accept"` before that click. Accept only when the user wants that action.
+- `text` on a click only answers a dialog; it does not find the element (use `ref` or `selector`).
+- To accept: pass `text:"accept"` (or the prompt's reply itself, e.g. `text:"Ada"`) on the click that opens it, or call `act action:"dialog" text:"accept"` before that click. Accept only when the user wants that action.
 - "Safari did not answer in time; the page may be showing a dialog": a native dialog is up. Answer it with `act action:"dialog" text:"dismiss"` (or `"accept"`).
 
 ## JavaScript, logs, batching

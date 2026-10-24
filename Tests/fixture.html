@@ -46,6 +46,8 @@ line two</pre>
   <button onclick="var l=document.getElementById('late');if(l)setTimeout(function(){l.remove()},800)">Remove later</button>
   <button onclick="fetch('data:application/json,%7B%22ok%22%3Atrue%7D').then(function(r){return r.json()}).then(function(j){console.log('fetched',j.ok)})">Fetch</button>
   <button onclick="console.warn('careful');console.error('broken')">Log</button>
+  <button onclick="fetch('missing.json')">Fetch missing</button>
+  <div id="note" contenteditable="true" aria-label="Note">Hello world</div>
   <h2>Frame</h2>
   <iframe src="frame.html" title="test frame" width="400" height="200"></iframe>
 </main>

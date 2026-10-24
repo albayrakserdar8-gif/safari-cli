@@ -9,7 +9,7 @@ The `mcp__safari__*` tools act in the user's real Safari, with their logins, whi
 
 ## Ground rules
 
-- **Work in your own tab.** Start with `tabs action:"new" url:...` (opens in the background) and pass its id as `tab` on every call, `batch` included. Without `tab` a call goes to the last tab anyone used: when several agents share the server, that can be another agent's tab. Act in a tab the user already has open only when they ask you to.
+- **Work in your own tab.** Start with `tabs action:"new" url:...` (opens in the background) and pass its id as `tab` on every call, `batch` included. Without `tab` a call goes to the last tab anyone used, which can be another agent's tab when several agents share the server; once more than one tab opened with `tabs new` is open, calls without `tab` are refused. Act in a tab the user already has open only when they ask you to.
 - **Close what you opened** with `tabs action:"close" tab:...` when done. Never close, navigate or type in the user's tabs on your own initiative.
 - **Ask before anything with consequences:** submitting or sending forms, posting, buying, deleting, changing account settings, accepting a confirm dialog that does any of these.
 - Tab ids (`t3`) stay valid while the tab is open. If a call says a tab is gone, run `tabs` for current ids; do not guess.
@@ -31,11 +31,11 @@ The `mcp__safari__*` tools act in the user's real Safari, with their logins, whi
 - Long output ends with `… N more chars; offset=K`; continue with `offset:K` only if you need it. Lower `max_chars` for a quick look.
 - Scope a read with `ref` or `selector` to one part of the page.
 - Refs belong to the current page. After a navigation, or on a "stale" error, `read` again. Never reuse refs from another page or session.
-- With the Safari extension, `read` adds `--- frame f1 <url>` blocks for iframes. Their refs look like `f1e5` and work everywhere a ref does. Without it, `read` says `(N iframes not read …)`: frame content is out of reach, so do not try clicks or `js` into it.
+- `read` adds `--- frame f1 <url>` blocks for iframes. Their refs look like `f1e5` and work everywhere a ref does (fill a rich-text editor's `body` ref too). Without the extension only same-origin frames that allow scripts are read; `(N iframes not read …)` names the rest, which are out of reach, so do not try clicks or `js` into them.
 
 ## Acting
 
-- `act action:"click" ref:"e12"` (or `selector:"#submit"` instead of a ref). The result ends with `→ title | url` when the page or its address changed (the wait is already done), `· new text: "…"` with lines that appeared in place (form results, messages), or `(no change on the page yet)` when nothing reacted.
+- `act action:"click" ref:"e12"` (or `selector:"#submit"` instead of a ref; `(1 of N matches)` means it took the first). The result ends with `→ title | url` when the page or its address changed (the wait is already done), `· new text: "…"` with lines that appeared in place (form results, messages), or `(no change on the page yet)` when nothing reacted.
 - If nothing reacted: `act action:"wait"` for what you expect, then `read diff:true`. If the page still ignores you, repeat with `os:true` (real mouse/keyboard; needs Accessibility; brings Safari forward). CSS `:hover` menus also need `os:true`.
 - Forms in one call: `act action:"fill" fields:{"e4":"Ada","e5":"Large","e6":true}` (text, `<select>` options by text or value, `true`/`false` for checkboxes and radios). Single field: `fill` (replace) or `type` (append) with `ref` and `text`. Results show the value the field now holds (`="Ada"`). Some forms validate a field only when you leave it; the next click does that.
 - `act action:"key" key:"Enter"` (or `cmd+a`, `Escape`, `Tab`). Enter in a field submits its form.

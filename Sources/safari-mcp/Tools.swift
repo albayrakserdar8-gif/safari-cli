@@ -86,6 +86,7 @@ final class Tools {
     /// URL is unique on both sides; the rest get new ids at the next sync.
     private func switched(toExtension e: Bool) {
         log(e ? "using the Safari extension" : "extension not connected; using Apple Events")
+        frameIDs = [:]  // frame ids mean different things in the two backends
         let list = (try? (e ? ext : apple as Browser).listTabs()) ?? []
         var fresh: [Int: Tab] = [:]
         for t in tabs.values where tabs.values.filter({ $0.url == t.url }).count == 1 {
@@ -114,6 +115,9 @@ final class Tools {
     /// Set once the default tab went away; from then on calls must name a tab rather than
     /// fall back to whatever the user happens to be looking at.
     private var defaultLost = false
+    /// Tabs opened with tabs new. Several agents can share this server; once more than one
+    /// of these is open, "the last tab used" may be another agent's, so calls must name a tab.
+    private var opened = Set<Int>()
     private let session = String(UInt32.random(in: 0...UInt32.max), radix: 36)
     private var seq = 0
     /// URL the last successful `exec` verified before it ran.
@@ -290,6 +294,10 @@ final class Tools {
             defaultLost = false
             return id
         }
+        opened = opened.filter { tabs[$0] != nil }
+        if opened.count > 1 {
+            throw ToolError("Several tabs opened here are open (\(opened.sorted().map { "t\($0)" }.joined(separator: ", "))); pass tab.")
+        }
         if let c = current {
             guard tabs[c] != nil else { throw gone(c) }
             return c
@@ -344,14 +352,25 @@ final class Tools {
     /// Runs `body(handle)` inside the page with the agent present and the handle verified.
     /// `body` is JS statements that return a JSON envelope string.
     private func agent(_ id: Int, _ body: (String) -> String) throws -> [String: Any] {
+        // Without the extension, a frame (aeFrame) is reached from the top document: the code
+        // runs through the frame window's own Function, so it sees that frame's globals.
+        func run(_ expr: String) throws -> String {
+            guard aeFrame != 0 else { return try exec(id, expr) }
+            let r = try exec(id, frameJS(aeFrame, "return " + expr))
+            if r == Tools.noFrame { throw ToolError("This frame cannot be reached without the Safari MCP extension (cross-origin, or the page blocks scripts).") }
+            return r
+        }
         for _ in 0..<4 {
             let h = tabs[id]?.handle
-            let r = try exec(id, "(function(){if(!window.__smcp)return '\(PageAgent.absent)';\(body(h ?? ""))})()")
+            let r = try run("(function(){if(!window.__smcp)return '\(PageAgent.absent)';\(body(h ?? ""))})()")
             if r == PageAgent.absent {
                 let nh = h ?? nextID("h")
                 // With the extension, the main-world part is already in the page as main.js.
                 let src = safari.isExtension ? PageAgent.source : PageAgent.mainSource + ";" + PageAgent.source
-                guard try exec(id, src + ";__smcp.h=\(jsonString(nh));'ok'") == "ok" else {
+                let installed = aeFrame == 0
+                    ? try exec(id, src + ";__smcp.h=\(jsonString(nh));'ok'")
+                    : try exec(id, frameJS(aeFrame, src + ";__smcp.h=\(jsonString(nh));return 'ok'"))
+                guard installed == "ok" else {
                     throw ToolError("Could not run script in this tab (still loading, showing a dialog, or not a web page).")
                 }
                 tabs[id]?.handle = nh
@@ -374,7 +393,7 @@ final class Tools {
                 } else {
                     // Agent left by an earlier session: adopt it.
                     let nh = h ?? nextID("h")
-                    _ = try exec(id, "__smcp.h=\(jsonString(nh));'ok'")
+                    _ = try run("(__smcp.h=\(jsonString(nh)),'ok')")
                     tabs[id]?.handle = nh
                 }
                 continue
@@ -408,10 +427,9 @@ final class Tools {
         let id = try resolve(a)
         var o = pick(a, keys)
         o["op"] = op
-        if op == "read", !safari.isExtension { o["nf"] = 1 }  // agent notes iframes it cannot read
         let frame = try frameOf(&o, id)
         var v = try inFrame(frame) { try agentCall(id, o)["v"] as? String ?? "" }
-        if op == "read", frame == 0, a["ref"] == nil, a["selector"] == nil, safari.isExtension { v += frameBlocks(id, o) }
+        if op == "read", frame == 0, a["ref"] == nil, a["selector"] == nil { v += frameBlocks(id, o) }
         return v
     }
 
@@ -440,26 +458,62 @@ final class Tools {
             o["fields"] = out
         }
         if frame == 0 { return 0 }
-        if !safari.isExtension { throw ToolError("Frame refs (f2e5) need the Safari MCP extension.") }
         guard let list = frameIDs[tab], frame >= 1, frame <= list.count else { throw ToolError("frame f\(frame) is unknown; call read again") }
         return list[frame - 1]
     }
 
     private func inFrame<T>(_ f: Int, _ body: () throws -> T) rethrows -> T {
         guard f != 0 else { return try body() }
-        ext.frame = f
-        defer { ext.frame = 0 }
+        if safari.isExtension {
+            ext.frame = f
+            defer { ext.frame = 0 }
+            return try body()
+        }
+        aeFrame = f
+        defer { aeFrame = 0 }
         return try body()
+    }
+
+    /// Apple Events only: the frame calls go to, as its 1-based index among the top
+    /// document's iframes. Only same-origin frames whose CSP allows Function can be reached.
+    private var aeFrame = 0
+    static let noFrame = "__smcp_noframe__"
+
+    /// JS for the top document that runs `body` (a function body) inside frame `i`.
+    private func frameJS(_ i: Int, _ body: String) -> String {
+        "(function(){var F=document.querySelectorAll('iframe,frame')[\(i - 1)],W=null;try{W=F&&F.contentWindow;if(W&&!W.document)W=null}catch(e){W=null}"
+            + "if(!W)return '\(Tools.noFrame)';try{return String(W.Function(\(jsonString(body)))())}catch(e){return '\(Tools.noFrame)'}})()"
+    }
+
+    /// Apple Events only: the top document's visible iframes, with whether we can script them.
+    private func aeFrames(_ id: Int) -> [(id: Int, url: String, ok: Bool)] {
+        let js = "JSON.stringify([].map.call(document.querySelectorAll('iframe,frame'),function(f,i){var r=f.getBoundingClientRect(),u='',ok=0;"
+            + "try{u=f.contentWindow.location.href;f.contentWindow.Function('');ok=1}catch(e){u=u||f.src||''}return[i+1,u,ok,r.width>20&&r.height>20?1:0]}))"
+        guard let r = try? exec(id, js), let list = (try? JSONSerialization.jsonObject(with: Data(r.utf8))) as? [[Any]] else { return [] }
+        return list.compactMap { x in
+            guard x.count == 4, let i = x[0] as? Int, let u = x[1] as? String, (x[3] as? Int) == 1 else { return nil }
+            return (i, u, (x[2] as? Int) == 1)
+        }
     }
 
     /// The same read in each child frame, as `--- frame f12 <url>` blocks with frame refs.
     private func frameBlocks(_ id: Int, _ o: [String: Any]) -> String {
-        guard let t = tabs[id], let frames = try? ext.frames(t.pos, expect(t)), !frames.isEmpty else { return "" }
+        guard let t = tabs[id] else { return "" }
+        var frames: [(id: Int, url: String)]
+        var unread = 0
+        if safari.isExtension {
+            guard let list = try? ext.frames(t.pos, expect(t)) else { return "" }
+            frames = list.filter { $0.url.hasPrefix("http") || $0.url.hasPrefix("file") }
+        } else {
+            let all = aeFrames(id)
+            frames = all.filter(\.ok).map { ($0.id, $0.url) }
+            unread = all.count - frames.count
+        }
         var fo = o
         fo["max_chars"] = min((o["max_chars"] as? Int ?? 6000) / 2, 3000)
         var out = ""
-        for f in frames.prefix(8) where f.url.hasPrefix("http") || f.url.hasPrefix("file") {
-            guard let body = try? inFrame(f.id, { try agentCall(id, fo)["v"] as? String }) else { continue }
+        for f in frames.prefix(8) {
+            guard let body = try? inFrame(f.id, { try agentCall(id, fo)["v"] as? String }) else { unread += 1; continue }
             var list = frameIDs[id] ?? []
             if !list.contains(f.id) { list.append(f.id); frameIDs[id] = list }
             let alias = list.firstIndex(of: f.id)! + 1
@@ -475,6 +529,7 @@ final class Tools {
             }
             out += "\n--- frame \(pre) \(clip(f.url, 120))\n" + fixed.joined(separator: "\n")
         }
+        if unread > 0 { out += "\n(\(unread) iframe\(unread > 1 ? "s" : "") not read: cross-origin or the page blocks scripts; needs the Safari MCP extension)" }
         return out
     }
 
@@ -527,6 +582,9 @@ final class Tools {
         var stuck = false
         var inPage = false
         var last: PageState?
+        // A loaded page is accepted only once it is still there, at the same address, a moment
+        // later: some pages redirect again by script right after loading.
+        var settled: String?
         while true {
             let t = Date().timeIntervalSince(start)
             guard tabs[id] != nil else { return ("lost track of the tab while it was loading; run tabs", false) }
@@ -539,7 +597,13 @@ final class Tools {
                 } else if s.ready != "leaving" {
                     if marked || s.url != from { moved = true }
                     // Accept "interactive" after a few seconds: some pages never finish loading.
-                    if (s.ready == "complete" && (moved || t > grace)) || (s.ready == "interactive" && moved && t > 4) { break }
+                    if (s.ready == "complete" && (moved || t > grace)) || (s.ready == "interactive" && moved && t > 4) {
+                        if settled == s.url || t > timeout { break }
+                        settled = s.url
+                        usleep(250_000)
+                        continue
+                    }
+                    settled = nil
                 }
             } else {
                 moved = true
@@ -586,6 +650,7 @@ final class Tools {
             guard let id = (tabs.values.first { pos.xid != nil && $0.xid == pos.xid } ?? tabs.values.first { $0.pos == pos.ref })?.id else { throw ToolError("Opened a tab but lost track of it; run tabs.") }
             current = id
             defaultLost = false
+            opened.insert(id)
             return "opened t\(id)" + (url.isEmpty ? "" : ": " + waitLoad(id, marked: false, from: "about:blank", timeout: 15, grace: 8).text)
         case "close":
             guard a["tab"] != nil else { throw ToolError("close needs an explicit tab id.") }

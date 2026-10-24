@@ -59,11 +59,11 @@ Safari only addresses tabs by `window id` + index, which shifts when tabs open, 
 - `sync()` re-lists tabs and carries ids over by aligning the old and new URL sequence per window (LCS). Unmatched tabs we have worked in are found by a handle stored in the page agent (`__smcp.h`); otherwise they are dropped and the model gets a "gone" error.
 - `exec` runs checked JS (count + URL), `poll` runs it with the URL check off for use while a navigation is in flight, and both keep the tracked URL fresh. `guardedOp` is the same retry-after-`sync` loop for non-JS operations.
 - A same-position URL change is trusted only within one host for tabs carrying a handle. This strictness is deliberate: losing an id costs the model one `tabs` call, adopting the wrong tab acts on the user's page.
-- The default tab is the last one used. Once it is closed, `defaultLost` makes calls without `tab` fail instead of falling back to the user's visible tab.
+- The default tab is the last one used. Once it is closed, `defaultLost` makes calls without `tab` fail instead of falling back to the user's visible tab. Subagents share one server, so once more than one tab from `tabs new` (`opened`) is open, calls without `tab` fail too.
 
 ### Navigation waits
 
-`waitLoad` decides when a page change is done. Signals, in order of reliability:
+`waitLoad` decides when a page change is done; a loaded page is accepted only if it is still at the same address about 250 ms later (script redirects). Signals, in order of reliability:
 
 - a marker (`window.__smcpOld = <mark>`) set on the document being left; `mark` is bumped after every wait so a marked page restored from the back-forward cache is not taken for the old one;
 - Safari's tab URL versus `location.href`: they differ while a navigation is pending but not committed (`PageState.pending`);
@@ -82,7 +82,7 @@ Injected once per document (`window.__smcp`), then each call is one small Apple 
 - Clicks are dispatched to the innermost element under the target's centre (including through open shadow roots), as a real click would be.
 - Safari's window is usually not key while the server works, so `focus()` moves focus without firing `focus`/`blur`. `foc()` sends those events itself (only when `!document.hasFocus()`); forms that commit on blur (Angular) depend on it.
 - The call envelope carries `u0`, the address before the call; `act` settles against it, so a `history.pushState` route change is reported as `→ title | url`. After a click or key with no navigation, `act` asks the agent for `delta` (up to 3 new visible text lines) and appends `· new text:`.
-- `read` ends with notes for what it left out: `(+N controls off-screen …)` and, without the extension (`nf`), `(N iframes not read …)`.
+- `read` ends with notes for what it left out: `(+N controls off-screen …)`, and `(N iframes not read …)` for frames neither backend could script.
 - Refs are per element (WeakMap), so an element keeps its ref across reads of one document. `diff` relies on this: `S.last` keeps the previous body per mode/root/query and lines are matched by ref, else by text.
 - `text` output ends each returned chunk with the URLs of the `[n]` links in that chunk; same-page fragment links get no number.
 - `mainSource` replaces `alert`/`confirm`/`prompt`; while the page is armed, alert is acknowledged and confirm/prompt are dismissed unless `act dialog` set the answer (`M.dp`, via `M.policy`). Answered dialogs travel in the call envelope (`d`) and `Tools.call` appends them as `⚠ dialog` lines; dialogs in child frames are posted to the top frame and marked `(frame)`. Dialogs the override does not catch (Apple Events mode before injection or in an iframe; extension mode during the first load of a site the agent has not touched) are native: Apple Events time out after 20 s (`-1712`), the tab is put in `blocked`, and `act dialog` answers through Accessibility (`Capture.dialog`), selecting a background tab first because Safari only shows a dialog in the visible tab. While a native dialog is up, Safari's AX window list can be empty; use the focused window.
@@ -95,7 +95,7 @@ Injected once per document (`window.__smcp`), then each call is one small Apple 
 - Safari can run two copies of the extension for a while after an update, each with its own tab and window ids. All authenticated connections are kept, requests go to the oldest, and `generation` changes when that one drops, so `Tools` re-matches its tabs (same path as switching backends).
 - Ops mirror the Apple Events handlers (`tabs`, `run`, `seturl`, `close`, `select`, `raise`, `newtab`) plus `status` and `reqs` (webRequest), `frames` (webNavigation), `win` and `shot` (captureVisibleTab). Reply fields must not be named `id`: that is the request id.
 - In extension mode tabs carry `xid` (Safari's tab id) and `sync` matches by it before the URL alignment.
-- `read` appends `--- frame fN <url>` blocks for child frames (`frameBlocks`). Frame refs are `fNeM`; `frameOf` strips them and routes the call through `ext.frame`.
+- `read` appends `--- frame fN <url>` blocks for child frames (`frameBlocks`). Frame refs are `fNeM`; `frameOf` strips them and `inFrame` routes the call: through `ext.frame` with the extension, or through `aeFrame` with Apple Events, where `agent()` wraps its code in `frameJS` to run in the frame window's own `Function` (same-origin frames whose CSP allows it; others return `Tools.noFrame`). `frameIDs` is reset when the backend switches.
 - `main.js` is generated from `PageAgent.mainSource` by `Extension/gen.sh`; never edit it directly. `Extension/build.sh` regenerates it, builds with automatic signing for the team in the project, and installs to `~/Applications`. `--schedule` adds a weekly launchd job (`com.sadopc.safari-mcp.resign`) because free-account signatures expire.
 - Safari does not let extensions into `file://` pages; serve test pages over HTTP (`python3 -m http.server` in `Tests/`).
 - Test the Apple Events fallback without disabling the extension by holding ports 47391–47399 with plain sockets: the server then logs that the bridge is disabled.

@@ -266,15 +266,14 @@ enum PageAgent {
       if(md0){var used=new Set();cut.replace(/\[(\d+)\]/g,function(_,n){used.add(+n)});cut+=foot(md0,used)}
       // Say what this read left out, so the model does not go looking for it with js.
       if(so&&so.off)cut+='\n(+'+so.off+' controls off-screen: full:true or query)';
-      if(a.nf&&!root){var fr=[].filter.call(document.querySelectorAll('iframe,frame'),function(f){var r=f.getBoundingClientRect();return r.width>20&&r.height>20}).length;
-        if(fr)cut+='\n('+fr+' iframe'+(fr>1?'s':'')+' not read: frame content needs the Safari MCP extension)'}
       var de=document.documentElement;
       return(document.title?clip(document.title,80)+' | ':'')+location.href.slice(0,200)+' | scroll '+Math.round(scrollY)+'/'+Math.max(0,de.scrollHeight-innerHeight)+(document.readyState==='complete'?'':' | still loading')+'\n'+cut}
 
     function deep(x,y){var e=document.elementFromPoint(x,y);while(e&&e.shadowRoot){var n=e.shadowRoot.elementFromPoint(x,y);if(!n||n===e)break;e=n}return e}
     function inside(el,c){for(;c;c=c.parentNode||c.host)if(c===el)return true;return false}
     function target(a){var el;
-      if(!a.ref&&a.selector){el=document.querySelector(a.selector);if(!el)throw new Error('no element matches '+a.selector);a.ref=ref(el)}
+      if(!a.ref&&a.selector){var ms=document.querySelectorAll(a.selector);el=ms[0];if(!el)throw new Error('no element matches '+a.selector);
+        if(ms.length>1)S.note=' (1 of '+ms.length+' matches)';a.ref=ref(el)}
       if(a.ref){el=get(a.ref);var r=el.getBoundingClientRect();
         if(r.top<0||r.left<0||r.bottom>innerHeight||r.right>innerWidth){el.scrollIntoView({block:'center',inline:'center'});r=el.getBoundingClientRect()}
         // Events go to the innermost element under the pointer, as a real click would, so
@@ -314,7 +313,7 @@ enum PageAgent {
       Object.getOwnPropertyDescriptor(p,'value').set.call(el,v);
       el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:v}));el.dispatchEvent(new Event('change',{bubbles:true}))}
     function edit(a){var t=target(a),el=t?t.el:document.activeElement,fill=a.action==='fill',text=a.text==null?'':String(a.text);
-      if(!el||el===document.body)throw new Error('nothing is focused; pass ref');
+      if(!t&&(!el||el===document.body))throw new Error('nothing is focused; pass ref');
       var inp=el.tagName==='INPUT'||el.tagName==='TEXTAREA';
       if(!inp&&!el.isContentEditable)throw new Error(desc(el)+' is not editable');
       foc(el);
@@ -381,7 +380,8 @@ enum PageAgent {
     function delta(){var t0=S.t0,out=[];S.t0=null;if(!t0)return'';
       lines().forEach(function(l){if(out.length<3&&l.length>1&&!t0.has(l)&&out.indexOf(l)<0)out.push(l)});
       return out.map(function(l){return JSON.stringify(clip(l,100))}).join(' / ')}
-    function act(a){var t;S.fx=1;
+    function act(a){S.note='';var r=act1(a);return r+S.note}
+    function act1(a){var t;S.fx=1;
       if(a.action==='click'||a.action==='dblclick'||a.action==='key'){watch();S.t0=new Set(lines())}
       switch(a.action){
         case'click':t=need(a);if(a.text!=null)try{mcall('policy',[String(a.text)])}catch(e){}if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.to.tagName)||t.to.isContentEditable)S.fx=1;press(t);return'clicked '+desc(t.el);

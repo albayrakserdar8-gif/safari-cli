@@ -188,6 +188,7 @@ Eklenti yolu da sonradan eklendi ve elle sınandı:
 - Eklentisiz modda, betik yerleşmeden önce ya da bir iframe'den açılan iletişim kutuları çağrıları 20 saniye bekletir; `act dialog` bunları yalnızca Erişilebilirlik izniyle yanıtlayabilir. Eklentiyle de, sunucunun henüz girmediği başka bir siteye geçilirken sayfa yüklenirken açılan kutular için aynı durum geçerlidir.
 - HTTP durum kodu (404 gibi) yalnızca eklentiyle bildirilir; Safari bunu sayfaya vermez. Safari'nin hiç açamadığı adresler her iki modda da hata döner.
 - `text` kipi bağlantı metinlerini ve tablo hücrelerini kırpar; çok sütunlu ya da iç içe tablolu sayfalarda düzen kaybolabilir.
+- Yukarıdaki sınırların çoğu (gerçek girdi olayları, CSP, iframe, tüm ağ trafiği, iletişim kutuları) Playwright'ın kullandığı Web Inspector protokolüyle aşılabilirdi, ama kullanıcının açık Safari'sinde bu protokole yalnızca Apple'ın kendi imzaladığı uygulamalar bağlanabilir: `webinspectord` başka bir sürecin bağlantısını "did not have entitlement" diyerek reddeder (macOS 27'de sınandı). Bu erişimi Apple'ın `safaridriver --mcp` sunucusu sunar, ama ayrı ve temiz bir otomasyon oturumunda: kullanıcının sekmelerini ve çerezlerini görmez. Oturum açmış olmayı gerektirmeyen test ve otomasyon işleri için o daha uygundur; "Allow remote automation" ayarının açık olmasını ister.
 
 ## Test
 

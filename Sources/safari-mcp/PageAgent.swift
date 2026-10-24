@@ -77,6 +77,10 @@ enum PageAgent {
     M.dlgTake=function(){return M.dlg.splice(0)};
     // Requests answered with 4xx/5xx since the counter was n, for act results.
     M.ncount=function(){return M.net?M.net.t||0:0};
+    // fetch/XHR requests started after request n0 and not answered yet (older long polls do not count).
+    M.nn0=function(){return M.nn||0};
+    M.pend=function(n0){if(!M.net)return 0;var done=0;for(var i=M.net.length-1;i>=0;i--){var k=+M.net[i].slice(1,M.net[i].indexOf(' '));if(k>n0)done++}
+      return Math.max(0,(M.nn||0)-n0-done)};
     M.fails=function(n){if(!M.net)return'';var k=Math.min(M.net.length,(M.net.t||0)-n);if(k<=0)return'';
       // Only HTTP errors: ERR (no response) is mostly an aborted beacon or a blocked tracker.
       return M.net.slice(-k).map(function(l){var p=l.split(' '),u;try{u=new URL(p[3],location.href)}catch(e){return null}
@@ -144,7 +148,9 @@ enum PageAgent {
         var r=shown?el.getBoundingClientRect():null;
         var vis=shown&&(r.width>0||r.height>0),inv=vis&&r.bottom>0&&r.right>0&&r.top<vh&&r.left<vw,ok=vis&&(o.full||inv);
         var ro=el.getAttribute('role'),leaf=native(el)||(ro&&IR.test(ro)),ti=el.getAttribute('tabindex');
-        var I=leaf||el.hasAttribute('onclick')||(ti!==null&&ti!=='-1')||(el.isContentEditable&&!(el.parentElement&&el.parentElement.isContentEditable));
+        // A role-only control that holds real ones (a menuitem <li> with its dropdown links): list those too.
+        var hold=leaf&&!native(el)&&!!el.querySelector('a[href],button,input,select,textarea,[role=menuitem],[role=option],[role=link],[role=button]');if(hold)leaf=false;
+        var I=hold||leaf||el.hasAttribute('onclick')||(ti!==null&&ti!=='-1')||(el.isContentEditable&&!(el.parentElement&&el.parentElement.isContentEditable));
         if(!I&&!inI&&ok&&el.children.length<6&&t!=='BODY'&&t!=='HTML'&&getComputedStyle(el).cursor==='pointer')I=true;
         if(I&&vis&&!ok)o.off=(o.off||0)+1;
         if(I&&ok){out.push({el:el,inv:inv,s:ref(el)+' '+role(el)+' '+JSON.stringify(name(el,leaf?80:50))+state(el)});if(leaf)return;inI=true}
@@ -415,19 +421,47 @@ enum PageAgent {
       return!!el&&(!el.checkVisibility||el.checkVisibility({visibilityProperty:true,checkVisibilityCSS:true}))}
     // Visible text lines before a click or key, to report what appeared after it (delta).
     function lines(){return(document.body&&document.body.innerText||'').split('\n').map(function(l){return l.trim()})}
-    function delta(){var t0=S.t0,out=[],f='';S.t0=null;if(!t0)return{t:'',f:''};
+    // Fields a fill/select/type changed besides its target (an address lookup, a reset).
+    function fv(e){return e.type==='checkbox'||e.type==='radio'?String(e.checked):e.value}
+    function fsnap(a){var el=null;try{el=a.ref?get(a.ref):a.selector?document.querySelector(a.selector):a.fields?get(Object.keys(a.fields)[0]):null}catch(e){}
+      if(!el)el=document.activeElement;var root=el&&el.form||document;S.fa=a;S.fel=el;
+      S.f0=[].slice.call(root.querySelectorAll('input:not([type=hidden]),select,textarea'),0,200).map(function(e){return[e,fv(e)]})}
+    function fdelta(){var f0=S.f0,a=S.fa||{},own=new Set(),out=[];S.f0=null;if(!f0)return'';
+      own.add(S.fel);[a.ref].concat(a.fields?Object.keys(a.fields):[]).forEach(function(r){try{if(r)own.add(get(r))}catch(e){}});
+      f0.forEach(function(x){var e=x[0];if(out.length<4&&e.isConnected&&!own.has(e)&&fv(e)!==x[1])out.push(desc(e)+(e.type==='checkbox'||e.type==='radio'?(e.checked?' checked':' unchecked'):' ='+JSON.stringify(secret(e)?'\u2022\u2022\u2022':clip(e.tagName==='SELECT'&&e.selectedOptions[0]?e.selectedOptions[0].text:e.value,40))))});
+      return out.join(', ')}
+    function pend(){if(S.q0==null)return 0;try{return mcall('pend',[S.q0])}catch(e){return 0}}
+    function delta(){var c=fdelta(),t0=S.t0,out=[],f='';S.t0=null;if(!t0)return{t:'',f:'',c:c};
       // A line that only shrank (an inline element removed) is not new text.
       var now=lines(),ns=new Set(now),gone=[];t0.forEach(function(l){if(l.length>1&&!ns.has(l))gone.push(l)});
       now.forEach(function(l){if(out.length<3&&l.length>1&&!t0.has(l)&&out.indexOf(l)<0&&!gone.some(function(g){return g.length>l.length&&g.indexOf(l)>=0}))out.push(l)});
       if(S.n0!=null)try{f=mcall('fails',[S.n0])}catch(e){}S.n0=null;
-      return{t:out.map(function(l){return JSON.stringify(clip(l,100))}).join(' / '),f:f}}
+      return{t:out.map(function(l){return JSON.stringify(clip(l,100))}).join(' / '),f:f,c:c}}
+    // CSS :hover cannot be triggered by dispatched events. Copy the page's :hover rules with a
+    // class in place of :hover (a constructed sheet, which page CSP does not block) and put the
+    // class on the element under the pointer and its ancestors, as a real pointer would.
+    var HC={k:-1,n:0,bad:0,sheet:null};
+    function hcss(){var ss=document.styleSheets;if(HC.k===ss.length)return HC;var out=[],n=0,bad=0;
+      function walk(rs,acc){for(var i=0;i<rs.length;i++){var r=rs[i];
+        if(r.selectorText!=null){if(/:hover\b/.test(r.selectorText)){acc.push(r.selectorText.replace(/:hover\b/g,'.__smcp_hover')+'{'+r.style.cssText+'}');n++}}
+        else if(r.cssRules){var inner=[];walk(r.cssRules,inner);if(inner.length){var c=r.media?'@media '+r.media.mediaText:r.conditionText!=null&&r.constructor.name.indexOf('Supports')>=0?'@supports '+r.conditionText:'';acc.push(c?c+'{'+inner.join('')+'}':inner.join(''))}}}}
+      for(var i=0;i<ss.length;i++){var rs;try{rs=ss[i].cssRules}catch(e){bad++;continue}if(rs)walk(rs,out)}
+      var text=out.join('\n');
+      try{if(!HC.sheet){HC.sheet=new CSSStyleSheet();document.adoptedStyleSheets=document.adoptedStyleSheets.concat([HC.sheet])}HC.sheet.replaceSync(text)}
+      catch(e){var st=document.getElementById('__smcp_hover')||document.documentElement.appendChild(document.createElement('style'));st.id='__smcp_hover';st.textContent=text}
+      HC.k=document.styleSheets.length;HC.n=n;HC.bad=bad;return HC}
+    function hov(el){if(S.hv)S.hv.forEach(function(e){e.classList.remove('__smcp_hover')});var h=hcss(),l=[];
+      for(var e=el;e&&e.nodeType===1;e=e.parentElement||(e.getRootNode&&e.getRootNode().host))l.push(e);
+      if(h.n)l.forEach(function(e){e.classList.add('__smcp_hover')});S.hv=l;return h}
     function act(a){S.note='';if(a.text!=null&&(a.action==='dialog'||a.action==='click'))a.text=String(a.text).replace(/^answer\s*[:=]?\s*/i,'');var r=act1(a);return r+S.note}
-    function act1(a){var t;S.fx=1;
-      if(a.action==='click'||a.action==='dblclick'||a.action==='key'){watch();S.t0=new Set(lines());S.n0=null;try{S.n0=mcall('ncount')}catch(e){}}
+    function act1(a){var t;S.fx=1;S.f0=null;
+      if(a.action==='click'||a.action==='dblclick'||a.action==='key'||a.action==='hover'){watch();S.t0=new Set(lines());S.n0=null;try{S.n0=mcall('ncount')}catch(e){}}
+      if(/^(click|dblclick|key|hover|fill|select|type)$/.test(a.action)){fsnap(a);S.q0=null;try{S.q0=mcall('nn0')}catch(e){}}
       switch(a.action){
-        case'click':t=need(a);if(a.text!=null)try{mcall('policy',[String(a.text)])}catch(e){}if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.to.tagName)||t.to.isContentEditable)S.fx=1;press(t);return'clicked '+desc(t.el);
-        case'dblclick':t=need(a);press(t);press(t,{detail:2});mev(t.to,'dblclick',t.x,t.y,{detail:2});return'double-clicked '+desc(t.el);
-        case'hover':t=need(a);['pointerover','mouseover','pointerenter','mouseenter','pointermove','mousemove'].forEach(function(e){mev(t.to,e,t.x,t.y)});return'hover events sent to '+desc(t.el)+' (CSS :hover styles need os:true)';
+        case'click':t=need(a);if(a.text!=null)try{mcall('policy',[String(a.text)])}catch(e){}if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.to.tagName)||t.to.isContentEditable)S.fx=1;if(S.hv)hov(t.to);press(t);return'clicked '+desc(t.el);
+        case'dblclick':t=need(a);if(S.hv)hov(t.to);press(t);press(t,{detail:2});mev(t.to,'dblclick',t.x,t.y,{detail:2});return'double-clicked '+desc(t.el);
+        case'hover':t=need(a);['pointerover','mouseover','pointerenter','mouseenter','pointermove','mousemove'].forEach(function(e){mev(t.to,e,t.x,t.y)});
+          var h=hov(t.to);return'hovered '+desc(t.el)+(h.n?' ('+h.n+' :hover rules':' (no :hover styles found')+(h.bad?'; '+h.bad+' stylesheets from other sites unreadable, os:true if nothing shows)':')');
         case'type':return edit(a);
         case'fill':return a.fields?form(a.fields):edit(a);
         case'key':return key(a);
@@ -457,7 +491,7 @@ enum PageAgent {
     S.call=function(a){if(a.h!==S.h)return JSON.stringify({m:S.h||''});
       // u0: the address before the call, so a history.pushState route change counts as a change.
       var u0=location.href;
-      try{var v=a.op==='read'?read(a):a.op==='act'?act(a):a.op==='geom'?geom(a):a.op==='logs'?logs(a):a.op==='has'?has(a):a.op==='delta'?delta():null,o={v:v,u:location.href,u0:u0,r:document.readyState},d;try{d=mcall('dlgTake')}catch(e){}if(d&&d.length)o.d=d;return JSON.stringify(o)}
+      try{var v=a.op==='read'?read(a):a.op==='act'?act(a):a.op==='geom'?geom(a):a.op==='logs'?logs(a):a.op==='has'?has(a):a.op==='delta'?delta():a.op==='pend'?pend():null,o={v:v,u:location.href,u0:u0,r:document.readyState},d;try{d=mcall('dlgTake')}catch(e){}if(d&&d.length)o.d=d;return JSON.stringify(o)}
       catch(e){return JSON.stringify({e:String(e&&e.message||e)})}};
     })()
     """#

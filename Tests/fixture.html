@@ -48,6 +48,7 @@ line two</pre>
   <button onclick="console.warn('careful');console.error('broken')">Log</button>
   <button onclick="fetch('missing.json')">Fetch missing</button>
   <div id="note" contenteditable="true" aria-label="Note">Hello world</div>
+  <ul role="menubar"><li role="menuitem">Account <a href="#profile">Profile</a> <a href="#out" onclick="this.textContent='signed out';return false">Sign out</a></li></ul>
   <h2>Frame</h2>
   <iframe src="frame.html" title="test frame" width="400" height="200"></iframe>
 </main>

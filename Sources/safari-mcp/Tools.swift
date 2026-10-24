@@ -770,24 +770,41 @@ final class Tools {
                 env["r"] = "complete"
             }
         }
-        if ["hover", "scroll", "dialog"].contains(action) || a["fields"] != nil { return result }
-        let twice = action == "click" || action == "dblclick" || action == "key"
+        if ["scroll", "dialog"].contains(action) { return result }
+        let twice = ["click", "dblclick", "key", "hover"].contains(action)
         // The address from before the action, so a pushState route change shows up as one.
         let out = settle(id, result, href: env["u0"] as? String ?? env["u"] as? String ?? "", tabURL: verifiedURL,
                          wasReady: env["r"] as? String == "complete", twice: twice)
-        // Same page, changed in place (a form result, a message): show the new lines, so the
-        // model does not need another read to see what happened.
+        guard !out.contains(" → "), a["os"] as? Bool != true else { return out }
+        // The page may still be waiting for its own requests (adding to a cart, an address lookup):
+        // let them finish, so what they change is part of this result.
+        let start = Date()
+        var waited = false
+        while Date().timeIntervalSince(start) < 2,
+              let n = try? inFrame(frame, { try agentCall(id, ["op": "pend"])["v"] as? Int }), n > 0 {
+            usleep(150_000)
+            waited = true
+        }
+        if waited { usleep(150_000) }
+        // Same page, changed in place: the new lines (a form result, a message), other fields that
+        // changed (an address lookup, a reset) and failed requests, so the model need not read again.
         var extra = ""
-        if twice, !out.contains(" → "), a["os"] as? Bool != true,
-           let d = try? inFrame(frame, { try agentCall(id, ["op": "delta"])["v"] as? [String: Any] }) {
-            if let t = d["t"] as? String, !t.isEmpty { extra += " · new text: " + t }
-            // Requests the page sent meanwhile that the server refused or that failed.
+        var changed = false
+        if let d = try? inFrame(frame, { try agentCall(id, ["op": "delta"])["v"] as? [String: Any] }) {
+            if twice, let t = d["t"] as? String, !t.isEmpty { extra += " · new text: " + t; changed = true }
+            if var c = d["c"] as? String, !c.isEmpty {
+                if frame != 0, let alias = frameIDs[id]?.firstIndex(of: frame).map({ "f\($0 + 1)" }) {
+                    c = c.replacing(#/\be(\d+)\b/#) { alias + "e" + $0.1 }
+                }
+                extra += " · also changed: " + c
+                changed = true
+            }
             if let f = d["f"] as? String, !f.isEmpty { extra += " · failed: " + f }
         }
         // A dialog in a frame reaches the top document by postMessage, after the frame call returned.
         if frame != 0 { _ = try? agentCall(id, ["op": "nop"]) }
-        // Changes inside a frame are not seen by settle, which judges the top document.
-        if extra.hasPrefix(" · new text") && out.hasSuffix(" (no change on the page yet)") {
+        // settle judges the top document right after the action; later or in-frame changes count too.
+        if changed && out.hasSuffix(" (no change on the page yet)") {
             return String(out.dropLast(" (no change on the page yet)".count)) + extra
         }
         return out + extra

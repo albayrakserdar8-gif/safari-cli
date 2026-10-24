@@ -136,7 +136,11 @@ Varsayılan yol sayfa içi olaylardır: Safari arka planda kalır, imleç sende 
 
 Sayfa içi tuş olayları tarayıcının kendi davranışını tetiklemediği için, sayfa olayı kendisi işlemediyse sunucu alanlardaki düzenleme tuşlarını kendisi uygular: `cmd+a`, `Backspace`, `Delete`, ok tuşları, `Home`/`End` (`shift` ile seçim), tek karakter ve çok satırlı alanlarda `Enter`. Sonuç alanın yeni değerini gösterir. Hedefsiz tuşlar, son hedef alınan iframe'e gider. `type` metni her zaman sona ekler.
 
-`os: true` gerçek fare ve klavye olayı gönderir. Sayfa içi olayları yok sayan siteler ve üzerine gelince (CSS `:hover`) beliren denetimler için gerekir. Erişilebilirlik izni ister, Safari'yi öne getirir ve çalışırken imleci kullanır; tıklamadan sonra imleci eski yerine koyar, `hover` sonrasında öğenin üzerinde bırakır. Çağrı başına yaklaşık bir saniye sürer.
+`hover`, sayfanın CSS `:hover` kurallarını bir sınıfla kopyalayıp öğeye ve atalarına uygular; böylece üzerine gelince açılan menüler `os: true` olmadan açılır. Başka sitelerden yüklenen stil sayfalarının kuralları okunamaz; sonuç bunu söyler.
+
+Bir işlem sayfanın kendi isteklerini başlatırsa (sepete ekleme, adres arama) sunucu bunların bitmesini en çok 2 saniye bekler. Sonuç, işlemin hedefi dışında değişen form alanlarını `· also changed: e4 textbox "Sokak" ="…"` diye bildirir.
+
+`os: true` gerçek fare ve klavye olayı gönderir. Sayfa içi olayları yok sayan siteler ve stilini başka siteden alan `:hover` menüleri için gerekir. Erişilebilirlik izni ister, Safari'yi öne getirir ve çalışırken imleci kullanır; tıklamadan sonra imleci eski yerine koyar, `hover` sonrasında öğenin üzerinde bırakır. Çağrı başına yaklaşık bir saniye sürer.
 
 ## Ekran görüntüsü
 
@@ -198,6 +202,11 @@ Dördüncü tur yine eklenti modunda koşturuldu. Üç görevin hepsi doğru bit
 - eleman silinince kısalan satır `· new text` olarak bildiriliyordu;
 - `Left` gibi kısa tuş adları tanınmıyordu.
 
+Bu turdan kalan üç sorun da sonradan giderildi ve elle sınandı:
+- `role="menuitem"` taşıyan ve içinde bağlantı olan öğelerin (Toolshop hesap menüsü) bağlantıları `read`'de görünmüyordu;
+- sayfa bir alanı değiştirince başka alanları da değiştirdiğinde (Toolshop adres araması) sonuç bunu söylemiyordu;
+- CSS `:hover` menüleri yalnızca `os: true` ile açılıyordu (the-internet `/hovers` artık sayfa içi olaylarla açılıyor).
+
 Eklenti yolu da sonradan eklendi ve elle sınandı:
 - Aynı test sayfası üzerinde, iframe'le birlikte, eklenti modunda sınandı.
 - Wikipedia'da 404 durum kodunun bildirildiği ve GitHub'ın katı CSP'sinde `js`'in çalıştığı görüldü.
@@ -208,7 +217,7 @@ Eklenti yolu da sonradan eklendi ve elle sınandı:
 ## Sınırlar
 
 - Eklentisiz modda, bir sekme bu oturumun dışında başka bir siteye giderse ve aynı anda pencerede sekme açılıp kapanırsa sunucu o sekmeyi kaybedebilir. Bu durumda hata döner; `tabs` ile yeni kimlik alınır. Eklentiyle sekmeler Safari'nin kendi kimlikleriyle izlenir.
-- Sayfa içi olaylar CSS `:hover` stilini tetikleyemez ve bazı siteler bu olayları yok sayar; bu durumlarda `os: true` gerekir. `os: true` sekmeyi kısa süre öne getirir, hedefin üstünü başka bir eleman kaplıyorsa tıklamaz, işten sonra kullanıcının görünür sekmesini ve öndeki uygulamayı geri getirir.
+- Bazı siteler sayfa içi olayları yok sayar; `:hover` taklidi yalnızca okunabilen stil sayfalarında ve CSS ile yapılan menülerde çalışır (fare konumunu JavaScript ile izleyen menüler fare olaylarına bakar). Bu durumlarda `os: true` gerekir. `os: true` sekmeyi kısa süre öne getirir, hedefin üstünü başka bir eleman kaplıyorsa tıklamaz, işten sonra kullanıcının görünür sekmesini ve öndeki uygulamayı geri getirir.
 - `tab` verilmeyen çağrılar son kullanılan sekmeye gider. Aynı sunucuyu paylaşan birden çok ajan bu sekmeyi birbirinden devralabilir. Bu yüzden `tabs new` ile açılmış birden fazla sekme açıkken `tab` verilmeyen çağrılar reddedilir; her çağrıda `tab` verilmelidir.
 - Erişilebilirlik izni yokken ekran görüntüsü kırpması, kenar çubuğunun solda, araç çubuğunun üstte olduğunu ve sayfa yakınlaştırmasının %100 olduğunu varsayar.
 - Eklentisiz modda konsol ve ağ kayıtları sunucunun sayfaya ilk girdiği andan sonrasını kapsar ve ilk ağ çağrısı o ana kadar yüklenmiş kaynakları durum kodu olmadan listeler. Eklentiyle kayıt sayfa açıldığı anda başlar. İki durumda da ağ listesi resim, betik ve stil dosyalarını `pattern` verilmedikçe göstermez. Yanıt gövdeleri yalnızca fetch/XHR'ın metin ve JSON yanıtları için, son 50 istekte ve ilk 4 KB'ye kadar tutulur.

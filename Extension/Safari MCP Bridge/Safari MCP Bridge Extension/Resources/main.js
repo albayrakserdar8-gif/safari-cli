@@ -68,6 +68,10 @@ M.logs=logs;
 M.dlgTake=function(){return M.dlg.splice(0)};
 // Requests answered with 4xx/5xx since the counter was n, for act results.
 M.ncount=function(){return M.net?M.net.t||0:0};
+// fetch/XHR requests started after request n0 and not answered yet (older long polls do not count).
+M.nn0=function(){return M.nn||0};
+M.pend=function(n0){if(!M.net)return 0;var done=0;for(var i=M.net.length-1;i>=0;i--){var k=+M.net[i].slice(1,M.net[i].indexOf(' '));if(k>n0)done++}
+  return Math.max(0,(M.nn||0)-n0-done)};
 M.fails=function(n){if(!M.net)return'';var k=Math.min(M.net.length,(M.net.t||0)-n);if(k<=0)return'';
   // Only HTTP errors: ERR (no response) is mostly an aborted beacon or a blocked tracker.
   return M.net.slice(-k).map(function(l){var p=l.split(' '),u;try{u=new URL(p[3],location.href)}catch(e){return null}

@@ -65,6 +65,7 @@ enum Input {
         "enter": 36, "return": 36, "tab": 48, "space": 49, " ": 49, "backspace": 51, "escape": 53, "esc": 53,
         "delete": 117, "home": 115, "end": 119, "pageup": 116, "pagedown": 121,
         "arrowleft": 123, "arrowright": 124, "arrowdown": 125, "arrowup": 126,
+        "left": 123, "right": 124, "down": 125, "up": 126, "del": 117, "pgup": 116, "pgdn": 121,
     ]
 
     private static func press(_ code: CGKeyCode, _ flags: CGEventFlags) {

@@ -69,7 +69,7 @@ const ops = {
     if (!t) return { stale: 1 };
     let r;
     try {
-      r = await browser.tabs.executeScript(t.id, { code: m.code, frameId: m.frame || 0 });
+      r = await browser.tabs.executeScript(t.id, { code: m.code, frameId: m.frame || 0, matchAboutBlank: true });
     } catch (e) {
       const msg = String((e && e.message) || e);
       if (/permission|not allowed|access/i.test(msg)) {

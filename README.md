@@ -120,7 +120,7 @@ Kutular yalnızca sunucunun çalıştığı sekmelerde yanıtlanır; senin kendi
 
 Eklentisiz modda, betik yerleşmeden önce açılan kutular Safari'de yerel olarak görünür ve çağrılar 20 saniye sonra zaman aşımına uğrar. Bu durumda `act dialog` kutuyu Erişilebilirlik üzerinden yanıtlar; sekme arka plandaysa onu kısa süre öne alır, sonra önceki sekmeye döner.
 
-Sayfayı değiştiren çağrılar (`act`, `navigate`, yönlendiren `js`) yeni sayfanın yüklenmesini bekler ve sonucu `→ başlık | adres` olarak bildirir. Bir tıklama ya da tuş hiçbir şeyi değiştirmediyse sonuçta `(no change on the page yet)` yazar. Sayfa yerinde değiştiyse yeni görünen satırlar `· new text: …` ile, bu sırada sunucunun reddettiği ya da başarısız olan istekler `· failed: n7 POST 400 /api/carts` ile eklenir. `act wait` aranan metin zaten sayfadaysa bunu `already present` diye söyler.
+Sayfayı değiştiren çağrılar (`act`, `navigate`, yönlendiren `js`) yeni sayfanın yüklenmesini bekler ve sonucu `→ başlık | adres` olarak bildirir. Bir tıklama ya da tuş hiçbir şeyi değiştirmediyse sonuçta `(no change on the page yet)` yazar. Sayfa yerinde değiştiyse yeni görünen satırlar `· new text: …` ile, bu sırada sunucunun 4xx/5xx ile yanıtladığı istekler `· failed: n7 POST 400 /api/carts` ile eklenir (yanıtsız kalan istekler, çoğu iptal edilmiş analitik çağrısı olduğu için yalnızca `logs`'ta görünür). `act wait` aranan metin zaten sayfadaysa bunu `already present` diye söyler.
 
 ## Sekmeler
 
@@ -192,6 +192,12 @@ Aynı görevler üçüncü kez, bu sefer eklenti modunda koşturuldu. Çağrı s
 
 Bu düzeltmeler `Tests/fixture.html` ve the-internet'in TinyMCE sayfasında elle sınandı.
 
+Dördüncü tur yine eklenti modunda koşturuldu. Üç görevin hepsi doğru bitti; diyalog ve iframe görevi bu sefer istem yanıtı, 404 isteği ve düzenlenebilir alan adımlarını da içeriyordu (27 çağrı). Düzenleme tuşları, `· failed:` satırı ve çerçeve diyalogları ilk denemede çalıştı. Bu turda bulunanlar da düzeltildi:
+- eklentiyle TinyMCE'nin `srcdoc` çerçevesi hiç okunmuyordu ve bununla ilgili bir not da çıkmıyordu;
+- `· failed:` satırı, her tıklamada iptal edilen bir analitik isteğini gösteriyordu;
+- eleman silinince kısalan satır `· new text` olarak bildiriliyordu;
+- `Left` gibi kısa tuş adları tanınmıyordu.
+
 Eklenti yolu da sonradan eklendi ve elle sınandı:
 - Aynı test sayfası üzerinde, iframe'le birlikte, eklenti modunda sınandı.
 - Wikipedia'da 404 durum kodunun bildirildiği ve GitHub'ın katı CSP'sinde `js`'in çalıştığı görüldü.
@@ -206,7 +212,7 @@ Eklenti yolu da sonradan eklendi ve elle sınandı:
 - `tab` verilmeyen çağrılar son kullanılan sekmeye gider. Aynı sunucuyu paylaşan birden çok ajan bu sekmeyi birbirinden devralabilir. Bu yüzden `tabs new` ile açılmış birden fazla sekme açıkken `tab` verilmeyen çağrılar reddedilir; her çağrıda `tab` verilmelidir.
 - Erişilebilirlik izni yokken ekran görüntüsü kırpması, kenar çubuğunun solda, araç çubuğunun üstte olduğunu ve sayfa yakınlaştırmasının %100 olduğunu varsayar.
 - Eklentisiz modda konsol ve ağ kayıtları sunucunun sayfaya ilk girdiği andan sonrasını kapsar ve ilk ağ çağrısı o ana kadar yüklenmiş kaynakları durum kodu olmadan listeler. Eklentiyle kayıt sayfa açıldığı anda başlar. İki durumda da ağ listesi resim, betik ve stil dosyalarını `pattern` verilmedikçe göstermez. Yanıt gövdeleri yalnızca fetch/XHR'ın metin ve JSON yanıtları için, son 50 istekte ve ilk 4 KB'ye kadar tutulur.
-- Kapalı shadow DOM okunmaz. iframe içerikleri ilk 8 çerçeveye kadar `f1e5` gibi ref'lerle okunur. Eklentisiz modda yalnızca aynı kökenli ve sayfa CSP'si `eval`'a izin veren çerçeveler okunabilir (örneğin TinyMCE editörü); okunamayanlar `read` çıktısında ayrıca belirtilir.
+- Kapalı shadow DOM okunmaz. iframe içerikleri ilk 8 çerçeveye kadar `f1e5` gibi ref'lerle okunur. Eklentisiz modda yalnızca aynı kökenli ve sayfa CSP'si `eval`'a izin veren çerçeveler okunabilir (örneğin TinyMCE editörü); okunamayanlar `read` çıktısında ayrıca belirtilir. Safari eklentinin `srcdoc`/`about:blank` çerçevelerine betik sokmasına izin vermez; eklentiyle bu çerçevelere de üst belge üzerinden, eklentisiz moddaki yolla ulaşılır, ama bu çerçevelerde iletişim kutuları yanıtlanmaz ve konsol kaydı tutulmaz.
 - Eklenti, Safari'nin katı CSP uygulayan sitelerinde (GitHub, Gmail) `js` kodunu sayfanın kendi ortamında çalıştıramaz; kod eklentinin ortamında çalışır, DOM'a erişir ama sayfanın JavaScript değişkenlerini göremez. Sonuçta bu not olarak belirtilir.
 - Eklenti kurulmadan önce açılmış sayfalarda konsol kaydı ve iletişim kutusu yanıtlama, sayfa yenilenene kadar çalışmaz.
 - Eklentisiz modda, betik yerleşmeden önce ya da bir iframe'den açılan iletişim kutuları çağrıları 20 saniye bekletir; `act dialog` bunları yalnızca Erişilebilirlik izniyle yanıtlayabilir. Eklentiyle de, sunucunun henüz girmediği başka bir siteye geçilirken sayfa yüklenirken açılan kutular için aynı durum geçerlidir.

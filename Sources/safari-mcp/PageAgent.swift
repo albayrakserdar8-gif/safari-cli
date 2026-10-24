@@ -75,10 +75,13 @@ enum PageAgent {
     function el(e){return'<'+e.tagName.toLowerCase()+(e.id?'#'+e.id:'')+'> '+JSON.stringify(clip(e.innerText||e.textContent||e.value||'',50))}
     M.logs=logs;
     M.dlgTake=function(){return M.dlg.splice(0)};
-    // Requests that failed (4xx/5xx or no response) since the counter was n, for act results.
+    // Requests answered with 4xx/5xx since the counter was n, for act results.
     M.ncount=function(){return M.net?M.net.t||0:0};
     M.fails=function(n){if(!M.net)return'';var k=Math.min(M.net.length,(M.net.t||0)-n);if(k<=0)return'';
-      return M.net.slice(-k).filter(function(l){var s=l.split(' ')[2];return s==='ERR'||+s>=400}).slice(-3).map(function(l){var p=l.split(' ');return p[0]+' '+p[1]+' '+p[2]+' '+clip(p[3].replace(/^https?:\/\/[^\/]+/,''),60)}).join(', ')};
+      // Only HTTP errors: ERR (no response) is mostly an aborted beacon or a blocked tracker.
+      return M.net.slice(-k).map(function(l){var p=l.split(' '),u;try{u=new URL(p[3],location.href)}catch(e){return null}
+          var own=u.origin===location.origin;if(!(+p[2]>=400))return null;
+          return p[0]+' '+p[1]+' '+p[2]+' '+clip(own?u.pathname+u.search:u.host+u.pathname,70)}).filter(Boolean).slice(-3).join(', ')};
     M.policy=function(p){arm(p)};
     // Page CSP may forbid compiling code here; the caller then runs it in its own world.
     M.run=function(id,code){var f;try{f=new Function('return(async function(){'+code+'\n})()')}catch(e){return e instanceof SyntaxError?'syntax: '+e.message:'csp'}
@@ -330,10 +333,12 @@ enum PageAgent {
       else if(!ok)el.textContent=(fill?'':el.textContent)+text;
       return(fill?'filled ':'typed into ')+desc(el)+(inp?state(el):' ='+JSON.stringify(clip(el.innerText,60)))}
     var KC={Enter:13,Tab:9,Escape:27,Backspace:8,Delete:46,' ':32,ArrowLeft:37,ArrowUp:38,ArrowRight:39,ArrowDown:40,Home:36,End:35,PageUp:33,PageDown:34};
+    var KN={space:' ',return:'Enter',esc:'Escape',left:'ArrowLeft',right:'ArrowRight',up:'ArrowUp',down:'ArrowDown',del:'Delete',pgup:'PageUp',pgdn:'PageDown'};
+    Object.keys(KC).forEach(function(k){KN[k.toLowerCase()]=k});
     function key(a){var t=target(a),el=t?t.el:(document.activeElement||document.body);
       if(t)foc(el);
       var ps=String(a.key||'').split('+'),k=ps.pop()||'+',i={bubbles:true,cancelable:true,composed:true,view:window};
-      if(k==='Space')k=' ';if(k==='Return')k='Enter';if(k==='Esc')k='Escape';
+      if(k.length>1)k=KN[k.toLowerCase()]||k;
       ps.forEach(function(p){p=p.toLowerCase();i[p==='cmd'||p==='meta'?'metaKey':p==='ctrl'?'ctrlKey':p==='alt'||p==='option'?'altKey':'shiftKey']=true});
       i.key=k;i.code=k===' '?'Space':k.length===1?(/[0-9]/.test(k)?'Digit'+k:'Key'+k.toUpperCase()):k;
       i.keyCode=i.which=KC[k]||(k.length===1?k.toUpperCase().charCodeAt(0):0);
@@ -411,7 +416,9 @@ enum PageAgent {
     // Visible text lines before a click or key, to report what appeared after it (delta).
     function lines(){return(document.body&&document.body.innerText||'').split('\n').map(function(l){return l.trim()})}
     function delta(){var t0=S.t0,out=[],f='';S.t0=null;if(!t0)return{t:'',f:''};
-      lines().forEach(function(l){if(out.length<3&&l.length>1&&!t0.has(l)&&out.indexOf(l)<0)out.push(l)});
+      // A line that only shrank (an inline element removed) is not new text.
+      var now=lines(),ns=new Set(now),gone=[];t0.forEach(function(l){if(l.length>1&&!ns.has(l))gone.push(l)});
+      now.forEach(function(l){if(out.length<3&&l.length>1&&!t0.has(l)&&out.indexOf(l)<0&&!gone.some(function(g){return g.length>l.length&&g.indexOf(l)>=0}))out.push(l)});
       if(S.n0!=null)try{f=mcall('fails',[S.n0])}catch(e){}S.n0=null;
       return{t:out.map(function(l){return JSON.stringify(clip(l,100))}).join(' / '),f:f}}
     function act(a){S.note='';if(a.text!=null&&(a.action==='dialog'||a.action==='click'))a.text=String(a.text).replace(/^answer\s*[:=]?\s*/i,'');var r=act1(a);return r+S.note}

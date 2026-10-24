@@ -66,10 +66,13 @@ function ser(v){if(v===undefined)return'undefined';if(v instanceof Element)retur
 function el(e){return'<'+e.tagName.toLowerCase()+(e.id?'#'+e.id:'')+'> '+JSON.stringify(clip(e.innerText||e.textContent||e.value||'',50))}
 M.logs=logs;
 M.dlgTake=function(){return M.dlg.splice(0)};
-// Requests that failed (4xx/5xx or no response) since the counter was n, for act results.
+// Requests answered with 4xx/5xx since the counter was n, for act results.
 M.ncount=function(){return M.net?M.net.t||0:0};
 M.fails=function(n){if(!M.net)return'';var k=Math.min(M.net.length,(M.net.t||0)-n);if(k<=0)return'';
-  return M.net.slice(-k).filter(function(l){var s=l.split(' ')[2];return s==='ERR'||+s>=400}).slice(-3).map(function(l){var p=l.split(' ');return p[0]+' '+p[1]+' '+p[2]+' '+clip(p[3].replace(/^https?:\/\/[^\/]+/,''),60)}).join(', ')};
+  // Only HTTP errors: ERR (no response) is mostly an aborted beacon or a blocked tracker.
+  return M.net.slice(-k).map(function(l){var p=l.split(' '),u;try{u=new URL(p[3],location.href)}catch(e){return null}
+      var own=u.origin===location.origin;if(!(+p[2]>=400))return null;
+      return p[0]+' '+p[1]+' '+p[2]+' '+clip(own?u.pathname+u.search:u.host+u.pathname,70)}).filter(Boolean).slice(-3).join(', ')};
 M.policy=function(p){arm(p)};
 // Page CSP may forbid compiling code here; the caller then runs it in its own world.
 M.run=function(id,code){var f;try{f=new Function('return(async function(){'+code+'\n})()')}catch(e){return e instanceof SyntaxError?'syntax: '+e.message:'csp'}

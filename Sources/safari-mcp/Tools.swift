@@ -467,12 +467,13 @@ final class Tools {
 
     private func inFrame<T>(_ f: Int, _ body: () throws -> T) rethrows -> T {
         guard f != 0 else { return try body() }
-        if safari.isExtension {
+        // A negative id is a frame reached from the top document (srcdoc frames with the extension).
+        if safari.isExtension && f > 0 {
             ext.frame = f
             defer { ext.frame = 0 }
             return try body()
         }
-        aeFrame = f
+        aeFrame = abs(f)
         defer { aeFrame = 0 }
         return try body()
     }
@@ -507,6 +508,11 @@ final class Tools {
         if safari.isExtension {
             guard let list = try? ext.frames(t.pos, expect(t)) else { return "" }
             frames = list.filter { $0.url.hasPrefix("http") || $0.url.hasPrefix("file") }
+            if list.count > frames.count {
+                // Safari does not let the extension script srcdoc/about:blank frames (rich-text editors
+                // such as TinyMCE); reach them from the top document, as without the extension.
+                frames += aeFrames(id).filter { $0.ok && $0.url.hasPrefix("about:") }.map { (-$0.id, $0.url) }
+            }
         } else {
             let all = aeFrames(id)
             frames = all.filter(\.ok).map { ($0.id, $0.url) }
@@ -516,7 +522,10 @@ final class Tools {
         fo["max_chars"] = min((o["max_chars"] as? Int ?? 6000) / 2, 3000)
         var out = ""
         for f in frames.prefix(8) {
-            guard let body = try? inFrame(f.id, { try agentCall(id, fo)["v"] as? String }) else { unread += 1; continue }
+            guard let body = try? inFrame(f.id, { try agentCall(id, fo)["v"] as? String }) else {
+                if !f.url.hasPrefix("about:") { unread += 1 }
+                continue
+            }
             var list = frameIDs[id] ?? []
             if !list.contains(f.id) { list.append(f.id); frameIDs[id] = list }
             let alias = list.firstIndex(of: f.id)! + 1
@@ -532,7 +541,7 @@ final class Tools {
             }
             out += "\n--- frame \(pre) \(clip(f.url, 120))\n" + fixed.joined(separator: "\n")
         }
-        if unread > 0 { out += "\n(\(unread) iframe\(unread > 1 ? "s" : "") not read: cross-origin or the page blocks scripts; needs the Safari MCP extension)" }
+        if unread > 0 { out += "\n(\(unread) iframe\(unread > 1 ? "s" : "") not read: \(safari.isExtension ? "the extension could not reach them" : "cross-origin or the page blocks scripts; needs the Safari MCP extension"))" }
         return out
     }
 
@@ -777,6 +786,10 @@ final class Tools {
         }
         // A dialog in a frame reaches the top document by postMessage, after the frame call returned.
         if frame != 0 { _ = try? agentCall(id, ["op": "nop"]) }
+        // Changes inside a frame are not seen by settle, which judges the top document.
+        if extra.hasPrefix(" · new text") && out.hasSuffix(" (no change on the page yet)") {
+            return String(out.dropLast(" (no change on the page yet)".count)) + extra
+        }
         return out + extra
     }
 

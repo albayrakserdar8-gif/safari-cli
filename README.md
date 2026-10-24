@@ -209,6 +209,12 @@ Bu turdan kalan üç sorun da sonradan giderildi ve elle sınandı:
 
 Beşinci turda (eklenti modu) üç görevin hepsi doğru bitti ve hiçbir ajan tıklamak, yazmak ya da doldurmak için `js` veya `os: true` kullanmadı; `js` yalnızca okuma ve doğrulama için çağrıldı. the-internet 62 çağrıda (önceki turlarda 85, 84, 66, 74), Toolshop 69 çağrıda (170, 178, 89, 97) bitti; hover, TinyMCE, adres otomatik doldurma ve hesap menüsünden çıkış sayfa içi olaylarla çalıştı. Bu turda `href`'i olmayan menü bağlantılarının `read`'de metin olarak görünmesi düzeltildi. Sonradan şunlar da giderildi: kaydırıcı tuşlarında anlamsız `new text` satırları yerine değerin gösterilmemesi, bir saniye sonra beliren metnin "no change" diye bildirilmesi ve etiketsiz onay kutularının ortak bir adla listelenmesi.
 
+Altıncı turda dört görev koşturuldu: önceki üçü ve yeni bir site olarak demowebshop (hesap açma, dizüstü fiyatlarını sıralama, arama, sepeti güncelleme, kargo hesabı). Dördü de doğru bitti; hiçbir işlem için `os: true` gerekmedi. Çağrı sayıları: fixture 27, the-internet 68 (kaydırıcı adımı eklendi), Toolshop 72, demowebshop 46. Bu turdan sonra şunlar düzeltildi:
+- düzenlenebilir alanlar `div` olarak ve içerikleri olmadan listeleniyordu; artık `textbox "Note" ="…"`;
+- `href`'i ve el imleci olmayan menü bağlantıları (Toolshop "Çıkış Yap") hâlâ metin görünüyordu;
+- aynı adlı düğmeler (üç "Add to cart") ayırt edilemiyordu; artık bulundukları ürünün adını taşıyor (`(in "Fiction")`);
+- `text` kipi alan değerlerini göstermiyordu (sepetteki miktarlar); artık `[=2]`, onay kutuları `[x]`.
+
 Eklenti yolu da sonradan eklendi ve elle sınandı:
 - Aynı test sayfası üzerinde, iframe'le birlikte, eklenti modunda sınandı.
 - Wikipedia'da 404 durum kodunun bildirildiği ve GitHub'ın katı CSP'sinde `js`'in çalıştığı görüldü.

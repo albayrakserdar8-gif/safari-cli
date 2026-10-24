@@ -21,7 +21,7 @@ The `mcp__safari__*` tools act in the user's real Safari, with their logins, whi
 |---|---|
 | Buttons, links, fields to act on | `read` (default `interactive`: visible controls with refs like `e12`) |
 | A specific control or text | `read query:"sign in"` (searches the whole page, top 10 hits) |
-| Article/content text | `read mode:"text"` (markdown; links as `text[3]`, URLs listed under each chunk) |
+| Article/content text | `read mode:"text"` (markdown; links as `text[3]`, URLs listed under each chunk; field values as `[=2]`, checkboxes `[x]`) |
 | Only the relevant paragraphs | `read mode:"text" query:"pricing refund"` (BM25-ranked blocks) |
 | Links to follow | `read mode:"links"` (ref + URL, page order); add `query` to filter |
 | What changed after an action | `read diff:true` (`+` added, `~` changed, `-` gone) |
@@ -30,6 +30,7 @@ The `mcp__safari__*` tools act in the user's real Safari, with their logins, whi
 
 - Long output ends with `… N more chars; offset=K`; continue with `offset:K` only if you need it. Lower `max_chars` for a quick look.
 - Scope a read with `ref` or `selector` to one part of the page.
+- Several controls with the same name get the part of the page they are in: `e40 button "Add to cart" (in "Fiction")`.
 - Refs belong to the current page. After a navigation, or on a "stale" error, `read` again. Never reuse refs from another page or session.
 - `read` adds `--- frame f1 <url>` blocks for iframes. Their refs look like `f1e5` and work everywhere a ref does (fill a rich-text editor's `body` ref too). Without the extension only same-origin frames that allow scripts are read; `(N iframes not read …)` names the rest, which are out of reach, so do not try clicks or `js` into them.
 

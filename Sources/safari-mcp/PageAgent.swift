@@ -111,7 +111,8 @@ enum PageAgent {
     var SKIP={SCRIPT:1,STYLE:1,NOSCRIPT:1,TEMPLATE:1,HEAD:1,LINK:1,META:1,svg:1,SVG:1};
     var PROSE={P:1,BLOCKQUOTE:1,PRE:1,FIGCAPTION:1,DD:1,LI:2,TD:2,TH:2,DT:2};
     var TR={BUTTON:'button',SELECT:'combobox',TEXTAREA:'textbox',SUMMARY:'button',A:'link'};
-    function role(el){var r=el.getAttribute('role');if(r)return r;var t=el.tagName;
+    function ceRoot(el){return el.isContentEditable&&!(el.parentElement&&el.parentElement.isContentEditable)}
+    function role(el){var r=el.getAttribute('role');if(r)return r;var t=el.tagName;if(ceRoot(el))return'textbox';
       if(t==='INPUT'){var y=(el.type||'text').toLowerCase();return y==='checkbox'||y==='radio'||y==='file'?y:/^(submit|button|reset|image)$/.test(y)?'button':y==='range'?'slider':y==='search'?'searchbox':'textbox'}
       return TR[t]||t.toLowerCase()}
     function native(el){var t=el.tagName;return t==='BUTTON'||t==='SELECT'||t==='TEXTAREA'||t==='SUMMARY'||(t==='A'&&el.hasAttribute('href'))||(t==='INPUT'&&el.type!=='hidden')}
@@ -123,6 +124,7 @@ enum PageAgent {
     function name(el,k){var a=el.getAttribute('aria-label');if(a)return clip(a,k);
       var lb=el.getAttribute('aria-labelledby');if(lb){var s=lb.split(/\s+/).map(function(i){var e=document.getElementById(i);return e?e.textContent:''}).join(' ');if(s.trim())return clip(s,k)}
       var t=el.tagName;
+      if(ceRoot(el))return clip(el.getAttribute('aria-placeholder')||el.getAttribute('data-placeholder')||el.title||'',k);
       if(t==='INPUT'&&/^(submit|button|reset)$/.test(el.type))return clip(el.value,k);
       if(t==='INPUT'||t==='SELECT'||t==='TEXTAREA'){if(el.labels&&el.labels[0])return clip(el.labels[0].textContent,k);
         if(el.placeholder||el.title)return clip(el.placeholder||el.title,k);
@@ -138,6 +140,7 @@ enum PageAgent {
       if(t==='INPUT'||t==='TEXTAREA'||t==='SELECT'){var y=(el.type||'').toLowerCase();
         if(y==='checkbox'||y==='radio'){if(el.checked)s+=' checked'}
         else if(!/^(submit|button|reset|image)$/.test(y)){var v;if(secret(el))v=el.value?'\u2022\u2022\u2022':'';else if(t==='SELECT'){var o=el.selectedOptions[0];v=o?o.text:''}else v=el.value;if(v)s+=' ='+JSON.stringify(clip(v,60))}}
+      if(ceRoot(el)){var cv=clip(el.innerText,60);s+=' ='+JSON.stringify(cv)}
       if(el.disabled||el.getAttribute('aria-disabled')==='true')s+=' disabled';
       var x=el.getAttribute('aria-expanded');if(x)s+=x==='true'?' expanded':' collapsed';
       if(el.getAttribute('aria-selected')==='true'||el.getAttribute('aria-checked')==='true'||el.getAttribute('aria-current'))s+=' selected';
@@ -158,9 +161,10 @@ enum PageAgent {
         var hold=leaf&&!native(el)&&!!el.querySelector('a,button,input,select,textarea,[role=menuitem],[role=option],[role=link],[role=button]');if(hold)leaf=false;
         var I=hold||leaf||el.hasAttribute('onclick')||(ti!==null&&ti!=='-1')||(el.isContentEditable&&!(el.parentElement&&el.parentElement.isContentEditable));
         // A clickable-looking element; inside a listed control only an <a> without href (dropdown items).
+        if(!I&&inI&&t==='A'&&ok)I=true;
         if(!I&&(!inI||t==='A')&&ok&&el.children.length<6&&t!=='BODY'&&t!=='HTML'&&getComputedStyle(el).cursor==='pointer')I=true;
         if(I&&vis&&!ok)o.off=(o.off||0)+1;
-        if(I&&ok){out.push({el:el,inv:inv,s:ref(el)+' '+role(el)+' '+JSON.stringify(name(el,leaf?80:50))+state(el)});if(leaf)return;inI=true}
+        if(I&&ok){var nm=name(el,leaf?80:50);out.push({el:el,inv:inv,k:role(el)+' '+nm,nm:nm,s:ref(el)+' '+role(el)+' '+JSON.stringify(nm)+state(el)});if(leaf)return;inI=true}
         else if(I&&leaf)return;
         else if(all&&ok&&/^H[1-6]$/.test(t)){out.push({el:el,inv:inv,s:ref(el)+' '+t.toLowerCase()+' '+JSON.stringify(name(el,120))});return}
         else if(all&&ok&&t==='IMG'){if(el.alt)out.push({s:'img '+JSON.stringify(clip(el.alt,80))});return}
@@ -171,7 +175,14 @@ enum PageAgent {
           if(k.nodeType===1)rec(k,inI,noText);
           else if(all&&ok&&!I&&!noText&&k.nodeType===3){var x=k.nodeValue.trim();if(x.length>1||/[0-9A-Za-z]/.test(x))out.push({s:clip(x,160),tel:el})}}
       }
-      rec(o.root||document.body,false);return out}
+      rec(o.root||document.body,false);ctx(out);return out}
+    // Controls with the same role and name (three "Add to cart"): name the part of the page each is in,
+    // from the first text line of its largest ancestor that holds no other one of them.
+    function ctx(out){var g=new Map();out.forEach(function(x){if(x.k){var l=g.get(x.k);if(l)l.push(x);else g.set(x.k,[x])}});
+      g.forEach(function(l){if(l.length<2||l.length>30)return;var els=l.map(function(x){return x.el});
+        l.forEach(function(x){var card=null;for(var p=x.el.parentElement,i=0;p&&p!==document.body&&i<10;p=p.parentElement,i++){if(els.some(function(e){return e!==x.el&&p.contains(e)}))break;card=p}
+          if(!card)return;var ln=(card.innerText||'').split('\n').map(function(t){return t.trim()}).filter(function(t){return t.length>1&&t!==x.nm})[0];
+          if(ln)x.s+=' (in '+JSON.stringify(clip(ln,40))+')'})})}
 
     // Lines are matched by ref when they have one, else by their text.
     function dk(l){var m=/^(e\d+) /.exec(l);return m?m[1]:l}
@@ -200,6 +211,11 @@ enum PageAgent {
         if(n.nodeType===3){buf+=n.nodeValue;return}
         if(n.nodeType!==1||++c>20000)return;
         var t=n.tagName,ro=n.getAttribute('role');
+        // Field values, so a cart's quantities or a form's contents show in the text.
+        if((t==='INPUT'||t==='SELECT'||t==='TEXTAREA')&&(!n.checkVisibility||n.checkVisibility())){var y=(n.type||'').toLowerCase();
+          if(y==='checkbox'||y==='radio')buf+=n.checked?' [x] ':' [ ] ';
+          else if(!/^(hidden|submit|button|reset|image|file)$/.test(y)){var v=secret(n)?(n.value?'\u2022\u2022\u2022':''):t==='SELECT'?(n.selectedOptions[0]?n.selectedOptions[0].text:''):n.value;if(v)buf+=' [='+clip(v,40)+'] '}
+          return}
         if(SKIP[t]||/^(INPUT|SELECT|TEXTAREA|BUTTON|OPTION|IFRAME|CANVAS|VIDEO|AUDIO|DIALOG)$/.test(t)||n.getAttribute('aria-hidden')==='true')return;
         if(n.checkVisibility&&!n.checkVisibility({visibilityProperty:true,checkVisibilityCSS:true})&&getComputedStyle(n).display!=='contents')return;
         if(n!==root&&(t==='NAV'||ro==='navigation'))return;

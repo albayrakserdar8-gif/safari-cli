@@ -149,9 +149,10 @@ enum PageAgent {
         var vis=shown&&(r.width>0||r.height>0),inv=vis&&r.bottom>0&&r.right>0&&r.top<vh&&r.left<vw,ok=vis&&(o.full||inv);
         var ro=el.getAttribute('role'),leaf=native(el)||(ro&&IR.test(ro)),ti=el.getAttribute('tabindex');
         // A role-only control that holds real ones (a menuitem <li> with its dropdown links): list those too.
-        var hold=leaf&&!native(el)&&!!el.querySelector('a[href],button,input,select,textarea,[role=menuitem],[role=option],[role=link],[role=button]');if(hold)leaf=false;
+        var hold=leaf&&!native(el)&&!!el.querySelector('a,button,input,select,textarea,[role=menuitem],[role=option],[role=link],[role=button]');if(hold)leaf=false;
         var I=hold||leaf||el.hasAttribute('onclick')||(ti!==null&&ti!=='-1')||(el.isContentEditable&&!(el.parentElement&&el.parentElement.isContentEditable));
-        if(!I&&!inI&&ok&&el.children.length<6&&t!=='BODY'&&t!=='HTML'&&getComputedStyle(el).cursor==='pointer')I=true;
+        // A clickable-looking element; inside a listed control only an <a> without href (dropdown items).
+        if(!I&&(!inI||t==='A')&&ok&&el.children.length<6&&t!=='BODY'&&t!=='HTML'&&getComputedStyle(el).cursor==='pointer')I=true;
         if(I&&vis&&!ok)o.off=(o.off||0)+1;
         if(I&&ok){out.push({el:el,inv:inv,s:ref(el)+' '+role(el)+' '+JSON.stringify(name(el,leaf?80:50))+state(el)});if(leaf)return;inI=true}
         else if(I&&leaf)return;

@@ -207,6 +207,8 @@ Bu turdan kalan üç sorun da sonradan giderildi ve elle sınandı:
 - sayfa bir alanı değiştirince başka alanları da değiştirdiğinde (Toolshop adres araması) sonuç bunu söylemiyordu;
 - CSS `:hover` menüleri yalnızca `os: true` ile açılıyordu (the-internet `/hovers` artık sayfa içi olaylarla açılıyor).
 
+Beşinci turda (eklenti modu) üç görevin hepsi doğru bitti ve hiçbir ajan tıklamak, yazmak ya da doldurmak için `js` veya `os: true` kullanmadı; `js` yalnızca okuma ve doğrulama için çağrıldı. the-internet 62 çağrıda (önceki turlarda 85, 84, 66, 74), Toolshop 69 çağrıda (170, 178, 89, 97) bitti; hover, TinyMCE, adres otomatik doldurma ve hesap menüsünden çıkış sayfa içi olaylarla çalıştı. Bu turda `href`'i olmayan menü bağlantılarının `read`'de metin olarak görünmesi düzeltildi.
+
 Eklenti yolu da sonradan eklendi ve elle sınandı:
 - Aynı test sayfası üzerinde, iframe'le birlikte, eklenti modunda sınandı.
 - Wikipedia'da 404 durum kodunun bildirildiği ve GitHub'ın katı CSP'sinde `js`'in çalıştığı görüldü.

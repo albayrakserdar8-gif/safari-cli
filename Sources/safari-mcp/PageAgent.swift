@@ -116,13 +116,19 @@ enum PageAgent {
       return TR[t]||t.toLowerCase()}
     function native(el){var t=el.tagName;return t==='BUTTON'||t==='SELECT'||t==='TEXTAREA'||t==='SUMMARY'||(t==='A'&&el.hasAttribute('href'))||(t==='INPUT'&&el.type!=='hidden')}
     function secret(el){return (el.type||'').toLowerCase()==='password'||/cc-|one-time|password/.test(el.getAttribute('autocomplete')||'')}
+    function sib(el,fwd){var s='',d=fwd?'nextSibling':'previousSibling';
+      for(var n=el[d];n;n=n[d]){if(n.nodeType===1&&(/^(INPUT|BR|SELECT|TEXTAREA|BUTTON)$/.test(n.tagName)||n.querySelector('input,select,textarea,button')))break;
+        if(n.nodeType===1||n.nodeType===3)s=fwd?s+n.textContent:n.textContent+s;if(s.trim().length>80)break}
+      return s.replace(/\s+/g,' ').trim()}
     function name(el,k){var a=el.getAttribute('aria-label');if(a)return clip(a,k);
       var lb=el.getAttribute('aria-labelledby');if(lb){var s=lb.split(/\s+/).map(function(i){var e=document.getElementById(i);return e?e.textContent:''}).join(' ');if(s.trim())return clip(s,k)}
       var t=el.tagName;
       if(t==='INPUT'&&/^(submit|button|reset)$/.test(el.type))return clip(el.value,k);
       if(t==='INPUT'||t==='SELECT'||t==='TEXTAREA'){if(el.labels&&el.labels[0])return clip(el.labels[0].textContent,k);
         if(el.placeholder||el.title)return clip(el.placeholder||el.title,k);
-        if(/^(checkbox|radio)$/.test(el.type)){var pe=el.parentElement,px=pe&&(pe.innerText||'').trim();if(px&&px.length<=80)return clip(px,k)}
+        // Unlabelled: the text right after the box (or before it), else the parent's if it holds only this box.
+        if(/^(checkbox|radio)$/.test(el.type)){var sx=sib(el,1)||sib(el,0);if(sx)return clip(sx,k);
+          var pe=el.parentElement,px=pe&&(pe.innerText||'').trim();if(px&&px.length<=80&&pe.querySelectorAll('input').length===1)return clip(px,k)}
         return clip(el.name||el.id||'',k)}
       if(t==='IMG')return clip(el.alt||el.title||'',k);
       var x=el.innerText||el.textContent||el.title;
@@ -303,8 +309,9 @@ enum PageAgent {
       if(more)for(var k in more)i[k]=more[k];
       return el.dispatchEvent(new C(type,i))}
     function watch(){S.fx=0;var mo=new MutationObserver(hit),ev=['input','change','scroll','hashchange','submit'];
-      function hit(){S.fx=1;mo.disconnect();ev.forEach(function(e){removeEventListener(e,hit,true)})}
-      mo.observe(document,{subtree:true,childList:true,attributes:true,characterData:true});ev.forEach(function(e){addEventListener(e,hit,true)});setTimeout(hit,1500)}
+      function stop(){mo.disconnect();ev.forEach(function(e){removeEventListener(e,hit,true)})}
+      function hit(){S.fx=1;stop()}
+      mo.observe(document,{subtree:true,childList:true,attributes:true,characterData:true});ev.forEach(function(e){addEventListener(e,hit,true)});setTimeout(stop,3000)}
     // While Safari's window is in the background (the usual case here), focus() moves focus
     // without firing focus/blur. Forms that commit on blur (Angular) then never see the
     // value, so send those events ourselves, as moving focus would.
@@ -357,10 +364,18 @@ enum PageAgent {
       if(go&&k==='Tab'){var p0=document.activeElement,L=[].filter.call(document.querySelectorAll('a[href],button,input,select,textarea,[tabindex],[contenteditable]'),function(e){return e.tabIndex>=0&&!e.disabled&&(!e.checkVisibility||e.checkVisibility())});
         var j=L.indexOf(el),nx=L.length?L[(j+(i.shiftKey?-1:1)+L.length)%L.length]:null;
         if(nx){try{nx.focus({preventScroll:true})}catch(e){}fsync(p0);if(document.activeElement===nx)moved=' (focus: '+desc(nx)+')'}}
-      var ed=k==='Tab'?'':go?keydef(el,k,i):/^(Backspace|Delete|Enter)$|^.$/.test(k)&&(el.isContentEditable||el.tagName==='TEXTAREA'||el.tagName==='INPUT')?fval(el):'';if(ed)S.fx=1;
+      // Sliders: report the value; a native range input also needs the key's default action.
+      var sl=el.getAttribute('role')==='slider'||el.tagName==='INPUT'&&el.type==='range';S.slider=sl;
+      if(sl&&go&&el.tagName==='INPUT')rangeKey(el,k,i);
+      var ed=sl?' ='+JSON.stringify(clip(el.getAttribute('aria-valuetext')||el.getAttribute('aria-valuenow')||el.value||'',30)):k==='Tab'?'':go?keydef(el,k,i):/^(Backspace|Delete|Enter)$|^.$/.test(k)&&(el.isContentEditable||el.tagName==='TEXTAREA'||el.tagName==='INPUT')?fval(el):'';if(ed)S.fx=1;
       el.dispatchEvent(new KeyboardEvent('keyup',i));
       return'key '+a.key+(go?'':' (handled by page)')+moved+ed}
     function fval(el){var inp=el.tagName==='INPUT'||el.tagName==='TEXTAREA';return' ='+JSON.stringify(inp&&secret(el)?(el.value?'\u2022\u2022\u2022':''):clip(inp?el.value:el.innerText,60))}
+    function rangeKey(el,k,i){var mn=el.min===''?0:+el.min,mx=el.max===''?100:+el.max,st=!el.step||el.step==='any'?1:+el.step,v=+el.value,big=Math.max(st,(mx-mn)/10);
+      var n={ArrowRight:v+st,ArrowUp:v+st,ArrowLeft:v-st,ArrowDown:v-st,PageUp:v+big,PageDown:v-big,Home:mn,End:mx}[k];if(n==null||i.metaKey||i.ctrlKey)return;
+      n=Math.min(mx,Math.max(mn,n));if(n===v)return;
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,String(n));
+      el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))}
     // Default actions of editing keys in fields, which dispatched key events do not perform.
     function keydef(el,k,i){var inp=el.tagName==='TEXTAREA'||el.tagName==='INPUT'&&!/^(checkbox|radio|file|range|color|submit|button|reset|image|hidden)$/i.test(el.type);
       if(!inp&&!el.isContentEditable)return'';
@@ -435,7 +450,9 @@ enum PageAgent {
     function delta(){var c=fdelta(),t0=S.t0,out=[],f='';S.t0=null;if(!t0)return{t:'',f:'',c:c};
       // A line that only shrank (an inline element removed) is not new text.
       var now=lines(),ns=new Set(now),gone=[];t0.forEach(function(l){if(l.length>1&&!ns.has(l))gone.push(l)});
-      now.forEach(function(l){if(out.length<3&&l.length>1&&!t0.has(l)&&out.indexOf(l)<0&&!gone.some(function(g){return g.length>l.length&&g.indexOf(l)>=0}))out.push(l)});
+      // After a slider key, lines without letters are its own labels run together (min, max, value).
+      var sl=S.slider;S.slider=false;
+      now.forEach(function(l){if(out.length<3&&l.length>1&&!(sl&&!/\p{L}/u.test(l))&&!t0.has(l)&&out.indexOf(l)<0&&!gone.some(function(g){return g.length>l.length&&g.indexOf(l)>=0}))out.push(l)});
       if(S.n0!=null)try{f=mcall('fails',[S.n0])}catch(e){}S.n0=null;
       return{t:out.map(function(l){return JSON.stringify(clip(l,100))}).join(' / '),f:f,c:c}}
     // CSS :hover cannot be triggered by dispatched events. Copy the page's :hover rules with a
@@ -455,7 +472,7 @@ enum PageAgent {
       for(var e=el;e&&e.nodeType===1;e=e.parentElement||(e.getRootNode&&e.getRootNode().host))l.push(e);
       if(h.n)l.forEach(function(e){e.classList.add('__smcp_hover')});S.hv=l;return h}
     function act(a){S.note='';if(a.text!=null&&(a.action==='dialog'||a.action==='click'))a.text=String(a.text).replace(/^answer\s*[:=]?\s*/i,'');var r=act1(a);return r+S.note}
-    function act1(a){var t;S.fx=1;S.f0=null;
+    function act1(a){var t;S.fx=1;S.f0=null;S.slider=false;
       if(a.action==='click'||a.action==='dblclick'||a.action==='key'||a.action==='hover'){watch();S.t0=new Set(lines());S.n0=null;try{S.n0=mcall('ncount')}catch(e){}}
       if(/^(click|dblclick|key|hover|fill|select|type)$/.test(a.action)){fsnap(a);S.q0=null;try{S.q0=mcall('nn0')}catch(e){}}
       switch(a.action){

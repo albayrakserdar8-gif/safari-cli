@@ -773,9 +773,18 @@ final class Tools {
         if ["scroll", "dialog"].contains(action) { return result }
         let twice = ["click", "dblclick", "key", "hover"].contains(action)
         // The address from before the action, so a pushState route change shows up as one.
-        let out = settle(id, result, href: env["u0"] as? String ?? env["u"] as? String ?? "", tabURL: verifiedURL,
+        var out = settle(id, result, href: env["u0"] as? String ?? env["u"] as? String ?? "", tabURL: verifiedURL,
                          wasReady: env["r"] as? String == "complete", twice: twice)
         guard !out.contains(" → "), a["os"] as? Bool != true else { return out }
+        // Pages often react a moment later (a timer, an animation): give them up to 1.2 s more.
+        let noChange = " (no change on the page yet)"
+        if frame == 0, out.hasSuffix(noChange) {
+            let t0 = Date()
+            while Date().timeIntervalSince(t0) < 1.2 {
+                usleep(150_000)
+                if peek(id)?.changed == true { out = String(out.dropLast(noChange.count)); break }
+            }
+        }
         // The page may still be waiting for its own requests (adding to a cart, an address lookup):
         // let them finish, so what they change is part of this result.
         let start = Date()

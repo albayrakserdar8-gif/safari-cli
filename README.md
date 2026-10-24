@@ -134,11 +134,11 @@ Sunucunun açtığı sekmeler arka planda açılır.
 
 Varsayılan yol sayfa içi olaylardır: Safari arka planda kalır, imleç sende kalır.
 
-Sayfa içi tuş olayları tarayıcının kendi davranışını tetiklemediği için, sayfa olayı kendisi işlemediyse sunucu alanlardaki düzenleme tuşlarını kendisi uygular: `cmd+a`, `Backspace`, `Delete`, ok tuşları, `Home`/`End` (`shift` ile seçim), tek karakter ve çok satırlı alanlarda `Enter`. Sonuç alanın yeni değerini gösterir. Hedefsiz tuşlar, son hedef alınan iframe'e gider. `type` metni her zaman sona ekler.
+Sayfa içi tuş olayları tarayıcının kendi davranışını tetiklemediği için, sayfa olayı kendisi işlemediyse sunucu alanlardaki düzenleme tuşlarını kendisi uygular: `cmd+a`, `Backspace`, `Delete`, ok tuşları, `Home`/`End` (`shift` ile seçim), tek karakter ve çok satırlı alanlarda `Enter`. Sonuç alanın yeni değerini gösterir; kaydırıcılarda (`role="slider"` ve `input[type=range]`) tuşun ardından değer `key ArrowLeft ="99"` gibi yazılır. Hedefsiz tuşlar, son hedef alınan iframe'e gider. `type` metni her zaman sona ekler.
 
 `hover`, sayfanın CSS `:hover` kurallarını bir sınıfla kopyalayıp öğeye ve atalarına uygular; böylece üzerine gelince açılan menüler `os: true` olmadan açılır. Başka sitelerden yüklenen stil sayfalarının kuralları okunamaz; sonuç bunu söyler.
 
-Bir işlem sayfanın kendi isteklerini başlatırsa (sepete ekleme, adres arama) sunucu bunların bitmesini en çok 2 saniye bekler. Sonuç, işlemin hedefi dışında değişen form alanlarını `· also changed: e4 textbox "Sokak" ="…"` diye bildirir.
+Bir işlem sayfanın kendi isteklerini başlatırsa (sepete ekleme, adres arama) sunucu bunların bitmesini en çok 2 saniye bekler. Sayfa hemen tepki vermezse 1,2 saniye daha bakar; geç beliren metin de sonuca girer. Sonuç, işlemin hedefi dışında değişen form alanlarını `· also changed: e4 textbox "Sokak" ="…"` diye bildirir.
 
 `os: true` gerçek fare ve klavye olayı gönderir. Sayfa içi olayları yok sayan siteler ve stilini başka siteden alan `:hover` menüleri için gerekir. Erişilebilirlik izni ister, Safari'yi öne getirir ve çalışırken imleci kullanır; tıklamadan sonra imleci eski yerine koyar, `hover` sonrasında öğenin üzerinde bırakır. Çağrı başına yaklaşık bir saniye sürer.
 
@@ -207,7 +207,7 @@ Bu turdan kalan üç sorun da sonradan giderildi ve elle sınandı:
 - sayfa bir alanı değiştirince başka alanları da değiştirdiğinde (Toolshop adres araması) sonuç bunu söylemiyordu;
 - CSS `:hover` menüleri yalnızca `os: true` ile açılıyordu (the-internet `/hovers` artık sayfa içi olaylarla açılıyor).
 
-Beşinci turda (eklenti modu) üç görevin hepsi doğru bitti ve hiçbir ajan tıklamak, yazmak ya da doldurmak için `js` veya `os: true` kullanmadı; `js` yalnızca okuma ve doğrulama için çağrıldı. the-internet 62 çağrıda (önceki turlarda 85, 84, 66, 74), Toolshop 69 çağrıda (170, 178, 89, 97) bitti; hover, TinyMCE, adres otomatik doldurma ve hesap menüsünden çıkış sayfa içi olaylarla çalıştı. Bu turda `href`'i olmayan menü bağlantılarının `read`'de metin olarak görünmesi düzeltildi.
+Beşinci turda (eklenti modu) üç görevin hepsi doğru bitti ve hiçbir ajan tıklamak, yazmak ya da doldurmak için `js` veya `os: true` kullanmadı; `js` yalnızca okuma ve doğrulama için çağrıldı. the-internet 62 çağrıda (önceki turlarda 85, 84, 66, 74), Toolshop 69 çağrıda (170, 178, 89, 97) bitti; hover, TinyMCE, adres otomatik doldurma ve hesap menüsünden çıkış sayfa içi olaylarla çalıştı. Bu turda `href`'i olmayan menü bağlantılarının `read`'de metin olarak görünmesi düzeltildi. Sonradan şunlar da giderildi: kaydırıcı tuşlarında anlamsız `new text` satırları yerine değerin gösterilmemesi, bir saniye sonra beliren metnin "no change" diye bildirilmesi ve etiketsiz onay kutularının ortak bir adla listelenmesi.
 
 Eklenti yolu da sonradan eklendi ve elle sınandı:
 - Aynı test sayfası üzerinde, iframe'le birlikte, eklenti modunda sınandı.

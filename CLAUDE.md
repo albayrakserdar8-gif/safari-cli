@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `safari-mcp`: a local stdio MCP server that lets Claude Code drive the user's real Safari. One Swift binary, no dependencies, no daemon. It talks to Safari through the optional Safari MCP Bridge extension (`Extension/`) when that is connected, else through Apple Events. It is an independent project; do not copy code from Anthropic's Claude in Chrome extension, do not use its OAuth token or bridge, and keep "Claude" out of the product name.
 
-The README is written in Turkish and is the user-facing reference for setup, permissions and known limits.
+`README.md` (English) and `README.tr.md` (Turkish) are the user-facing reference for setup, permissions and known limits. Keep them short and in step with each other.
 
 ## Commands
 
@@ -117,7 +117,7 @@ Capture uses ScreenCaptureKit in a child process: the server re-executes itself 
 
 ## Repository
 
-Hosted at `github.com/sadopc/safari-mcp` (public), default branch `main`. `README.md` is user-facing and in Turkish; keep its "Sınırlar" (limits) and "Sınanma durumu" (what was tested) sections honest when behaviour changes.
+Hosted at `github.com/sadopc/safari-mcp` (public), default branch `main`. Keep the "Limits" / "Sınırlar" and "Testing status" / "Sınanma durumu" sections of both READMEs honest when behaviour changes.
 
 ## Design constraints
 

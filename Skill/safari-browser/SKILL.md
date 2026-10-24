@@ -9,7 +9,7 @@ The `mcp__safari__*` tools act in the user's real Safari, with their logins, whi
 
 ## Ground rules
 
-- **Work in your own tab.** Start with `tabs action:"new" url:...` (opens in the background) and pass its id as `tab` on every call. Act in a tab the user already has open only when they ask you to.
+- **Work in your own tab.** Start with `tabs action:"new" url:...` (opens in the background) and pass its id as `tab` on every call, `batch` included. Without `tab` a call goes to the last tab anyone used: when several agents share the server, that can be another agent's tab. Act in a tab the user already has open only when they ask you to.
 - **Close what you opened** with `tabs action:"close" tab:...` when done. Never close, navigate or type in the user's tabs on your own initiative.
 - **Ask before anything with consequences:** submitting or sending forms, posting, buying, deleting, changing account settings, accepting a confirm dialog that does any of these.
 - Tab ids (`t3`) stay valid while the tab is open. If a call says a tab is gone, run `tabs` for current ids; do not guess.
@@ -25,36 +25,37 @@ The `mcp__safari__*` tools act in the user's real Safari, with their logins, whi
 | Only the relevant paragraphs | `read mode:"text" query:"pricing refund"` (BM25-ranked blocks) |
 | Links to follow | `read mode:"links"` (ref + URL, page order); add `query` to filter |
 | What changed after an action | `read diff:true` (`+` added, `~` changed, `-` gone) |
-| Below the fold | `read full:true`, or `act action:"scroll"` then `read diff:true` |
+| Below the fold | `read full:true`, or `act action:"scroll"` then `read diff:true`. A `(+N controls off-screen …)` line says some exist. Content that loads on scroll (lazy tables, infinite lists) exists only after scrolling to it. |
 | Layout, images, canvas, visual bugs | `screenshot` (JPEG; `ref` or `region` to crop). Costs far more tokens than `read`. |
 
 - Long output ends with `… N more chars; offset=K`; continue with `offset:K` only if you need it. Lower `max_chars` for a quick look.
 - Scope a read with `ref` or `selector` to one part of the page.
 - Refs belong to the current page. After a navigation, or on a "stale" error, `read` again. Never reuse refs from another page or session.
-- With the Safari extension, `read` adds `--- frame f1 <url>` blocks for iframes. Their refs look like `f1e5` and work everywhere a ref does.
+- With the Safari extension, `read` adds `--- frame f1 <url>` blocks for iframes. Their refs look like `f1e5` and work everywhere a ref does. Without it, `read` says `(N iframes not read …)`: frame content is out of reach, so do not try clicks or `js` into it.
 
 ## Acting
 
-- `act action:"click" ref:"e12"`. The result ends with `→ title | url` when the page changed (the wait is already done), or `(no change on the page yet)` when nothing reacted.
+- `act action:"click" ref:"e12"` (or `selector:"#submit"` instead of a ref). The result ends with `→ title | url` when the page or its address changed (the wait is already done), `· new text: "…"` with lines that appeared in place (form results, messages), or `(no change on the page yet)` when nothing reacted.
 - If nothing reacted: `act action:"wait"` for what you expect, then `read diff:true`. If the page still ignores you, repeat with `os:true` (real mouse/keyboard; needs Accessibility; brings Safari forward). CSS `:hover` menus also need `os:true`.
-- Forms in one call: `act action:"fill" fields:{"e4":"Ada","e5":"Large","e6":true}` (text, `<select>` options by text or value, `true`/`false` for checkboxes and radios). Single field: `fill` (replace) or `type` (append) with `ref` and `text`.
+- Forms in one call: `act action:"fill" fields:{"e4":"Ada","e5":"Large","e6":true}` (text, `<select>` options by text or value, `true`/`false` for checkboxes and radios). Single field: `fill` (replace) or `type` (append) with `ref` and `text`. Results show the value the field now holds (`="Ada"`). Some forms validate a field only when you leave it; the next click does that.
 - `act action:"key" key:"Enter"` (or `cmd+a`, `Escape`, `Tab`). Enter in a field submits its form.
-- `act action:"select" ref text` for one `<select>`.
-- Waiting: `act action:"wait" text:"Order placed"` (or `ref`/`selector`, `gone:true` to wait for disappearance, `timeout` seconds ≤ 30). Prefer this to sleeping or re-reading in a loop.
+- `act action:"select" ref text` for one `<select>`. If the page refuses the option, the result says which one it kept.
+- To edit a list item that opens on double-click (todo lists), `dblclick` its text, not its checkbox: find it with `read query:"<item text>"`.
+- Waiting: `act action:"wait" text:"Order placed"` (or `ref`/`selector`, `gone:true` to wait for disappearance, `timeout` in seconds, ≤ 30). Prefer this to sleeping or re-reading in a loop. Wait for something on the page you will be on: a click that navigates replaces the old page and its messages.
 - Upload: `act action:"upload" ref:<file input> text:"/abs/path/a.pdf,/abs/path/b.png"` (≤ 10 MB total).
 
 ## Dialogs (alert / confirm / prompt)
 
 - They are answered automatically in tabs you work in. `alert` is acknowledged; `confirm` and `prompt` are **dismissed** by default. Each answer is reported as a `⚠ dialog …` line.
-- To accept the next one: `act action:"dialog" text:"accept"` (or the prompt's answer text) **before** the click that opens it. Accept only when the user wants that action.
+- To accept: pass `text:"accept"` (or the prompt's answer) on the click that opens it, or call `act action:"dialog" text:"accept"` before that click. Accept only when the user wants that action.
 - "Safari did not answer in time; the page may be showing a dialog": a native dialog is up. Answer it with `act action:"dialog" text:"dismiss"` (or `"accept"`).
 
 ## JavaScript, logs, batching
 
 - `js code:"document.title"`: a bare expression is returned, or write a body with `return`. Async is fine; 15 s limit. Use it for data that `read` does not show (structured extraction, page state). Do not use it to click or type when `act` can.
 - A `(page CSP blocks eval: …)` note means the code ran with DOM access but without the page's own JS globals.
-- `logs` shows the console; `level:"error"` keeps errors only, `new:true` returns lines since your last `logs` call. `logs kind:"network"` lists requests; `logs kind:"network" id:"n4"` shows one response body (text/JSON).
-- `batch steps:[{tool:"act",args:{...}},{tool:"read",args:{diff:true}}]` runs several calls in one round trip and stops at the first error. Use it for known sequences (fill, submit, wait, read).
+- `logs` shows the console; `level:"error"` keeps errors only, `new:true` returns lines since your last `logs` call. `logs kind:"network"` lists requests; `logs id:"n4"` shows one response body (text/JSON fetch/XHR). Capture starts when the server first touches the page; earlier loads are listed without ids.
+- `batch tab:"t3" steps:[{tool:"act",args:{...}},{tool:"read",args:{diff:true}}]` runs several calls in one round trip and stops at the first error. `tab` applies to steps that do not name one. Use it for known sequences (fill, submit, wait, read).
 
 ## Recipes
 
@@ -75,7 +76,7 @@ The `mcp__safari__*` tools act in the user's real Safari, with their logins, whi
 
 1. `read`, then `act fill fields`.
 2. `act dialog` only if needed, then `act click` submit.
-3. `act wait text:"<success text>"`, then `read diff:true`.
+3. Read the click result (`→ …` or `· new text: …`); if the outcome comes later, `act wait text:"<success text>"`, then `read diff:true`.
 4. Look at `logs level:"error"` if anything fails.
 
 **Debug a page**

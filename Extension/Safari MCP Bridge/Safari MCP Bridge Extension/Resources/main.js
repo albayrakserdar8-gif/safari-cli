@@ -24,7 +24,7 @@ function hook(){if(M.con)return false;M.con=[];M.net=[];M.nn=0;M.cur={};
       try{if(x.responseType===''||x.responseType==='text')keep(id,x.getResponseHeader('content-type'),x.responseText)}catch(e){}});return xs.apply(this,arguments)};
   return true}
 var STATIC=/^(img|css|link|script|font|video|audio|image|icon|stylesheet|media)$/;
-function logs(a){var fresh=hook(),net=a.kind==='network',kind=net?'net':'con',arr=net?M.net:M.con,note='';
+function logs(a){var fresh=hook(),net=a.kind==='network'||!!a.id,kind=net?'net':'con',arr=net?M.net:M.con,note='';
   if(net&&a.id){var b=BOD.get(a.id),l=M.net.find(function(x){return x.indexOf(a.id+' ')===0});
     if(!l)return'no request '+a.id+' in the log';
     return clip(l,300)+(b?'\n'+b.c+'\n'+b.b.slice(0,(a.limit||40)*100):'\n(no body kept: only text/JSON bodies of the last 50 requests)')}
@@ -35,7 +35,7 @@ function logs(a){var fresh=hook(),net=a.kind==='network',kind=net?'net':'con',ar
     arr=w.concat(arr);if(hid)note='('+hid+' images/scripts/styles hidden; pass pattern to include them)\n'}
   else if(net&&!M.nseen){M.nseen=1;var hid=0,res=performance.getEntriesByType('resource').filter(function(e){if(!a.pattern&&STATIC.test(e.initiatorType)){hid++;return false}return true});
     arr=res.map(function(e){return(e.initiatorType||'res')+' '+(e.responseStatus||'-')+' '+e.name+' '+Math.round(e.duration)+'ms'}).concat(arr);
-    note='(fetch/XHR capture starts now; below: what this page loaded so far'+(hid?', without '+hid+' images/scripts/styles (pass pattern to include them)':'')+')\n'}
+    note='(lines without an id were loaded before the server first touched this page; no bodies'+(hid?'; '+hid+' images/scripts/styles hidden, pass pattern to include them':'')+')\n'}
   else if(fresh)note='(capture starts now; earlier console output is not available)\n';
   if(!net&&a.level){var lv=a.level==='error'?/^(error|exception|rejection) /:/^(error|exception|rejection|warn) /;arr=arr.filter(function(l){return lv.test(l)})}
   if(a.pattern){var re;try{re=new RegExp(a.pattern,'i')}catch(e){}var p=a.pattern.toLowerCase();arr=arr.filter(function(l){return re?re.test(l):l.toLowerCase().indexOf(p)>=0})}

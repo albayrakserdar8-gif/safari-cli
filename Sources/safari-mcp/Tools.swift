@@ -5,39 +5,40 @@ import UniformTypeIdentifiers
 final class Tools {
     // Descriptions are sent to the model every session; keep them terse.
     static let defs: [[String: Any]] = [
-        tool("tabs", "List, open, close or select Safari tabs. Ids like t3 stay valid while the tab is open; * marks the visible tab of a window.", [
+        tool("tabs", "List, open, close or select Safari tabs. Ids (t3) last while the tab is open; * marks a window's visible tab.", [
             "action": ["type": "string", "enum": ["list", "new", "close", "select"]],
             "url": str, "tab": str,
         ]),
         tool("navigate", "Load a URL, or back / forward / reload, and wait for the page.", ["url": str, "tab": str], ["url"]),
-        tool("read", "Read the page. interactive (default): visible controls with refs. all: adds headings and text. text: main content as markdown. links: link refs and URLs. query finds elements by words on the whole page, or filters text/links.", [
+        tool("read", "Read the page. interactive (default): visible controls with refs. all: adds headings and text. text: main content as markdown. links: link refs and URLs. query: find by words on the whole page, or filter text/links.", [
             "mode": ["type": "string", "enum": ["interactive", "all", "text", "links"]],
             "query": str, "ref": str, "selector": str,
             "full": ["type": "boolean", "description": "include off-screen elements"],
             "diff": ["type": "boolean", "description": "only changes since the last read"],
             "max_chars": int, "offset": int, "tab": str,
         ]),
-        tool("act", "Act on an element by ref (from read) or x,y viewport px. text: for type/fill/select, file paths for upload, accept/dismiss/answer for the next dialog (default dismiss). key: Enter, cmd+a. dy: scroll px. fields {ref: value} fills many. wait: until text/ref/selector appears (gone: disappears).", [
+        tool("act", "Act on an element by ref (from read), selector or x,y viewport px. text: for type/fill/select, file paths for upload, accept/dismiss/answer for the next dialog (dialog, or the click that opens it; default dismiss). key: Enter, cmd+a. dy: scroll px. fields {ref: value} fills many. wait: until text/ref/selector appears (gone: disappears).", [
             "action": ["type": "string", "enum": ["click", "dblclick", "hover", "type", "fill", "select", "key", "scroll", "wait", "upload", "dialog"]],
             "ref": str, "x": num, "y": num, "text": str, "key": str, "dy": num,
-            "fields": ["type": "object"], "selector": str, "gone": ["type": "boolean"], "timeout": num,
+            "fields": ["type": "object"], "selector": str, "gone": ["type": "boolean"], "timeout": ["type": "number", "description": "seconds"],
             "os": ["type": "boolean", "description": "real mouse/keyboard; use when the page ignores the default synthetic events"],
             "tab": str,
         ], ["action"]),
         tool("js", "Run JavaScript in the page. Code is an async function body: use return. 15s limit.", [
             "code": str, "max_chars": int, "tab": str,
         ], ["code"]),
-        tool("screenshot", "JPEG of the viewport, an element (ref) or a region [x,y,w,h]. Costs far more tokens than read.", [
+        tool("screenshot", "JPEG of the viewport, an element (ref) or a region [x,y,w,h]. Costs far more than read.", [
             "ref": str, "region": ["type": "array", "items": num], "max_width": int, "tab": str,
         ]),
-        tool("logs", "Console or network lines captured since the first logs call on this page. id (n4) shows a response body.", [
+        tool("logs", "Console or network lines since the server first touched the page. id (n4) shows a response body.", [
             "kind": ["type": "string", "enum": ["console", "network"]],
             "level": ["type": "string", "enum": ["error", "warn"]],
             "new": ["type": "boolean", "description": "only lines since the last logs call"],
             "pattern": str, "id": str, "limit": int, "clear": ["type": "boolean"], "tab": str,
         ]),
-        tool("batch", "Run several tool calls in order in one round trip; stops at the first error.", [
+        tool("batch", "Run several tool calls in order in one round trip; stops at the first error. tab is the default for steps.", [
             "steps": ["type": "array", "items": ["type": "object", "properties": ["tool": str, "args": ["type": "object"]], "required": ["tool"]]],
+            "tab": str,
         ], ["steps"]),
     ]
     static let names = Set(defs.compactMap { $0["name"] as? String })
@@ -407,6 +408,7 @@ final class Tools {
         let id = try resolve(a)
         var o = pick(a, keys)
         o["op"] = op
+        if op == "read", !safari.isExtension { o["nf"] = 1 }  // agent notes iframes it cannot read
         let frame = try frameOf(&o, id)
         var v = try inFrame(frame) { try agentCall(id, o)["v"] as? String ?? "" }
         if op == "read", frame == 0, a["ref"] == nil, a["selector"] == nil, safari.isExtension { v += frameBlocks(id, o) }
@@ -659,6 +661,7 @@ final class Tools {
         if action == "dialog", let r = try nativeDialog(id, a["text"] as? String ?? "accept") { return r }
         var result: String
         var env: [String: Any]
+        var frame = 0
         if action == "upload" {
             var o = pick(a, ["ref", "x", "y"])
             o["op"] = "act"
@@ -669,21 +672,31 @@ final class Tools {
         } else if a["os"] as? Bool == true {
             (result, env) = try osAct(id, action, a)
         } else {
-            var o = pick(a, ["action", "ref", "x", "y", "text", "key", "dy", "fields"])
+            var o = pick(a, ["action", "ref", "x", "y", "text", "key", "dy", "fields", "selector"])
             o["op"] = "act"
-            let frame = try frameOf(&o, id)
+            frame = try frameOf(&o, id)
             env = try inFrame(frame) { try agentCall(id, o) }
             result = env["v"] as? String ?? "ok"
             if frame != 0, let alias = frameIDs[id]?.firstIndex(of: frame).map({ "f\($0 + 1)" }) {
                 // Report frame refs as the model knows them, and judge page changes by the top document.
                 result = result.replacing(#/\be(\d+)\b/#) { alias + "e" + $0.1 }
                 env["u"] = tabs[id]?.url ?? ""
+                env["u0"] = env["u"]
                 env["r"] = "complete"
             }
         }
         if ["hover", "scroll", "dialog"].contains(action) || a["fields"] != nil { return result }
-        return settle(id, result, href: env["u"] as? String ?? "", tabURL: verifiedURL,
-                      wasReady: env["r"] as? String == "complete", twice: action == "click" || action == "dblclick" || action == "key")
+        let twice = action == "click" || action == "dblclick" || action == "key"
+        // The address from before the action, so a pushState route change shows up as one.
+        let out = settle(id, result, href: env["u0"] as? String ?? env["u"] as? String ?? "", tabURL: verifiedURL,
+                         wasReady: env["r"] as? String == "complete", twice: twice)
+        // Same page, changed in place (a form result, a message): show the new lines, so the
+        // model does not need another read to see what happened.
+        if twice, !out.contains(" → "), a["os"] as? Bool != true,
+           let d = try? inFrame(frame, { try agentCall(id, ["op": "delta"])["v"] as? String }), !d.isEmpty {
+            return out + " · new text: " + d
+        }
+        return out
     }
 
     /// Answers a dialog Safari shows natively, via Accessibility. Only tried when the tab's last
@@ -721,7 +734,9 @@ final class Tools {
         o["op"] = "has"
         let frame = try frameOf(&o, id)
         let gone = a["gone"] as? Bool == true
-        let limit = min(max(a["timeout"] as? Double ?? 10, 0.5), 30)
+        var limit = a["timeout"] as? Double ?? 10
+        if limit > 100 { limit /= 1000 }  // given in milliseconds
+        limit = min(max(limit, 0.5), 30)
         let what = (a["text"] as? String).map { "text " + jsonString($0) } ?? (a["ref"] as? String ?? (a["selector"] as? String).map { "selector " + $0 } ?? "")
         let start = Date()
         while true {
@@ -754,19 +769,32 @@ final class Tools {
         guard Input.trusted(prompt: true) else {
             throw ToolError("Real input needs Accessibility permission for the app running this server (System Settings > Privacy & Security > Accessibility). Grant it and retry, or drop os:true.")
         }
-        var o = pick(a, ["ref", "x", "y"])
+        // Real input goes to whatever is on screen, so the tab is shown first. The user's
+        // visible tab and front app are put back afterwards.
+        try sync()
+        guard let w = tabs[id]?.pos.wid else { throw gone(id) }
+        let back = tabs.values.first { $0.pos.wid == w && $0.visible && $0.id != id }
+        let front = NSWorkspace.shared.frontmostApplication
+        try guardedOp(id) { try safari.raise($0, $1) }
+        defer {
+            if let back { try? guardedOp(back.id) { try safari.select($0, $1) } }
+            if let front, front.bundleIdentifier != "com.apple.Safari" { front.activate() }
+        }
+        let wid = cg(w)
+        var tries = 0
+        while !Capture.onScreen(wid) && tries < 20 { usleep(100_000); tries += 1 }
+        usleep(250_000)
+
+        // Measure only now: a background tab can lay out differently from the shown one.
+        var o = pick(a, ["ref", "x", "y", "selector"])
         o["op"] = "geom"
         let env = try agentCall(id, o)
         let verified = verifiedURL
         let g = env["v"] as? [String: Any] ?? [:]
         let iw = g["iw"] as? Double ?? 0, ih = g["ih"] as? Double ?? 0
-
-        try guardedOp(id) { try safari.raise($0, $1) }
-        guard let w = tabs[id]?.pos.wid else { throw gone(id) }
-        let wid = cg(w)
-        var tries = 0
-        while !Capture.onScreen(wid) && tries < 20 { usleep(100_000); tries += 1 }
-        usleep(250_000)
+        if let cover = g["cover"] as? String, ["click", "dblclick", "type", "fill"].contains(action) {
+            throw ToolError("\(g["d"] as? String ?? "target") is covered by \(cover) at its centre; not clicking. Close what covers it, or use x,y.")
+        }
         let view = try Capture.viewport(wid: wid, iw: iw, ih: ih).rect
         let z = iw > 0 ? Double(view.width) / iw : 1
         var point: CGPoint?
@@ -798,6 +826,7 @@ final class Tools {
             throw ToolError("\(action) has no os mode; drop os:true.")
         }
         verifiedURL = verified
+        usleep(150_000)  // let the event land before the user's tab comes back
         let what = (g["d"] as? String).map { " on " + $0 } ?? ""
         return ("real \(action)\(what)", env)
     }
@@ -877,10 +906,14 @@ final class Tools {
         // Only the visible tab of a window can be captured.
         try sync()
         guard let tab = tabs[id] else { throw gone(id) }
+        var back: Tab?
         if !tab.visible {
+            back = tabs.values.first { $0.pos.wid == tab.pos.wid && $0.visible }
             try guardedOp(id) { try safari.select($0, $1) }
             usleep(350_000)
         }
+        // Put the user's visible tab back once the capture is done.
+        defer { if let back { try? guardedOp(back.id) { try safari.select($0, $1) } } }
         var o = pick(a, ["ref"])
         o["op"] = "geom"
         let g = try agentCall(id, o)["v"] as? [String: Any] ?? [:]
@@ -956,8 +989,11 @@ final class Tools {
                 add("[\(i + 1)] unknown tool; stopped")
                 break
             }
+            var args = step["args"] as? [String: Any] ?? [:]
+            // A tab given to batch itself must not be dropped: steps would go to the last used tab.
+            if args["tab"] == nil, let t = a["tab"] { args["tab"] = t }
             do {
-                for c in try call(name, step["args"] as? [String: Any] ?? [:]) {
+                for c in try call(name, args) {
                     if case .text(let t) = c { add("[\(i + 1)] \(name): \(t)") } else { out.append(c) }
                 }
             } catch let e as ToolError {

@@ -33,7 +33,7 @@ enum PageAgent {
           try{if(x.responseType===''||x.responseType==='text')keep(id,x.getResponseHeader('content-type'),x.responseText)}catch(e){}});return xs.apply(this,arguments)};
       return true}
     var STATIC=/^(img|css|link|script|font|video|audio|image|icon|stylesheet|media)$/;
-    function logs(a){var fresh=hook(),net=a.kind==='network',kind=net?'net':'con',arr=net?M.net:M.con,note='';
+    function logs(a){var fresh=hook(),net=a.kind==='network'||!!a.id,kind=net?'net':'con',arr=net?M.net:M.con,note='';
       if(net&&a.id){var b=BOD.get(a.id),l=M.net.find(function(x){return x.indexOf(a.id+' ')===0});
         if(!l)return'no request '+a.id+' in the log';
         return clip(l,300)+(b?'\n'+b.c+'\n'+b.b.slice(0,(a.limit||40)*100):'\n(no body kept: only text/JSON bodies of the last 50 requests)')}
@@ -44,7 +44,7 @@ enum PageAgent {
         arr=w.concat(arr);if(hid)note='('+hid+' images/scripts/styles hidden; pass pattern to include them)\n'}
       else if(net&&!M.nseen){M.nseen=1;var hid=0,res=performance.getEntriesByType('resource').filter(function(e){if(!a.pattern&&STATIC.test(e.initiatorType)){hid++;return false}return true});
         arr=res.map(function(e){return(e.initiatorType||'res')+' '+(e.responseStatus||'-')+' '+e.name+' '+Math.round(e.duration)+'ms'}).concat(arr);
-        note='(fetch/XHR capture starts now; below: what this page loaded so far'+(hid?', without '+hid+' images/scripts/styles (pass pattern to include them)':'')+')\n'}
+        note='(lines without an id were loaded before the server first touched this page; no bodies'+(hid?'; '+hid+' images/scripts/styles hidden, pass pattern to include them':'')+')\n'}
       else if(fresh)note='(capture starts now; earlier console output is not available)\n';
       if(!net&&a.level){var lv=a.level==='error'?/^(error|exception|rejection) /:/^(error|exception|rejection|warn) /;arr=arr.filter(function(l){return lv.test(l)})}
       if(a.pattern){var re;try{re=new RegExp(a.pattern,'i')}catch(e){}var p=a.pattern.toLowerCase();arr=arr.filter(function(l){return re?re.test(l):l.toLowerCase().indexOf(p)>=0})}
@@ -139,12 +139,14 @@ enum PageAgent {
         var ro=el.getAttribute('role'),leaf=native(el)||(ro&&IR.test(ro)),ti=el.getAttribute('tabindex');
         var I=leaf||el.hasAttribute('onclick')||(ti!==null&&ti!=='-1')||(el.isContentEditable&&!(el.parentElement&&el.parentElement.isContentEditable));
         if(!I&&!inI&&ok&&el.children.length<6&&t!=='BODY'&&t!=='HTML'&&getComputedStyle(el).cursor==='pointer')I=true;
+        if(I&&vis&&!ok)o.off=(o.off||0)+1;
         if(I&&ok){out.push({el:el,inv:inv,s:ref(el)+' '+role(el)+' '+JSON.stringify(name(el,leaf?80:50))+state(el)});if(leaf)return;inI=true}
         else if(I&&leaf)return;
         else if(all&&ok&&/^H[1-6]$/.test(t)){out.push({el:el,inv:inv,s:ref(el)+' '+t.toLowerCase()+' '+JSON.stringify(name(el,120))});return}
         else if(all&&ok&&t==='IMG'){if(el.alt)out.push({s:'img '+JSON.stringify(clip(el.alt,80))});return}
-        else if(all&&ok&&!inI&&(PROSE[t]===1||(PROSE[t]===2&&!el.querySelector('a[href],button,input,select,textarea')))){var p=clip(el.innerText,400);if(p.length>1)out.push({s:p,tel:el});if(!o.links)return;noText=true}
-        var kids=el.shadowRoot?el.shadowRoot.childNodes:el.childNodes;
+        else if(all&&ok&&!inI&&!el.querySelector('slot')&&(PROSE[t]===1||(PROSE[t]===2&&!el.querySelector('a[href],button,input,select,textarea')))){var p=clip(el.innerText,400);if(p.length>1)out.push({s:p,tel:el});if(!o.links)return;noText=true}
+        // A slot shows the host's children assigned to it (innerText of the shadow side is empty).
+        var sl=t==='SLOT'&&el.assignedNodes({flatten:true}),kids=sl&&sl.length?sl:el.shadowRoot?el.shadowRoot.childNodes:el.childNodes;
         for(var i=0;i<kids.length;i++){var k=kids[i];
           if(k.nodeType===1)rec(k,inI,noText);
           else if(all&&ok&&!I&&!noText&&k.nodeType===3){var x=k.nodeValue.trim();if(x.length>1||/[0-9A-Za-z]/.test(x))out.push({s:clip(x,160),tel:el})}}
@@ -234,7 +236,7 @@ enum PageAgent {
     function read(a){
       var root=a.ref?get(a.ref):a.selector?document.querySelector(a.selector):null;
       if(a.selector&&!root)throw new Error('selector matched nothing');
-      var body,md0=null,qm=a.query&&a.mode!=='text'&&a.mode!=='links';
+      var body,md0=null,so=null,qm=a.query&&a.mode!=='text'&&a.mode!=='links';
       if(qm){
         var q=a.query.toLowerCase().trim(),ws=q.split(/\s+/).filter(Boolean),hits=[];
         var wb=ws.map(function(w){return new RegExp('(^|[^a-z0-9])'+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'($|[^a-z0-9])')});
@@ -252,7 +254,8 @@ enum PageAgent {
       }else if(a.mode==='links'){
         body=links(root||document.body,a.query);
       }else{
-        body=scan({mode:a.mode,full:a.full,root:root}).map(function(x){return x.s}).join('\n')||(a.full?'(nothing found)':'(nothing in viewport; scroll or pass full:true)');
+        var so={mode:a.mode,full:a.full,root:root};
+        body=scan(so).map(function(x){return x.s}).join('\n')||(a.full?'(nothing found)':'(nothing in viewport; scroll or pass full:true)');
       }
       if(!qm){
         var k=(a.mode||'interactive')+'|'+(a.ref||a.selector||'')+'|'+(a.full?1:0)+'|'+(a.query||''),old=S.last[k];S.last[k]=body;
@@ -261,12 +264,17 @@ enum PageAgent {
       if(off+max<tot){var nl=cut.lastIndexOf('\n');if(nl>max*0.6)cut=cut.slice(0,nl);cut+='\n\u2026 '+(tot-off-cut.length)+' more chars; offset='+(off+cut.length)}
       // Each chunk lists the URLs of the [n] links it contains.
       if(md0){var used=new Set();cut.replace(/\[(\d+)\]/g,function(_,n){used.add(+n)});cut+=foot(md0,used)}
+      // Say what this read left out, so the model does not go looking for it with js.
+      if(so&&so.off)cut+='\n(+'+so.off+' controls off-screen: full:true or query)';
+      if(a.nf&&!root){var fr=[].filter.call(document.querySelectorAll('iframe,frame'),function(f){var r=f.getBoundingClientRect();return r.width>20&&r.height>20}).length;
+        if(fr)cut+='\n('+fr+' iframe'+(fr>1?'s':'')+' not read: frame content needs the Safari MCP extension)'}
       var de=document.documentElement;
       return(document.title?clip(document.title,80)+' | ':'')+location.href.slice(0,200)+' | scroll '+Math.round(scrollY)+'/'+Math.max(0,de.scrollHeight-innerHeight)+(document.readyState==='complete'?'':' | still loading')+'\n'+cut}
 
     function deep(x,y){var e=document.elementFromPoint(x,y);while(e&&e.shadowRoot){var n=e.shadowRoot.elementFromPoint(x,y);if(!n||n===e)break;e=n}return e}
     function inside(el,c){for(;c;c=c.parentNode||c.host)if(c===el)return true;return false}
     function target(a){var el;
+      if(!a.ref&&a.selector){el=document.querySelector(a.selector);if(!el)throw new Error('no element matches '+a.selector);a.ref=ref(el)}
       if(a.ref){el=get(a.ref);var r=el.getBoundingClientRect();
         if(r.top<0||r.left<0||r.bottom>innerHeight||r.right>innerWidth){el.scrollIntoView({block:'center',inline:'center'});r=el.getBoundingClientRect()}
         // Events go to the innermost element under the pointer, as a real click would, so
@@ -284,9 +292,23 @@ enum PageAgent {
     function watch(){S.fx=0;var mo=new MutationObserver(hit),ev=['input','change','scroll','hashchange','submit'];
       function hit(){S.fx=1;mo.disconnect();ev.forEach(function(e){removeEventListener(e,hit,true)})}
       mo.observe(document,{subtree:true,childList:true,attributes:true,characterData:true});ev.forEach(function(e){addEventListener(e,hit,true)});setTimeout(hit,1500)}
-    function press(t,d){var el=t.to||t.el;
-      mev(el,'pointerdown',t.x,t.y,d);mev(el,'mousedown',t.x,t.y,d);
-      if(el.focus&&document.activeElement!==el)try{el.focus({preventScroll:true})}catch(e){}
+    // While Safari's window is in the background (the usual case here), focus() moves focus
+    // without firing focus/blur. Forms that commit on blur (Angular) then never see the
+    // value, so send those events ourselves, as moving focus would.
+    // Like a real press, focus goes to the nearest focusable ancestor, or leaves the old element;
+    // a cancelled mousedown (keep) moves nothing. p is the focus from before the action: the
+    // page may have moved focus itself meanwhile (sliders do, in mousedown), silently too.
+    function foc(el,p,keep){if(p===undefined)p=document.activeElement;
+      if(!keep){var f=el;while(f&&!(f.tabIndex>=0||f.isContentEditable))f=f.parentElement||(f.getRootNode&&f.getRootNode().host);
+        if(f!==document.activeElement){if(f)try{f.focus({preventScroll:true})}catch(e){}else if(p&&p.blur)p.blur()}}
+      fsync(p)}
+    // Fire the focus events a focus change from p to the current element would have fired.
+    function fsync(p){var now=document.activeElement;if(document.hasFocus()||now===p)return;
+      if(p&&p!==document.body){p.dispatchEvent(new FocusEvent('blur',{relatedTarget:now}));p.dispatchEvent(new FocusEvent('focusout',{bubbles:true,composed:true,relatedTarget:now}))}
+      if(now&&now!==document.body){now.dispatchEvent(new FocusEvent('focus',{relatedTarget:p}));now.dispatchEvent(new FocusEvent('focusin',{bubbles:true,composed:true,relatedTarget:p}))}}
+    function press(t,d){var el=t.to||t.el,p=document.activeElement;
+      mev(el,'pointerdown',t.x,t.y,d);var go=mev(el,'mousedown',t.x,t.y,d);
+      foc(el,p,!go);
       mev(el,'pointerup',t.x,t.y,d);mev(el,'mouseup',t.x,t.y,d);mev(el,'click',t.x,t.y,d)}
     function setv(el,v){var p=el.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
       Object.getOwnPropertyDescriptor(p,'value').set.call(el,v);
@@ -295,17 +317,17 @@ enum PageAgent {
       if(!el||el===document.body)throw new Error('nothing is focused; pass ref');
       var inp=el.tagName==='INPUT'||el.tagName==='TEXTAREA';
       if(!inp&&!el.isContentEditable)throw new Error(desc(el)+' is not editable');
-      el.focus();
+      foc(el);
       if(fill){if(inp)el.select();else getSelection().selectAllChildren(el)}
       else if(inp)try{el.setSelectionRange(el.value.length,el.value.length)}catch(e){}
       var before=inp?el.value:null,ok=false;
       try{ok=text?document.execCommand('insertText',false,text):(fill?document.execCommand('delete'):true)}catch(e){}
       if(inp){var want=fill?text:before+text;if(!ok||el.value!==want&&el.value===before)setv(el,want)}
       else if(!ok)el.textContent=(fill?'':el.textContent)+text;
-      return(fill?'filled ':'typed into ')+desc(el)}
+      return(fill?'filled ':'typed into ')+desc(el)+state(el)}
     var KC={Enter:13,Tab:9,Escape:27,Backspace:8,Delete:46,' ':32,ArrowLeft:37,ArrowUp:38,ArrowRight:39,ArrowDown:40,Home:36,End:35,PageUp:33,PageDown:34};
     function key(a){var t=target(a),el=t?t.el:(document.activeElement||document.body);
-      if(t&&el.focus)el.focus();
+      if(t)foc(el);
       var ps=String(a.key||'').split('+'),k=ps.pop()||'+',i={bubbles:true,cancelable:true,composed:true,view:window};
       if(k==='Space')k=' ';if(k==='Return')k='Enter';if(k==='Esc')k='Escape';
       ps.forEach(function(p){p=p.toLowerCase();i[p==='cmd'||p==='meta'?'metaKey':p==='ctrl'?'ctrlKey':p==='alt'||p==='option'?'altKey':'shiftKey']=true});
@@ -314,13 +336,23 @@ enum PageAgent {
       var go=el.dispatchEvent(new KeyboardEvent('keydown',i));
       if(go&&(k.length===1||k==='Enter'))go=el.dispatchEvent(new KeyboardEvent('keypress',i))&&go;
       if(go&&k==='Enter'&&el.tagName==='INPUT'&&el.form){if(el.form.requestSubmit)el.form.requestSubmit();else el.form.submit()}
+      // Tab's default action, which a dispatched event does not perform: move focus on.
+      var moved='';
+      if(go&&k==='Tab'){var p0=document.activeElement,L=[].filter.call(document.querySelectorAll('a[href],button,input,select,textarea,[tabindex],[contenteditable]'),function(e){return e.tabIndex>=0&&!e.disabled&&(!e.checkVisibility||e.checkVisibility())});
+        var j=L.indexOf(el),nx=L.length?L[(j+(i.shiftKey?-1:1)+L.length)%L.length]:null;
+        if(nx){try{nx.focus({preventScroll:true})}catch(e){}fsync(p0);if(document.activeElement===nx)moved=' (focus: '+desc(nx)+')'}}
       el.dispatchEvent(new KeyboardEvent('keyup',i));
-      return'key '+a.key+(go?'':' (handled by page)')}
+      return'key '+a.key+(go?'':' (handled by page)')+moved}
     function pick(a){var el=need(a).el,want=String(a.text==null?'':a.text);
       if(el.tagName!=='SELECT')throw new Error(desc(el)+' is not a <select>; click it instead');
       var os=[].slice.call(el.options),o=os.find(function(o){return o.value===want||o.text.trim()===want})||os.find(function(o){return o.text.toLowerCase().indexOf(want.toLowerCase())>=0});
       if(!o)throw new Error('no option '+JSON.stringify(want)+'; options: '+os.slice(0,20).map(function(o){return o.text.trim()}).join(' | '));
-      el.value=o.value;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
+      foc(el);
+      // The prototype setter, so frameworks that track the value (React) see a change.
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(el,o.value);
+      el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
+      var now=el.selectedOptions[0];
+      if(el.value!==o.value)return'tried '+JSON.stringify(o.text.trim())+' but the page kept '+JSON.stringify(now?now.text.trim():el.value)+' in '+desc(el);
       return'selected '+JSON.stringify(o.text.trim())+' in '+desc(el)}
     function scroll(a){var de=document.documentElement,pos=function(){return'scroll '+Math.round(scrollY)+'/'+Math.max(0,de.scrollHeight-innerHeight)};
       if(a.ref&&a.dy==null){get(a.ref).scrollIntoView({block:'center'});return pos()}
@@ -344,10 +376,15 @@ enum PageAgent {
       else if(a.selector)el=document.querySelector(a.selector);
       else return(document.body.innerText||'').toLowerCase().indexOf(String(a.text||'').toLowerCase())>=0;
       return!!el&&(!el.checkVisibility||el.checkVisibility({visibilityProperty:true,checkVisibilityCSS:true}))}
+    // Visible text lines before a click or key, to report what appeared after it (delta).
+    function lines(){return(document.body&&document.body.innerText||'').split('\n').map(function(l){return l.trim()})}
+    function delta(){var t0=S.t0,out=[];S.t0=null;if(!t0)return'';
+      lines().forEach(function(l){if(out.length<3&&l.length>1&&!t0.has(l)&&out.indexOf(l)<0)out.push(l)});
+      return out.map(function(l){return JSON.stringify(clip(l,100))}).join(' / ')}
     function act(a){var t;S.fx=1;
-      if(a.action==='click'||a.action==='dblclick'||a.action==='key')watch();
+      if(a.action==='click'||a.action==='dblclick'||a.action==='key'){watch();S.t0=new Set(lines())}
       switch(a.action){
-        case'click':t=need(a);if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.to.tagName)||t.to.isContentEditable)S.fx=1;press(t);return'clicked '+desc(t.el);
+        case'click':t=need(a);if(a.text!=null)try{mcall('policy',[String(a.text)])}catch(e){}if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.to.tagName)||t.to.isContentEditable)S.fx=1;press(t);return'clicked '+desc(t.el);
         case'dblclick':t=need(a);press(t);press(t,{detail:2});mev(t.to,'dblclick',t.x,t.y,{detail:2});return'double-clicked '+desc(t.el);
         case'hover':t=need(a);['pointerover','mouseover','pointerenter','mouseenter','pointermove','mousemove'].forEach(function(e){mev(t.to,e,t.x,t.y)});return'hover events sent to '+desc(t.el)+' (CSS :hover styles need os:true)';
         case'type':return edit(a);
@@ -359,7 +396,9 @@ enum PageAgent {
         case'dialog':var dp=a.text==null?'accept':String(a.text);try{mcall('policy',[dp])}catch(e){throw new Error('dialogs cannot be answered on this page until it is reloaded')}return'next dialog: '+(dp==='accept'||dp==='dismiss'?dp:'answer '+JSON.stringify(dp));
         default:throw new Error('unknown action '+a.action)}}
     function geom(a){var t=target(a),g={iw:innerWidth,ih:innerHeight};
-      if(t){g.x=t.x;g.y=t.y;g.d=desc(t.el);if(t.r)g.r=[t.r.left,t.r.top,t.r.width,t.r.height]}return g}
+      if(t){g.x=t.x;g.y=t.y;g.d=desc(t.el);if(t.r)g.r=[t.r.left,t.r.top,t.r.width,t.r.height];
+        // For real input: what a click at the centre would hit, when that is not the target.
+        if(a.ref){var h=deep(t.x,t.y);if(h&&!inside(t.el,h)&&!inside(h,t.el))g.cover=desc(h)}}return g}
 
     // The main-world part: the same object when injected together (Apple Events), else
     // reached through synchronous DOM events from the extension's isolated world.
@@ -375,7 +414,9 @@ enum PageAgent {
     S.slot=function(id){var s=S.slots[id]={d:0};return{done:function(v){s.d=1;s.v=ser(v)},fail:function(e){s.d=1;s.e=String(e)}}};
     S.take=function(id){var s=S.slots[id];if(!s){try{return mcall('take',[id])}catch(e){return'{"x":1}'}}if(!s.d)return'{"p":1}';delete S.slots[id];return JSON.stringify(s.e?{e:s.e}:{v:s.v})};
     S.call=function(a){if(a.h!==S.h)return JSON.stringify({m:S.h||''});
-      try{var v=a.op==='read'?read(a):a.op==='act'?act(a):a.op==='geom'?geom(a):a.op==='logs'?logs(a):a.op==='has'?has(a):null,o={v:v,u:location.href,r:document.readyState},d;try{d=mcall('dlgTake')}catch(e){}if(d&&d.length)o.d=d;return JSON.stringify(o)}
+      // u0: the address before the call, so a history.pushState route change counts as a change.
+      var u0=location.href;
+      try{var v=a.op==='read'?read(a):a.op==='act'?act(a):a.op==='geom'?geom(a):a.op==='logs'?logs(a):a.op==='has'?has(a):a.op==='delta'?delta():null,o={v:v,u:location.href,u0:u0,r:document.readyState},d;try{d=mcall('dlgTake')}catch(e){}if(d&&d.length)o.d=d;return JSON.stringify(o)}
       catch(e){return JSON.stringify({e:String(e&&e.message||e)})}};
     })()
     """#

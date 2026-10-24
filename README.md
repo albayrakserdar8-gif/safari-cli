@@ -169,6 +169,18 @@ Bu, bir günde ve tek bir makinede yapılmış bir sınamadır; geniş bir site 
 
 Markdown, `links`, `diff`, `wait`, `fill fields`, `upload`, iletişim kutuları ve ağ gövdeleri sonradan eklendi; bunlar `Tests/fixture.html` üzerinde ve Wikipedia ile Hacker News'te elle sınandı, model turlarına girmedi.
 
+24 Ekim 2026'da 15 Haiku ajanıyla bir tur daha yapıldı. Ajanlar paralel çalıştı ve sunucu eklentisiz (Apple Events) moddaydı. Okuma görevlerinin yanında hesap açma, sepet ve ödeme adımları da denendi: automationexercise, Toolshop (Angular), saucedemo (React), demowebshop ve the-internet. Cevaplar doğruydu, ama zor sayfalarda çağrıların yaklaşık dörtte biri `js`'e kaçtı ve şu sorunlar bulunup düzeltildi:
+- `batch` üst seviyedeki `tab`'ı yok sayıyordu.
+- Arka plandaki sekmede odak olayları oluşmadığı için Angular formları değeri almıyordu.
+- SPA geçişleri bildirilmiyordu.
+- `select` sonucu doğrulanmıyordu.
+- `logs id` gövde döndürmüyordu.
+- `wait` süresinin birimi belirsizdi.
+- `read` atladığı iframe'leri ve ekran dışındaki kontrolleri söylemiyordu.
+- Slot'a yerleşen shadow DOM metni `all` kipinde görünmüyordu.
+
+En zor 5 görev düzeltmelerden sonra Haiku ile tekrarlandı. İletişim kutuları, Angular formu, SPA geçişleri ve `select` doğrulaması doğru çalıştı. Diyalog/iframe görevi 49 yerine 30 çağrıda bitti. Diğer görevlerde çağrı sayısı pek düşmedi, çünkü ajanlar sonuçları `js` ile ayrıca doğruluyor. Bu turda bulunan bir odak hatası (sayfanın `mousedown` içinde odağı kendisinin taşıması, örneğin kaydırıcılar) da düzeltildi.
+
 Eklenti yolu da sonradan eklendi ve elle sınandı:
 - Aynı test sayfası üzerinde, iframe'le birlikte, eklenti modunda sınandı.
 - Wikipedia'da 404 durum kodunun bildirildiği ve GitHub'ın katı CSP'sinde `js`'in çalıştığı görüldü.
@@ -179,7 +191,8 @@ Eklenti yolu da sonradan eklendi ve elle sınandı:
 ## Sınırlar
 
 - Eklentisiz modda, bir sekme bu oturumun dışında başka bir siteye giderse ve aynı anda pencerede sekme açılıp kapanırsa sunucu o sekmeyi kaybedebilir. Bu durumda hata döner; `tabs` ile yeni kimlik alınır. Eklentiyle sekmeler Safari'nin kendi kimlikleriyle izlenir.
-- Sayfa içi olaylar CSS `:hover` stilini tetikleyemez ve bazı siteler bu olayları yok sayar; bu durumlarda `os: true` gerekir.
+- Sayfa içi olaylar CSS `:hover` stilini tetikleyemez ve bazı siteler bu olayları yok sayar; bu durumlarda `os: true` gerekir. `os: true` sekmeyi kısa süre öne getirir, hedefin üstünü başka bir eleman kaplıyorsa tıklamaz, işten sonra kullanıcının görünür sekmesini ve öndeki uygulamayı geri getirir.
+- `tab` verilmeyen çağrılar son kullanılan sekmeye gider. Aynı sunucuyu paylaşan birden çok ajan bu sekmeyi birbirinden devralabilir; her çağrıda `tab` verilmelidir.
 - Erişilebilirlik izni yokken ekran görüntüsü kırpması, kenar çubuğunun solda, araç çubuğunun üstte olduğunu ve sayfa yakınlaştırmasının %100 olduğunu varsayar.
 - Eklentisiz modda konsol ve ağ kayıtları sunucunun sayfaya ilk girdiği andan sonrasını kapsar ve ilk ağ çağrısı o ana kadar yüklenmiş kaynakları durum kodu olmadan listeler. Eklentiyle kayıt sayfa açıldığı anda başlar. İki durumda da ağ listesi resim, betik ve stil dosyalarını `pattern` verilmedikçe göstermez. Yanıt gövdeleri yalnızca fetch/XHR'ın metin ve JSON yanıtları için, son 50 istekte ve ilk 4 KB'ye kadar tutulur.
 - Kapalı shadow DOM okunmaz. iframe içerikleri yalnızca eklentiyle okunur (ilk 8 çerçeve, `f1e5` gibi ref'lerle).

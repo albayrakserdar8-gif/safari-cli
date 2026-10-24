@@ -69,7 +69,7 @@ Safari only addresses tabs by `window id` + index, which shifts when tabs open, 
 - Safari's tab URL versus `location.href`: they differ while a navigation is pending but not committed (`PageState.pending`);
 - a `beforeunload` flag in the agent ("leaving").
 
-`navigate` marks then waits; `act` and `js` call `settle`/a short check afterwards and append `→ title | url` when the page changed. When changing this code, the failure to avoid is a result that describes the previous page.
+`navigate` marks then waits; `act` and `js` call `settle`/a short check afterwards and append `→ title | url` when the page or its address changed. When changing this code, the failure to avoid is a result that describes the previous page.
 
 ### Page agent (`PageAgent.swift`)
 
@@ -80,6 +80,9 @@ Injected once per document (`window.__smcp`), then each call is one small Apple 
 - User code for `js` is embedded as an async function body, never `eval`'d (page CSP would block it).
 - The main-world part (`mainSource`: console/fetch/XHR hooks, dialog answers, the `js` runner) is separate from `source`. With Apple Events both are injected together; with the extension `mainSource` is `main.js` (MAIN world, `document_start`, all frames) and the agent runs in the isolated world, reaching it with `mcall` over `__smcp_q`/`__smcp_r` DOM events. Dialog answering is armed only once the agent touches the page (and its frames, via postMessage); a sessionStorage flag keeps it armed across same-site navigations, so the user's own browsing keeps native dialogs.
 - Clicks are dispatched to the innermost element under the target's centre (including through open shadow roots), as a real click would be.
+- Safari's window is usually not key while the server works, so `focus()` moves focus without firing `focus`/`blur`. `foc()` sends those events itself (only when `!document.hasFocus()`); forms that commit on blur (Angular) depend on it.
+- The call envelope carries `u0`, the address before the call; `act` settles against it, so a `history.pushState` route change is reported as `→ title | url`. After a click or key with no navigation, `act` asks the agent for `delta` (up to 3 new visible text lines) and appends `· new text:`.
+- `read` ends with notes for what it left out: `(+N controls off-screen …)` and, without the extension (`nf`), `(N iframes not read …)`.
 - Refs are per element (WeakMap), so an element keeps its ref across reads of one document. `diff` relies on this: `S.last` keeps the previous body per mode/root/query and lines are matched by ref, else by text.
 - `text` output ends each returned chunk with the URLs of the `[n]` links in that chunk; same-page fragment links get no number.
 - `mainSource` replaces `alert`/`confirm`/`prompt`; while the page is armed, alert is acknowledged and confirm/prompt are dismissed unless `act dialog` set the answer (`M.dp`, via `M.policy`). Answered dialogs travel in the call envelope (`d`) and `Tools.call` appends them as `⚠ dialog` lines; dialogs in child frames are posted to the top frame and marked `(frame)`. Dialogs the override does not catch (Apple Events mode before injection or in an iframe; extension mode during the first load of a site the agent has not touched) are native: Apple Events time out after 20 s (`-1712`), the tab is put in `blocked`, and `act dialog` answers through Accessibility (`Capture.dialog`), selecting a background tab first because Safari only shows a dialog in the visible tab. While a native dialog is up, Safari's AX window list can be empty; use the focused window.
@@ -101,7 +104,7 @@ Injected once per document (`window.__smcp`), then each call is one small Apple 
 
 Capture uses ScreenCaptureKit in a child process: the server re-executes itself as `safari-mcp --grab <json>` and kills it after 6 s. A capture that never calls back blocks all later captures from processes of the same executable, so it must stay out of the long-lived server. macOS does not render windows on an inactive Space; when the window is not on screen, `screenshot` raises Safari briefly and then reactivates the previous app.
 
-`Input.swift` sends real mouse/keyboard events via CGEvent for `os: true`. It needs Accessibility permission, raises Safari, and maps viewport coordinates to the screen through the page's scroll area found with the Accessibility API. Typed events must clear modifier flags, or a preceding key combo (cmd+a) leaks into them.
+`Input.swift` sends real mouse/keyboard events via CGEvent for `os: true`. It needs Accessibility permission, raises Safari (`osAct` measures only after raising, refuses when `geom` reports the target covered, and puts the user's visible tab and front app back), and maps viewport coordinates to the screen through the page's scroll area found with the Accessibility API. Typed events must clear modifier flags, or a preceding key combo (cmd+a) leaks into them.
 
 ## Skill
 

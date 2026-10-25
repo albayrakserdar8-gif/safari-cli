@@ -10,16 +10,22 @@ Anthropic ile bağlantısı olmayan bağımsız bir projedir. Claude in Chrome y
 
 ## Ne zaman kullanılır
 
-Giriş yaptığın sitelerde günlük işler için uygundur: okuma, arama, form doldurma, gezinme. Web uygulaması testi, CI ve tekrarlanabilir otomasyon için Playwright (ya da Apple'ın `safaridriver`'ı) daha doğru araçtır.
+Giriş yaptığın sitelerde günlük işler için uygundur: okuma, arama, form doldurma, gezinme. Web uygulaması testi, CI ve tekrarlanabilir otomasyon için Playwright (ya da Apple'ın `safaridriver`'ı) daha doğru araçtır. Sayfalarda işlem yapmak yerine kaynak gösteren araştırılmış cevaplar istiyorsan [Vane](https://github.com/ItzCrazyKns/Vane) gibi bir arama motoru daha uygundur.
 
-| | safari-mcp | Playwright |
-|---|---|---|
-| Tarayıcı | Senin açık Safari'n ve oturumların | Kendi başlattığı ayrı tarayıcı |
-| Girdi | Sayfa içi olaylar; istenirse gerçek fare/klavye | Tarayıcı düzeyinde gerçek olaylar |
-| İletişim kutusu, dosya yükleme | Var | Var |
-| iframe | Eklentiyle var | Var |
-| Ağ müdahalesi | Yok | Var |
-| Platform | macOS 14+ | macOS, Windows, Linux |
+| | safari-mcp | Playwright | Vane |
+|---|---|---|---|
+| Ne | Safari'ni süren MCP sunucusu | Tarayıcı otomasyon kütüphanesi | Kendi sunucunda çalışan yapay zekâ cevap motoru |
+| Kim yönetir | Claude Code | Senin betiklerin ya da Playwright MCP üzerinden bir ajan | Kendi LLM akışı; web arayüzünden ya da API'den |
+| Tarayıcı | Senin açık Safari'n | Kendi başlattığı ayrı tarayıcı | Başsız Chromium (Playwright ile), yalnızca sayfa okumak için |
+| Açık oturumların | Var | Yalnızca kayıtlı profil ya da oturum durumuyla | Yok |
+| Tıklama, yazma, form | Var | Var | Yok, yalnızca okur |
+| İletişim kutusu, dosya yükleme, iframe | Var (iframe eklentiyle) | Var | — |
+| Ağ müdahalesi | Yok (yalnızca kayıt) | Var | — |
+| Kaynak gösteren web araması | Açtığı siteler üzerinden | Yok | Var (SearxNG) |
+| LLM | Claude Code'unki | Kendi LLM'i yok | Herhangi biri: Ollama, OpenAI, Claude, Gemini, Groq |
+| Kurulum | Swift derlemesi, isteğe bağlı Safari eklentisi | npm ya da pip paketi | Docker imajı (SearxNG dahil) |
+| Platform | macOS 14+ | macOS, Windows, Linux | Docker çalışan her yer |
+| En uygun iş | Giriş yaptığın sitelerde günlük işler | Test, CI, tekrarlanabilir otomasyon | Kaynak gösteren, gizli araştırma soruları |
 
 ## Kurulum
 

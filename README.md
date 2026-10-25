@@ -10,16 +10,22 @@ Independent project, not affiliated with Anthropic. It was written because Claud
 
 ## When to use it
 
-Good for everyday work on sites you are logged into: reading, searching, filling forms, navigating. For web app testing, CI or repeatable automation, use Playwright (or Apple's `safaridriver`) instead.
+Good for everyday work on sites you are logged into: reading, searching, filling forms, navigating. For web app testing, CI or repeatable automation, use Playwright (or Apple's `safaridriver`) instead. To get researched answers with sources rather than act on pages, a search engine like [Vane](https://github.com/ItzCrazyKns/Vane) fits better.
 
-| | safari-mcp | Playwright |
-|---|---|---|
-| Browser | Your open Safari and sessions | A separate browser it launches |
-| Input | In-page events; real mouse/keyboard on request | Real browser-level events |
-| Dialogs, file upload | Yes | Yes |
-| iframes | Yes, with the extension | Yes |
-| Network interception | No | Yes |
-| Platform | macOS 14+ | macOS, Windows, Linux |
+| | safari-mcp | Playwright | Vane |
+|---|---|---|---|
+| What it is | MCP server that drives your Safari | Browser automation library | Self-hosted AI answer engine |
+| Driven by | Claude Code | Your scripts, or an agent through Playwright MCP | Its own LLM pipeline, from its web UI or API |
+| Browser | Your open Safari | A separate browser it launches | Headless Chromium (via Playwright), only to read pages |
+| Your logged-in sessions | Yes | Only with saved profiles or state | No |
+| Clicks, typing, forms | Yes | Yes | No, read-only |
+| Dialogs, file upload, iframes | Yes (iframes with the extension) | Yes | — |
+| Network interception | No (logs only) | Yes | — |
+| Web search with cited sources | Through the sites it opens | No | Yes (SearxNG) |
+| LLM | Claude Code's | None of its own | Any: Ollama, OpenAI, Claude, Gemini, Groq |
+| Setup | Swift build, optional Safari extension | npm or pip package | Docker image (includes SearxNG) |
+| Platform | macOS 14+ | macOS, Windows, Linux | Anywhere Docker runs |
+| Best for | Everyday tasks on sites you are logged into | Testing, CI, repeatable automation | Private research questions with cited answers |
 
 ## Install
 

@@ -15,6 +15,13 @@ install: build
 	  if [ -d "$$(dirname "$$d")" ]; then mkdir -p "$$d" && ln -sfn "$(SKILL)" "$$d/safari-browser" && echo "skill → $$d/safari-browser"; fi; \
 	done
 	@echo "Installed $(PREFIX)/bin/safari. In Claude Code, add \"Bash(safari:*)\" to permissions.allow in ~/.claude/settings.json to skip the prompts."
+	@if [ ! -d "$(HOME)/Applications/Safari CLI Bridge.app" ]; then \
+	  echo ""; echo "safari needs the Safari CLI Bridge extension, which is not installed yet:"; \
+	  echo "  1. Xcode > Settings > Accounts: add an Apple ID (a free one works)"; \
+	  echo "  2. open 'Extension/Safari MCP Bridge/Safari MCP Bridge.xcodeproj', pick your team under Signing & Capabilities for both targets"; \
+	  echo "  3. Extension/build.sh --schedule"; \
+	  echo "  4. Safari > Settings > Extensions: enable Safari CLI Bridge and allow it on every website"; \
+	fi
 
 uninstall:
 	-"$(BIN)" stop 2>/dev/null

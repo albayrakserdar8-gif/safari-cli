@@ -65,13 +65,13 @@ The files below sit in `references/` next to this one. **Before you start a task
 - Rows from a list or table, several pages of results, a site that blocks fast loading → `scraping.md`
 - Data that `read`/`text` do not show, console errors, failed requests → `js-and-logs.md`
 - A selector that survives reloads, pointing something out to the user, phone or desktop widths, cleaning up tabs → `selectors.md`
-- Faking or blocking API answers → `network-mocking.md`
+- Faking, blocking, redirecting or changing requests (API calls; scripts, images or pages with `--global`, which hits every tab) → `network-mocking.md`
 - Turning what the user does into commands → `recording.md`
 - Cookies, localStorage, saving or restoring a login, PDF, drop zones, whole-page screenshots → `storage-and-files.md`
 
 ## Troubleshooting
 
 - `safari status` shows whether the Safari CLI Bridge extension is connected; `safari stop` restarts the daemon on the next command.
-- "Allow JavaScript from Apple Events": the extension is not connected. Ask the user to enable Safari CLI Bridge in Safari > Settings > Extensions.
+- "Safari CLI Bridge extension is not connected": ask the user to enable it in Safari > Settings > Extensions (safari cannot work without it). `file://` pages are refused: serve the folder with `python3 -m http.server`.
 - "no access to this site": the user must allow the extension on every website.
 - Logs, dialogs or routes missing on a page loaded before the extension was enabled: reload it.

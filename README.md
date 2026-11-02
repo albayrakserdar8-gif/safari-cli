@@ -4,7 +4,7 @@
 
 A `safari` command that lets coding agents (Claude Code, opencode, anything with a shell) drive your real Safari, with your logged-in sessions. One Swift binary, no dependencies. Forked from [safari-mcp](https://github.com/sadopc/safari-mcp): same engine, a CLI and a skill instead of an MCP server.
 
-It talks to Safari through the optional **Safari CLI Bridge** extension when it is installed, and through Apple Events otherwise.
+It talks to Safari through the **Safari CLI Bridge** extension, which is required: it reaches every tab and frame, and can intercept network traffic.
 
 Independent project, not affiliated with Anthropic. It was written because Claude in Chrome only works in Chromium browsers.
 
@@ -19,12 +19,12 @@ Good for everyday work on sites you are logged into: reading, searching, filling
 | Browser | Your open Safari | A separate browser it launches | Its own Chromium, Firefox or WebKit (headless by default), or Chrome/Edge it attaches to | Headless Chromium (via Playwright), only to read pages |
 | Your logged-in sessions | Yes | Only with saved profiles or state | With a persistent profile, or by attaching to your Chrome | No |
 | Clicks, typing, forms | Yes | Yes | Yes | No, read-only |
-| Dialogs, file upload, iframes | Yes (iframes with the extension) | Yes | Yes | — |
-| Network interception | fetch/XHR mocking and request blocking (`route`) | Yes | Yes (`route`) | — |
+| Dialogs, file upload, iframes | Yes | Yes | Yes | — |
+| Network interception | Per tab: mock, block, redirect or change headers of fetch/XHR. `--global`: any request (scripts, styles, images, frames, the page itself), in every tab (`route`) | Yes | Yes (`route`) | — |
 | Cookies, saved state, PDF | Yes (`cookies`, `state`, `pdf`) | Yes | Yes | — |
 | Web search with cited sources | Through the sites it opens | No | Through the sites it opens | Yes (SearxNG) |
 | LLM | The agent's | None of its own | The agent's | Any: Ollama, OpenAI, Claude, Gemini, Groq |
-| Setup | Swift build, optional Safari extension | npm or pip package | npm package (Node 18+), skill via `install --skills` | Docker image (includes SearxNG) |
+| Setup | Swift build and the Safari extension (needs Xcode) | npm or pip package | npm package (Node 18+), skill via `install --skills` | Docker image (includes SearxNG) |
 | Platform | macOS 14+ | macOS, Windows, Linux | macOS, Windows, Linux | Anywhere Docker runs |
 | Best for | Everyday tasks on sites you are logged into | Testing, CI, repeatable automation | Agent-driven testing and automation in a separate browser | Private research questions with cited answers |
 
@@ -37,7 +37,7 @@ Good for everyday work on sites you are logged into: reading, searching, filling
 
 ## Install
 
-Needs macOS 14 or later and the Command Line Tools (Xcode only for the extension).
+Needs macOS 14 or later, the Command Line Tools, and Xcode for the Safari extension.
 
 ```bash
 git clone https://github.com/albayrakserdar8-gif/safari-cli.git
@@ -54,11 +54,9 @@ A background daemon keeps tab ids and the extension connection between commands.
 
 In Claude Code, adding `"Bash(safari:*)"` to `permissions.allow` in `~/.claude/settings.json` stops the per-command prompts.
 
-### Safari extension (recommended)
+### Safari extension (required)
 
-With the extension, no Automation or "Allow JavaScript from Apple Events" permission is needed, iframes can be read, HTTP status codes (404) are reported, network logging starts when the page opens, and screenshots of a visible tab need no Screen Recording permission. Without it, safari falls back to Apple Events.
-
-Building it needs Xcode:
+Every command goes through the extension; without it, commands fail with a message saying how to turn it on. `safari status` shows whether it is connected. Building it needs Xcode:
 
 1. Add an Apple ID in Xcode > Settings > Accounts (a free account works).
 2. Open `Extension/Safari MCP Bridge/Safari MCP Bridge.xcodeproj` and pick your Personal Team under Signing & Capabilities for both targets.
@@ -67,23 +65,21 @@ Building it needs Xcode:
    Extension/build.sh --schedule
    ```
    `--schedule` adds a weekly job that re-signs the extension, because free-account signatures expire.
-4. In Safari > Settings > Extensions, enable **Safari CLI Bridge** and allow it on every website. For private tabs, also turn on "Allow in Private Browsing". After an update that adds a permission (cookies, in the November 2026 build), Safari may turn the extension off until you enable it again.
+4. In Safari > Settings > Extensions, enable **Safari CLI Bridge** and allow it on every website. For private tabs, also turn on "Allow in Private Browsing". After an update that adds a permission (cookies, and network rules with host access for `route`, in November 2026), Safari may turn the extension off until you enable it again; reload pages that were open before.
 
-The daemon and extension talk over `127.0.0.1` (ports 47391–47399) and authenticate each other with a key in `~/.config/safari-mcp/token`, so other pages or local programs cannot connect. The extension is the same one safari-mcp uses; both can be installed at once.
+The daemon and extension talk over `127.0.0.1` (ports 47391–47399) and authenticate each other with a key in `~/.config/safari-mcp/token`, so other pages or local programs cannot connect. The extension is the same one safari-mcp uses; both can be installed at once. `route` answers mocked requests from a second listener on `127.0.0.1` (ports 47401–47409), at unguessable paths.
 
-Safari does not let extensions into `file://` pages; those always use Apple Events.
+Safari does not let extensions into `file://` pages, so safari refuses them; serve the folder over HTTP (`python3 -m http.server`).
 
 ## Permissions
 
-| Permission | Used for | With extension | Without |
-|---|---|---|---|
-| Safari extension, on every website | Everything | Required | — |
-| Automation (control Safari) | Everything | Not needed | Required, asked on first use |
-| Safari > Settings > Developer > "Allow JavaScript from Apple Events" | Everything except `tabs` | Not needed | Required |
-| Screen Recording | `shot` | Only when the tab is not on screen | Required |
-| Accessibility | `--os`, native dialogs, exact screenshot cropping | Optional | Optional; needed for private windows |
+| Permission | Used for | Needed |
+|---|---|---|
+| Safari extension, on every website | Everything | Required |
+| Screen Recording | `shot` of a tab that is not on screen | Only then |
+| Accessibility | `--os`, native dialogs, exact screenshot cropping, opening a private window | Optional |
 
-These go to the app that runs the agent (your terminal). If the Developer tab is missing, turn on Settings > Advanced > "Show features for web developers". Note that "Allow JavaScript from Apple Events" applies to every app allowed to control Safari.
+These go to the app that runs the agent (your terminal). Automation and "Allow JavaScript from Apple Events" are no longer used.
 
 ## Usage
 
@@ -110,8 +106,8 @@ Just ask the agent:
 | `T js CODE [R]` | Run JavaScript in the page (async function body, 15 s limit; `-` reads stdin); an element after the code is `el` |
 | `T shot [--full]` | JPEG of the viewport, an element, a region or the whole page; prints its path |
 | `T resize W H` | Viewport size, in a window that holds only agent tabs |
-| `T route PATTERN`, `T unroute` | Mock the page's fetch/XHR answers (`--status`, `--body`), or `--block` requests |
-| `T storage`, `T cookies` | List, get, set or delete localStorage/sessionStorage, or the site's cookies (HttpOnly too with the extension) |
+| `T route PATTERN`, `T unroute` | Mock the tab's fetch/XHR (`--status`, `--body`, `--resp-header`, `--delay`), `--block` or `--redirect` them, or change their `--header`s. `--global` does the same for every kind of request, in every tab; `--doc` adds the page itself |
+| `T storage`, `T cookies` | List, get, set or delete localStorage/sessionStorage, or the site's cookies (HttpOnly too) |
 | `T state save\|load FILE` | The site's cookies and web storage to a file (mode 0600) and back |
 | `T check R`, `T uncheck R` | Set a checkbox or radio; safe to repeat |
 | `T pdf` | The page as a paged PDF, rendered from a snapshot of its DOM in the background |
@@ -180,25 +176,32 @@ Fixed after these rounds:
 - In a private window `cookies` and `state load` wrote to the normal window's cookies, so the restored login did not take; the extension now uses the private tab's cookie store.
 - `drag --to` takes a CSS selector as well as a ref; regex patterns in "no match" messages are shown as typed; the skill says `go reload` (an agent tried `reload`).
 
+An eighth round (November 2026) followed the removal of the Apple Events backend and the rewrite of `route`. Each step was first checked by hand on Safari 27.2 against `route.html`, `fixture.html`, example.com and httpbin.org, which is how the network-rule quirks in CLAUDE.md were found. Then Claude Haiku agents worked in parallel on one daemon: a regression pass over every everyday command (all passed), two rounds of feature tests for `route`, and two adversarial rounds. The first adversarial round showed that Safari applies network rules to every tab, which led to the current split between per-tab routes and `--global`.
+
+Fixed after these rounds:
+- Plain mocks failed on https pages (mixed content); they now reach the mock server through a network-rule redirect keyed to a secret marker.
+- An empty pattern matched every request, and a header value with a line break became two headers; both are refused, as is a `--global` pattern that matches everything.
+- Routes were not re-applied after a move to another port or a script navigation, missed URLs with a `#fragment` and iframes loaded before the route, and a reused XHR was logged as failed.
+- Global rules of a daemon that exits are removed after 5 s, so a dead mock server cannot break the user's tabs.
+
 This was tested on one Mac (macOS 27), not across a wide range of sites.
 
 ## Limits
 
-- Closed shadow DOM is not read. Up to 8 iframes are read; without the extension only same-origin frames whose CSP allows it.
+- Closed shadow DOM is not read. Up to 8 iframes are read.
 - Some sites ignore in-page events, and `hover` only emulates readable CSS `:hover` rules. Use `--os` there.
 - On sites with strict CSP (GitHub, Gmail), the extension runs `js` in an isolated context: it sees the DOM but not the page's JavaScript variables.
-- HTTP status codes are only reported with the extension.
-- Without the extension, logs start when safari first touches the page, and dialogs that open before that block calls for 20 s (answerable via Accessibility).
+- Dialogs during the first load of a site safari has not touched yet are Safari's own and block calls for 20 s (answerable with `dialog`, via Accessibility).
 - Agents share one daemon, so they must put the tab id first (or set `SAFARI_TAB`) once more than one new tab is open.
-- `route` mocks the page's fetch and XHR, not the page's own document, WebSockets or service workers; it starts with each page only with the extension. A click that leaves the site drops the routes until `route` runs again.
-- `record` needs the extension, covers one site in one tab, and does not record rich-text editors or password values.
+- A plain `route` covers only the tab's own fetch/XHR, intercepted in the page (mocked ones never reach the network; Workers, `sendBeacon` and `EventSource` are not covered). Scripts, styles, images, frames and pages need `--global`: Safari's network rules ignore their tab filter, and its request events do not reliably say which tab asked, so they apply to every tab, the user's too, until `unroute`, the routing tab closes or the daemon stops. With `--global`, Safari changes only standard header names (not custom `X-` ones), its regex engine lacks `|`, `{n}` and lookahead, a `--block` beats an overlapping mock, and a `--doc` page has the mock's origin (`127.0.0.1`), without site cookies. Workers, service workers and WebSocket messages are not mocked; a mocked fetch's `response.url` is the local mock address.
+- `record` covers one site in one tab, and does not record rich-text editors or password values.
 - `shot --full` scrolls the page itself; pages that scroll an inner box show only their first screen.
 - `pdf` lays out a snapshot of the page again with JavaScript off: images that need the user's login, content drawn by scripts after load and cross-origin canvases may be missing.
-- Without the extension `cookies` sees only cookies the page can read (no HttpOnly, no domain or expiry), and `state load` cannot restore HttpOnly cookies.
-- Without the extension, a tab can be lost if it navigates elsewhere while tabs open or close at the same time; safari then returns an error instead of guessing.
+- In a private window whose cookie store Safari does not name, `cookies` sees only cookies the page can read (no HttpOnly).
+- Data: URLs (sleeping tabs of extensions like Tab Sleeper) are hidden from extensions, so `tabs` lists them blank.
 - Bot checks are recognised by their titles and markup; others pass unnoticed. Pacing covers `go`, `open` and `crawl`, not clicks that load a page.
 - `text` mode trims link text and data-table cells (200 chars, 60 rows); complex tables may lose layout. Tables used for page layout are read as text.
-- Full browser control (real input, all network traffic) would need Safari's Web Inspector protocol, which only Apple-signed apps may use with your own Safari. Apple's `safaridriver --mcp` offers it in a separate, clean session without your tabs or cookies.
+- Reading response bodies of every request, and real (trusted) input without `--os`, would need Safari's Web Inspector protocol, which only Apple-signed apps may use with your own Safari. Apple's `safaridriver --mcp` offers it in a separate, clean session without your tabs or cookies.
 
 ## Development
 
@@ -207,7 +210,7 @@ Tests/smoke.sh                                             # CLI and daemon test
 (cd Tests && python3 -m http.server 8765 --bind 127.0.0.1)  # serve test pages
 ```
 
-Open `http://127.0.0.1:8765/fixture.html` with `safari open` for manual checks (form, dialogs, delayed element, table, fetch, iframe). `route.html` (fetch/XHR buttons and an image) and `drop.html` (a drop zone) cover `route` and `drop`.
+Open `http://127.0.0.1:8765/fixture.html` with `safari open` for manual checks (form, dialogs, delayed element, table, fetch, iframe). `route.html` (fetch/XHR/Worker buttons, and a script, stylesheet and image that are missing until `route` mocks them) and `drop.html` (a drop zone) cover `route` and `drop`.
 
 ## License
 

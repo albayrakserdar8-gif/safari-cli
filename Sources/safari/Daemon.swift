@@ -172,6 +172,9 @@ final class Daemon {
         if tool == "rate" {
             do { return ["ok": true, "text": try tools.rate.command(args)] } catch let e as ToolError { return ["ok": false, "text": e.msg] } catch { return ["ok": false, "text": "\(error)"] }
         }
+        if tool == "ext" {
+            do { return ["ok": true, "text": try tools.rawExt(args["op"] as? String ?? "", args["args"] as? [String: Any] ?? [:])] } catch let e as ToolError { return ["ok": false, "text": e.msg] } catch { return ["ok": false, "text": "\(error)"] }
+        }
         guard Tools.names.contains(tool) else { return ["ok": false, "text": "unknown tool \(tool)"] }
         do {
             var text: [String] = []

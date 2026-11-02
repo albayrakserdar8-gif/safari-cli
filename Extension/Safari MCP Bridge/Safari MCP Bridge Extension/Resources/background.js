@@ -31,22 +31,29 @@ browser.webRequest.onBeforeRequest.addListener((d) => {
   if (d.type === 'main_frame' && d.frameId === 0) reqs.set(d.tabId, []);
   started.set(d.requestId, d.timeStamp);
 }, { urls: ['<all_urls>'] });
+// Requests that safari route sent to its mock server, by request id: the URL the page asked for.
+const MOCK = /^http:\/\/127\.0\.0\.1:474\d\d\/m\//;
+const mocked = new Map();
+browser.webRequest.onBeforeRedirect.addListener((d) => {
+  if (d.tabId >= 0 && MOCK.test(d.redirectUrl || '') && !mocked.has(d.requestId)) mocked.set(d.requestId, d.url);
+}, { urls: ['<all_urls>'] });
+const authed = new Set();
 function done(d, st) {
   if (d.tabId < 0) return;
   if (d.type === 'main_frame' && d.frameId === 0) status.set(d.tabId, st);
   const t0 = started.get(d.requestId); started.delete(d.requestId);
   const list = reqs.get(d.tabId) || []; reqs.set(d.tabId, list);
-  list.push(`${d.type} ${st || 'ERR'} ${d.url} ${t0 ? Math.round(d.timeStamp - t0) : 0}ms`);
+  let url = d.url, note = '';
+  if (mocked.has(d.requestId)) { url = mocked.get(d.requestId); mocked.delete(d.requestId); note = ' (mocked)'; } else if (MOCK.test(url)) note = ' (mocked)';
+  list.push(`${d.type} ${st || 'ERR'} ${url} ${t0 ? Math.round(d.timeStamp - t0) : 0}ms${note}`);
   if (list.length > 300) list.shift();
 }
 browser.webRequest.onCompleted.addListener((d) => done(d, d.statusCode), { urls: ['<all_urls>'] });
 browser.webRequest.onErrorOccurred.addListener((d) => done(d, 0), { urls: ['<all_urls>'] });
-const blockRules = new Map(); // tab id -> session rule ids
+const portRules = new Map(); // daemon port -> its session rule ids (safari route)
 let nextRule = 1;
 browser.tabs.onRemoved.addListener((id) => {
   status.delete(id); reqs.delete(id);
-  const ids = blockRules.get(id);
-  if (ids && browser.declarativeNetRequest) { blockRules.delete(id); browser.declarativeNetRequest.updateSessionRules({ removeRuleIds: ids }).catch(() => {}); }
 });
 
 // Tabs are addressed like Apple Events does: window id + 1-based index, plus what the server
@@ -120,21 +127,26 @@ const ops = {
     return { ok: fs.filter((f) => f.frameId !== 0).map((f) => ({ id: f.frameId, parent: f.parentFrameId, url: f.url })) };
   },
   async win(m) { const w = await browser.windows.get(m.w); return { x: w.left, y: w.top, width: w.width, height: w.height, focused: w.focused }; },
-  // Blocks every request of one tab that matches a route pattern (safari route --block).
-  async block(m) {
+  // Network rules of one daemon (safari route --global): the full list, replacing that daemon's
+  // earlier rules. Safari applies them to every tab whatever tabIds say. Priorities: Safari takes
+  // the higher one between actions but the LOWER one between two redirects, so redirects come
+  // first, numbered newest-lowest; then the allow rule for the mock server (beats every
+  // redirect); then blocks and header rules, newest highest.
+  async rules(m, port) {
     const dnr = browser.declarativeNetRequest;
-    if (!dnr || !dnr.updateSessionRules) return { no: 1 };
-    const t = await tabAt(m); if (!t) return { stale: 1 };
-    const old = blockRules.get(t.id) || [];
-    const rules = m.pats.map((p) => {
-      const c = { tabIds: [t.id], resourceTypes: ['sub_frame', 'stylesheet', 'script', 'image', 'font', 'object', 'xmlhttprequest', 'ping', 'media', 'websocket', 'other'] };
-      if (p.startsWith('re:')) c.regexFilter = p.slice(3); else c.urlFilter = p;
-      return { id: nextRule++, priority: 1, action: { type: 'block' }, condition: c };
-    });
-    await dnr.updateSessionRules({ removeRuleIds: old, addRules: rules });
-    if (rules.length) blockRules.set(t.id, rules.map((r) => r.id)); else blockRules.delete(t.id);
-    return { ok: rules.length };
+    if (!dnr || !dnr.updateSessionRules) return { err: 'this Safari has no declarativeNetRequest' };
+    const old = portRules.get(port) || [];
+    const list = m.rules || [];
+    const redirs = list.filter((r) => r.action.type === 'redirect').length;
+    let nr = redirs, na = redirs + 1, nh = redirs + 1;
+    const add = list.map((r) => ({ id: nextRule++, priority: r.action.type === 'redirect' ? nr-- : r.action.type === 'allow' ? na : ++nh, action: r.action, condition: r.condition }));
+    await dnr.updateSessionRules({ removeRuleIds: old, addRules: add });
+    if (add.length) portRules.set(port, add.map((r) => r.id)); else portRules.delete(port);
+    return { ok: list.length };
   },
+  // Debugging (safari --ext): the session rules, and raw rule changes.
+  async sessionrules() { return { ok: await browser.declarativeNetRequest.getSessionRules() }; },
+  async rawrules(m) { await browser.declarativeNetRequest.updateSessionRules({ removeRuleIds: m.remove || [], addRules: m.add || [] }); return { ok: 1 }; },
   // Cookies of the tab's site (safari cookies, safari state). Reply items: name, value, domain,
   // path, secure, httpOnly, sameSite, exp (seconds; absent for session cookies).
   async cookies(m) {
@@ -190,7 +202,19 @@ function connect(port) {
   try { ws = new WebSocket(`ws://127.0.0.1:${port}`); } catch (e) { return; }
   const st = { ok: false, expect: null };
   socks.set(port, ws);
-  const drop = () => { if (socks.get(port) === ws) socks.delete(port); };
+  const drop = () => {
+    authed.delete(ws);
+    if (socks.get(port) === ws) socks.delete(port);
+    // A daemon that went away leaves rules pointing at its dead mock server, which would break
+    // matching requests in every tab: drop them unless it is back within a few seconds.
+    if (st.ok) setTimeout(() => {
+      const w = socks.get(port);
+      if ((!w || !authed.has(w)) && portRules.has(port)) {
+        browser.declarativeNetRequest.updateSessionRules({ removeRuleIds: portRules.get(port) }).catch(() => {});
+        portRules.delete(port);
+      }
+    }, 5000);
+  };
   ws.onclose = drop;
   ws.onerror = drop;
   ws.onmessage = async (ev) => {
@@ -203,7 +227,7 @@ function connect(port) {
         st.expect = await hmac('srv:' + mine);
         ws.send(JSON.stringify({ auth: await hmac('ext:' + m.n), n: mine }));
       } else if (m.auth && st.expect) {
-        if (m.auth === st.expect) st.ok = true;
+        if (m.auth === st.expect) { st.ok = true; authed.add(ws); }
         else { token = null; ws.close(); }
       }
       return;
@@ -211,7 +235,7 @@ function connect(port) {
     const reply = (o) => { try { ws.send(JSON.stringify(Object.assign({}, o, { id: m.id }))); } catch (e) { /* closed */ } };
     const f = ops[m.op];
     if (!f) { reply({ err: 'unknown op ' + m.op }); return; }
-    try { reply(await f(m)); } catch (e) { reply({ err: String((e && e.message) || e) }); }
+    try { reply(await f(m, port)); } catch (e) { reply({ err: String((e && e.message) || e) }); }
   };
 }
 function tick() { PORTS.forEach(connect); }

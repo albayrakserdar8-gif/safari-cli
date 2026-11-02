@@ -6,6 +6,15 @@
 <button id="x" onclick="var x=new XMLHttpRequest();x.open('GET','api/data.json');x.onload=()=>show('xhr '+x.status+' '+x.responseText);x.onerror=()=>show('xhr failed');x.send()">XHR</button>
 <button id="j" onclick="var x=new XMLHttpRequest();x.open('GET','api/data.json');x.responseType='json';x.onload=()=>show('xhr json '+x.status+' '+JSON.stringify(x.response));x.send()">XHR JSON</button>
 <p id="out">(nothing yet)</p>
+<button id="w" onclick="worker()">Worker fetch</button>
 <img id="img" src="list.html" alt="probe">
+<!-- Loaded with the page and missing on purpose (404), so `route` can supply them. -->
+<link rel="stylesheet" href="mock/style.css">
+<img id="pic" src="mock/pic.png" alt="pic" onload="document.getElementById('picinfo').textContent='pic '+this.naturalWidth+'x'+this.naturalHeight" onerror="document.getElementById('picinfo').textContent='pic failed'">
+<p id="picinfo">(pic pending)</p>
+<p id="scr">(script not run)</p>
+<script src="mock/app.js"></script>
 <script>function show(s){document.getElementById('out').textContent=s}
+function worker(){var src='fetch('+JSON.stringify(new URL('api/data.json',location.href).href)+').then(function(r){return r.text()}).then(function(t){postMessage("worker "+t)},function(e){postMessage("worker failed "+e)})';
+  var w=new Worker(URL.createObjectURL(new Blob([src],{type:'text/javascript'})));w.onmessage=function(e){show(e.data)}}
 fetch('api/data.json').then(r=>r.text()).then(t=>document.title='route test · '+t.trim()).catch(()=>document.title='route test · failed');</script>

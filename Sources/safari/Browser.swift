@@ -2,42 +2,45 @@ import AppKit
 import CoreGraphics
 import Foundation
 
-/// What `Tools` needs from Safari. Two implementations: the extension (preferred, no Apple
-/// Events permission) and Apple Events (`Safari`, the fallback). Both check `Expect` in the
-/// same step that acts, so a stale position never hits another tab.
-protocol Browser: AnyObject {
-    func listTabs() throws -> [TabInfo]
-    func js(_ tab: TabRef, _ code: String, _ e: Expect) throws -> (url: String, result: String)?
-    func setURL(_ tab: TabRef, _ url: String, _ e: Expect) throws -> Bool
-    func close(_ tab: TabRef, _ e: Expect) throws -> Bool
-    func select(_ tab: TabRef, _ e: Expect) throws -> Bool
-    func raise(_ tab: TabRef, _ e: Expect) throws -> Bool
-    func newTab(in wid: Int?, url: String) throws -> (ref: TabRef, xid: Int?)
-    /// A new private window, when the backend can open one itself; nil means use the menu.
-    func newPrivateWindow(url: String) -> (ref: TabRef, xid: Int?)?
-    /// HTTP status of the tab's last top-level load, 0 when unknown.
-    func status(_ tab: TabRef) -> Int
-    /// Window server id of the window, for screen capture and real input.
-    func cgWindow(_ wid: Int) -> Int?
-    /// JPEG of the window's visible tab, when the backend can take one itself.
-    func capture(_ wid: Int) -> Data?
-    /// Sets the window's outer size, keeping its top-left corner. False: the backend cannot.
-    func resize(_ wid: Int, width: Int, height: Int) throws -> Bool
-    var isExtension: Bool { get }
+/// Position of a tab right now. Positions shift when tabs open, close or move, so every
+/// call that touches a tab also states what it expects to find there (see `Expect`).
+struct TabRef: Equatable {
+    var wid: Int
+    var idx: Int
+
+    init(_ wid: Int, _ idx: Int) {
+        self.wid = wid
+        self.idx = idx
+    }
 }
 
-extension Safari: Browser {
-    func newTab(in wid: Int?, url: String) throws -> (ref: TabRef, xid: Int?) { (try openTab(in: wid, url: url), nil) }
-    func newPrivateWindow(url: String) -> (ref: TabRef, xid: Int?)? { nil }
-    func status(_ tab: TabRef) -> Int { 0 }
-    func cgWindow(_ wid: Int) -> Int? { wid }
-    func capture(_ wid: Int) -> Data? { nil }
-    func resize(_ wid: Int, width: Int, height: Int) throws -> Bool { try resizeWindow(wid, width, height) }
-    var isExtension: Bool { false }
+struct TabInfo {
+    let ref: TabRef
+    let current: Bool
+    let title: String
+    let url: String
+    /// Safari's own tab id, only known through the extension. It never changes while the tab is open.
+    var xid: Int? = nil
+    /// In a private window; only known through the extension.
+    var priv = false
 }
 
-/// Safari through the extension's background page.
-final class ExtBrowser: Browser {
+/// What the caller believes about a tab position. The extension checks it in the same step
+/// that performs the action, so a stale position is refused instead of hitting another tab.
+struct Expect {
+    /// Tab count of the window; negative skips the check.
+    var count: Int
+    /// URL of the tab; nil skips the check (used while a navigation is in flight).
+    var url: String?
+}
+
+/// The page script produced no value: syntax error, page not ready, or a dialog is open.
+struct ScriptEmpty: Error {}
+
+/// Safari through the Safari CLI Bridge extension's background page. Every tab-targeted op
+/// carries an `Expect` that the extension checks in the same step that acts, so a stale
+/// position is refused instead of hitting another tab.
+final class ExtBrowser {
     private let bridge: Bridge
     init(_ bridge: Bridge) { self.bridge = bridge }
 
@@ -49,8 +52,6 @@ final class ExtBrowser: Browser {
         let r = try bridge.call("frames", at(tab, e))
         return (r["ok"] as? [[String: Any]] ?? []).compactMap { f in (f["id"] as? Int).map { ($0, f["url"] as? String ?? "") } }
     }
-
-    var isExtension: Bool { true }
 
     private func at(_ tab: TabRef, _ e: Expect) -> [String: Any] {
         ["w": tab.wid, "i": tab.idx, "n": e.count, "u": e.url ?? "*"]
@@ -126,10 +127,13 @@ final class ExtBrowser: Browser {
         return match?[kCGWindowNumber as String] as? Int
     }
 
-    /// Replaces the tab's block rules (URL patterns, as `route` takes them). False: not supported here.
-    func block(_ tab: TabRef, _ e: Expect, _ patterns: [String]) -> Bool {
-        guard let r = try? bridge.call("block", at(tab, e).merging(["pats": patterns]) { $1 }) else { return false }
-        return r["ok"] != nil
+    /// Replaces the tab's network rules (`safari route`). False: the tab moved (re-sync and retry).
+    func rules(_ tab: TabRef, _ e: Expect, _ list: [[String: Any]]) throws -> Bool {
+        do {
+            return try bridge.call("rules", at(tab, e).merging(["rules": list]) { $1 })["stale"] == nil
+        } catch let e as ToolError where e.msg.hasPrefix("unknown op") {
+            throw ToolError("The Safari CLI Bridge extension is out of date; rebuild it with Extension/build.sh.")
+        }
     }
 
     /// The extension's `cookies` op on the tab's site; the reply has `ok`, `stale` (tab moved) or `no` (no cookie API).

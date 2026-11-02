@@ -31,5 +31,5 @@ safari t5 logs --clear
 ```
 
 - `ERR` means no response was seen (aborted, blocked or served from cache), not always a failure: an image can be `ERR` and still show. Check a suspect image with `js 'el.naturalWidth' e5` (0 = broken).
-- Capture starts when safari first touches the page (with the extension: when the page opens). Pages loaded before the extension was enabled need a reload.
+- Capture starts when the page opens. Pages loaded before the extension was enabled need a reload.
 - After an action, `· failed: n7 POST 400 …` already names failed requests; `logs --id n7` shows the body.

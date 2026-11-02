@@ -35,7 +35,7 @@ enum CLI {
         ("logs", "[T] logs [--net] [--errors|--warn] [--new] [-p PAT] [--id nN] [--limit N] [--clear]"),
         ("locator", "[T] locator R                 a CSS selector for R that lasts across page loads (--sel)"),
         ("highlight", "[T] highlight R [--for S (5; 0 = until --hide)] | highlight --hide   box around R in the user's view"),
-        ("route", "[T] route PATTERN [--status N] [--body TEXT|@FILE] [--type CT] [--block] | route --list   mock fetch/XHR"),
+        ("route", "[T] route PATTERN [--status N] [--body TEXT|@FILE] [--type CT] [--resp-header H] [--delay MS] | --block | --redirect URL | --header H  [--global [--doc]] | route --list   the tab's fetch/XHR; --global: every request kind (scripts, images, frames; --doc pages) in EVERY tab"),
         ("unroute", "[T] unroute [PATTERN]         remove one route, or all"),
         ("storage", "[T] storage [local|session] [KEY [VALUE]] [--delete KEY] [--clear]   list, get or set web storage"),
         ("cookies", "[T] cookies [NAME [VALUE]] [--domain D] [--delete NAME] [--clear] [--max N]   list, get or set the site's cookies"),
@@ -67,20 +67,20 @@ enum CLI {
         "--offset": "offset", "--xy": "xy", "--to": "to", "--answer": "answer", "--text": "text", "--timeout": "timeout",
         "--region": "region", "--width": "max_width", "-p": "pattern", "--pattern": "pattern",
         "--id": "id", "--limit": "limit", "-o": "out", "--rows": "rows", "--next": "next", "--pages": "pages",
-        "--delay": "delay", "--for": "secs", "--status": "status", "--body": "body", "--type": "ctype", "--delete": "del", "--domain": "domain",
+        "--delay": "delay", "--for": "secs", "--status": "status", "--body": "body", "--type": "ctype", "--redirect": "to", "--header": "hq", "--resp-header": "hs", "--delete": "del", "--domain": "domain",
     ]
     private static let flags: [String: String] = [
         "--all": "all", "--full": "full", "--diff": "diff", "--os": "os", "--gone": "gone",
         "--private": "private", "--net": "net", "--errors": "errors", "--warn": "warn",
         "--new": "new", "--clear": "clear", "--right": "right", "--id-only": "idonly", "--wait": "wait",
-        "--json": "json", "--load": "load", "--window": "window", "--agents": "agents", "--hide": "hide", "--block": "block", "--list": "list", "--stop": "stop",
+        "--json": "json", "--load": "load", "--window": "window", "--agents": "agents", "--hide": "hide", "--block": "block", "--doc": "doc", "--global": "global", "--list": "list", "--stop": "stop",
     ]
     /// Options each verb takes.
     private static let allowed: [String: Set<String>] = {
         let page: Set = ["query", "ref", "selector", "max_chars", "offset", "diff"]
         let el: Set = ["ref", "selector", "xy", "os"]
         return [
-            "tabs": [], "open": ["private", "window", "idonly", "delay"], "downloads": ["wait", "timeout"], "status": [], "stop": [], "show": [], "close": ["agents"], "resize": [], "route": ["status", "body", "ctype", "block", "list"], "unroute": [], "storage": ["del", "clear", "max_chars"], "cookies": ["del", "clear", "max_chars", "domain"], "state": [], "pdf": ["out"], "drop": ["ref", "selector", "xy", "text"], "record": ["stop"], "locator": ["ref", "selector", "xy"], "highlight": ["ref", "selector", "xy", "secs", "hide"], "go": ["delay"],
+            "tabs": [], "open": ["private", "window", "idonly", "delay"], "downloads": ["wait", "timeout"], "status": [], "stop": [], "show": [], "close": ["agents"], "resize": [], "route": ["status", "body", "ctype", "block", "list", "to", "hq", "hs", "delay", "doc", "global"], "unroute": [], "storage": ["del", "clear", "max_chars"], "cookies": ["del", "clear", "max_chars", "domain"], "state": [], "pdf": ["out"], "drop": ["ref", "selector", "xy", "text"], "record": ["stop"], "locator": ["ref", "selector", "xy"], "highlight": ["ref", "selector", "xy", "secs", "hide"], "go": ["delay"],
             "read": page.union(["all", "full", "out"]), "text": page.union(["out"]), "links": page.union(["out"]),
             "table": ["ref", "selector", "rows", "json", "max_chars", "offset", "out"],
             "crawl": ["selector", "rows", "json", "next", "pages", "delay", "out"], "rate": [],
@@ -139,10 +139,14 @@ enum CLI {
             }
             if let k = valued[a] {
                 guard keys.contains(k) else { throw bad("\(verb) does not take \(a)") }
-                if let inline { o[k] = inline; continue }
-                guard i < rest.count else { throw bad("\(a) needs a value") }
-                o[k] = rest[i]
-                i += 1
+                guard inline != nil || i < rest.count else { throw bad("\(a) needs a value") }
+                let v = inline ?? rest[i]
+                if inline == nil { i += 1 }
+                // --header and --resp-header may repeat (kept apart by NUL, which no value contains).
+                if k == "hq" || k == "hs" {
+                    guard !v.contains(where: { $0 == "\r" || $0 == "\n" || $0 == "\0" }) else { throw bad("header values cannot contain line breaks") }
+                    o[k] = o[k].map { $0 + "\0" + v } ?? v
+                } else { o[k] = v }
             } else if let k = flags[a], inline == nil {
                 guard keys.contains(k) else { throw bad("\(verb) does not take \(a)") }
                 f.insert(k)
@@ -225,26 +229,63 @@ enum CLI {
                 args["action"] = "list"
                 return ("route", args, nil)
             }
-            args["pattern"] = try one("a URL pattern (glob like '*/api/*', a substring, or re:REGEX)")
+            let pat = try one("a URL pattern (glob like '*/api/*', a substring, or re:REGEX)")
+            guard !pat.isEmpty, pat != "re:" else { throw bad("the pattern is empty; it would match every request") }
+            if f.contains("global"), pat.allSatisfy({ $0 == "*" }) || ["re:.*", "re:^.*$", "re:.", "re:^"].contains(pat) {
+                throw bad("--global with a pattern that matches everything would change every request in every Safari tab; name the URLs")
+            }
+            args["pattern"] = pat
             args["action"] = "add"
+            let mockOpts = o["status"] != nil || o["body"] != nil || o["ctype"] != nil || o["delay"] != nil
             if f.contains("block") {
-                if o["status"] != nil || o["body"] != nil || o["ctype"] != nil { throw bad("--block takes no --status, --body or --type") }
+                if mockOpts || o["to"] != nil || o["hq"] != nil || o["hs"] != nil { throw bad("--block takes no other route options") }
                 args["block"] = true
+            }
+            if let to = o["to"] {
+                if mockOpts || o["hq"] != nil || o["hs"] != nil { throw bad("--redirect takes no --status, --body, --type, --delay or headers") }
+                guard let u = URL(string: to), ["http", "https"].contains(u.scheme ?? "") else { throw bad("--redirect needs an http(s) URL") }
+                args["to"] = to
+            }
+            if mockOpts, o["hq"] != nil { throw bad("--header changes requests that go out; a mocked answer takes --resp-header") }
+            if f.contains("global") { args["global"] = true }
+            if f.contains("doc") {
+                guard f.contains("global") else { throw bad("--doc needs --global: only network rules reach the page itself, and in Safari they apply to every tab") }
+                args["doc"] = true
+            }
+            for k in ["hq", "hs"] {
+                guard let v = o[k] else { continue }
+                var list: [[String]] = []
+                for line in v.split(separator: "\0") {
+                    guard let c = line.firstIndex(of: ":") else { throw bad("headers are 'Name: value' ('Name:' removes one)") }
+                    let n = line[..<c].trimmingCharacters(in: .whitespaces)
+                    guard !n.isEmpty, n.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }) else { throw bad("bad header name \(n)") }
+                    list.append([n, line[line.index(after: c)...].trimmingCharacters(in: .whitespaces)])
+                }
+                args[k] = list
             }
             if let v = o["status"] {
                 guard let n = Int(v), (200...599).contains(n) else { throw bad("--status must be an HTTP status, 200-599") }
                 args["status"] = n
             }
-            if var b = o["body"] {
+            if let v = o["delay"] {
+                guard let d = Double(v), d >= 0, d <= 60_000 else { throw bad("--delay is milliseconds, 0-60000") }
+                args["latency"] = d / 1000
+            }
+            if let b = o["body"] {
                 if b.hasPrefix("@") {
                     let path = (String(b.dropFirst()) as NSString).expandingTildeInPath
-                    guard let d = FileManager.default.contents(atPath: path), let t = String(data: d, encoding: .utf8) else { throw bad("cannot read \(b.dropFirst()) as text") }
-                    b = t
+                    guard let d = FileManager.default.contents(atPath: path) else { throw bad("cannot read \(b.dropFirst())") }
+                    guard d.count <= 20_000_000 else { throw bad("--body is limited to 20 MB") }
+                    if let t = String(data: d, encoding: .utf8) { args["body"] = t } else { args["body64"] = d.base64EncodedString() }
+                    if o["ctype"] == nil, let ext = path.split(separator: ".").last.map({ String($0).lowercased() }), let ct = Tools.contentTypes[ext] { args["ctype"] = ct }
+                } else {
+                    args["body"] = b
                 }
-                guard b.utf8.count <= 1_000_000 else { throw bad("--body is limited to 1 MB") }
-                args["body"] = b
             }
-            if let t = o["ctype"] { args["ctype"] = t }
+            if let t = o["ctype"] {
+                guard Tools.contentTypes[t.lowercased()] != nil || t.contains("/") else { throw bad("--type is a short name (json, js, css, html, text, png…) or a content type like text/csv") }
+                args["ctype"] = t
+            }
             if let p = args["pattern"] as? String, p.hasPrefix("re:"), (try? NSRegularExpression(pattern: String(p.dropFirst(3)))) == nil { throw bad("bad regular expression after re:") }
             return ("route", args, nil)
         case "storage":

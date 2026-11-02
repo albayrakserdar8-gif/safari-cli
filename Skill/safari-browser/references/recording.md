@@ -24,5 +24,5 @@ safari click --sel 'a[href="/orders"]'
 - Targets are stable selectors (see `selectors.md`), so the commands work on a fresh load. Check positional ones (`nth-of-type`) and read the list before replaying it.
 - `<select>` choices are recorded from the change, however the user made it (`select` itself has no `--os` mode).
 - Only the user's own actions count; safari's commands are not recorded. Text typed into rich editors (contenteditable) is not recorded.
-- Recording covers one site in one tab: moving to another site ends it, and `--stop` then says it is not recording. Needs the Safari CLI Bridge extension.
+- Recording covers one site in one tab: moving to another site ends it, and `--stop` then says it is not recording.
 - Replay with the tab id (`export SAFARI_TAB=t9` in a script, or put `t9` after `safari`). Read the result after each step that matters, and ask before replaying anything that submits, buys or deletes.

@@ -35,29 +35,29 @@ final class Tools {
         var priv = false
     }
 
-    private lazy var apple = Safari()
     private let bridge = Bridge()
     private lazy var ext = ExtBrowser(bridge)
-    private var usingExt: Bool?
     private var extGeneration = 0
 
-    /// Safari through the extension when it is connected, else through Apple Events.
-    private var safari: Browser {
-        let e = bridge.ready()
-        let g = e ? bridge.generation : extGeneration
-        if let u = usingExt, u != e || (e && g != extGeneration) { switched(toExtension: e) }
-        usingExt = e
-        extGeneration = g
-        return e ? ext : apple
+    /// Safari, through the Safari CLI Bridge extension (the only way in). When it is not
+    /// connected, the first call throws the setup message (`Bridge.down`).
+    private var safari: ExtBrowser {
+        _ = bridge.ready()  // right after start, wait briefly for the extension to connect
+        if bridge.generation != extGeneration {
+            if extGeneration != 0 { reconnected() } else { _ = try? bridge.call("rules", ["rules": []], timeout: 3) }
+            extGeneration = bridge.generation
+        }
+        return ext
     }
 
-    /// Window ids and positions differ between the two backends. Carry over the tabs whose
-    /// URL is unique on both sides; the rest get new ids at the next sync.
-    private func switched(toExtension e: Bool) {
-        log(e ? "using the Safari extension" : "extension not connected; using Apple Events")
-        frameIDs = [:]  // frame ids mean different things in the two backends
+    /// Another copy of the extension took over (Safari restarted it): its tab and window ids
+    /// differ, so carry over the tabs whose URL is unique; the rest get new ids at the next sync.
+    private func reconnected() {
+        log("extension reconnected")
+        routes = [:]  // the new copy of the extension holds no rules
+        frameIDs = [:]
         focusFrame = [:]
-        let list = (try? (e ? ext : apple as Browser).listTabs()) ?? []
+        let list = (try? ext.listTabs()) ?? []
         var fresh: [Int: Tab] = [:]
         for t in tabs.values where tabs.values.filter({ $0.url == t.url }).count == 1 {
             let hits = list.filter { $0.url == t.url }
@@ -73,11 +73,19 @@ final class Tools {
         counts = [:]
     }
 
-    /// One line for `safari status`; does not touch Safari.
+    /// `safari --ext OP JSON`: one raw extension op, for debugging. `"tab": "t3"` fills in its address.
+    func rawExt(_ op: String, _ a: [String: Any]) throws -> String {
+        var m = a
+        if a["tab"] != nil, let t = tabs[try resolve(a)] {
+            m["w"] = t.pos.wid; m["i"] = t.pos.idx; m["n"] = -1; m["u"] = "*"
+            m["tab"] = nil
+        }
+        return jsonString(try bridge.call(op, m))
+    }
+
+    /// One line for `safari status`.
     func status() -> String {
-        let ext = bridge.ready() ? "extension connected (port \(bridge.port))"
-            : bridge.port == 0 ? "extension bridge off (ports 47391-47399 busy); Apple Events"
-            : "extension not connected (port \(bridge.port)); Apple Events"
+        let ext = bridge.ready() ? "extension connected (port \(bridge.port))" : "extension NOT connected: " + bridge.downReason
         return "daemon pid \(getpid()) · \(ext) · \(tabs.count) tabs tracked"
     }
 
@@ -129,6 +137,8 @@ final class Tools {
             throw ToolError(e.msg + " If so, `safari t\(id) dialog accept` (or dismiss) answers it; it needs Accessibility permission and shows the tab.")
         }
         saveState()
+        pruneRoutes()
+        followRoutes()
         if !dialogs.isEmpty {
             let note = dialogs.map { "⚠ dialog " + $0 }.joined(separator: "\n")
             if let i = out.lastIndex(where: { if case .text = $0 { return true } else { return false } }), case .text(let t) = out[i] {
@@ -158,14 +168,13 @@ final class Tools {
         case "storage": return [.text(try page("storage", a, ["area", "key", "value", "del", "clear", "max_chars"]))]
         case "cookies": return [.text(try cookies(a))]
         case "record":
-            if !safari.isExtension { throw ToolError("record needs the Safari CLI Bridge extension (the recorder must start with each page).") }
             return [.text(try page("record", a, ["stop"]))]
         case "highlight": return [.text(try page("highlight", a, ["ref", "selector", "x", "y", "secs", "hide"]))]
         case "js": return [.text(try js(a))]
         case "screenshot": return try screenshot(a)
         case "logs":
             var la = a
-            if a["kind"] as? String == "network", a["id"] == nil, safari.isExtension, let t = tabs[try resolve(a)], let wr = ext.requests(t.pos) {
+            if a["kind"] as? String == "network", a["id"] == nil, let t = tabs[try resolve(a)], let wr = ext.requests(t.pos) {
                 la["wr"] = wr
             }
             return [.text(try page("logs", la, ["kind", "level", "new", "pattern", "id", "limit", "clear", "wr"]))]
@@ -345,7 +354,7 @@ final class Tools {
                 if current == id { current = nil; defaultLost = true }
             }
         }
-        if !closed.isEmpty { try? sync(); saveState() }
+        if !closed.isEmpty { try? sync(); saveState(); pruneRoutes() }
         return closed
     }
 
@@ -423,12 +432,12 @@ final class Tools {
     /// Runs `body(handle)` inside the page with the agent present and the handle verified.
     /// `body` is JS statements that return a JSON envelope string.
     private func agent(_ id: Int, _ body: (String) -> String) throws -> [String: Any] {
-        // Without the extension, a frame (aeFrame) is reached from the top document: the code
-        // runs through the frame window's own Function, so it sees that frame's globals.
+        // A frame the extension cannot script (srcdoc, about:blank; `jsFrame`) is reached from
+        // the top document: the code runs through the frame window's own Function.
         func run(_ expr: String) throws -> String {
             guard aeFrame != 0 else { return try exec(id, expr) }
             let r = try exec(id, frameJS(aeFrame, "return " + expr))
-            if r == Tools.noFrame { throw ToolError("This frame cannot be reached without the Safari CLI Bridge extension (cross-origin, or the page blocks scripts).") }
+            if r == Tools.noFrame { throw ToolError("This frame cannot be reached (cross-origin, or the page blocks scripts).") }
             return r
         }
         for _ in 0..<4 {
@@ -436,8 +445,8 @@ final class Tools {
             let r = try run("(function(){if(!window.__smcp)return '\(PageAgent.absent)';\(body(h ?? ""))})()")
             if r == PageAgent.absent {
                 let nh = h ?? nextID("h")
-                // With the extension, the main-world part is already in the page as main.js.
-                let src = safari.isExtension ? PageAgent.source : PageAgent.mainSource + ";" + PageAgent.source
+                // The main-world part is already in the page as the extension's main.js.
+                let src = PageAgent.source
                 let installed = aeFrame == 0
                     ? try exec(id, src + ";__smcp.h=\(jsonString(nh));'ok'")
                     : try exec(id, frameJS(aeFrame, src + ";__smcp.h=\(jsonString(nh));return 'ok'"))
@@ -542,7 +551,7 @@ final class Tools {
     private func inFrame<T>(_ f: Int, _ body: () throws -> T) rethrows -> T {
         guard f != 0 else { return try body() }
         // A negative id is a frame reached from the top document (srcdoc frames with the extension).
-        if safari.isExtension && f > 0 {
+        if f > 0 {
             ext.frame = f
             defer { ext.frame = 0 }
             return try body()
@@ -552,8 +561,8 @@ final class Tools {
         return try body()
     }
 
-    /// Apple Events only: the frame calls go to, as its 1-based index among the top
-    /// document's iframes. Only same-origin frames whose CSP allows Function can be reached.
+    /// A frame the extension cannot script (srcdoc, about:blank), reached from the top document
+    /// as its 1-based index among the iframes. Only same-origin frames whose CSP allows Function.
     private var aeFrame = 0
     static let noFrame = "__smcp_noframe__"
 
@@ -563,7 +572,7 @@ final class Tools {
             + "if(!W)return '\(Tools.noFrame)';try{return String(W.Function(\(jsonString(body)))())}catch(e){return '\(Tools.noFrame)'}})()"
     }
 
-    /// Apple Events only: the top document's visible iframes, with whether we can script them.
+    /// The top document's visible iframes, with whether the top document can script them.
     private func aeFrames(_ id: Int) -> [(id: Int, url: String, ok: Bool)] {
         let js = "JSON.stringify([].map.call(document.querySelectorAll('iframe,frame'),function(f,i){var r=f.getBoundingClientRect(),u='',ok=0;"
             + "try{u=f.contentWindow.location.href;f.contentWindow.Function('');ok=1}catch(e){u=u||f.src||''}return[i+1,u,ok,r.width>20&&r.height>20?1:0]}))"
@@ -579,18 +588,12 @@ final class Tools {
         guard let t = tabs[id] else { return "" }
         var frames: [(id: Int, url: String)]
         var unread = 0
-        if safari.isExtension {
-            guard let list = try? ext.frames(t.pos, expect(t)) else { return "" }
-            frames = list.filter { $0.url.hasPrefix("http") || $0.url.hasPrefix("file") }
-            if list.count > frames.count {
-                // Safari does not let the extension script srcdoc/about:blank frames (rich-text editors
-                // such as TinyMCE); reach them from the top document, as without the extension.
-                frames += aeFrames(id).filter { $0.ok && $0.url.hasPrefix("about:") }.map { (-$0.id, $0.url) }
-            }
-        } else {
-            let all = aeFrames(id)
-            frames = all.filter(\.ok).map { ($0.id, $0.url) }
-            unread = all.count - frames.count
+        guard let list = try? ext.frames(t.pos, expect(t)) else { return "" }
+        frames = list.filter { $0.url.hasPrefix("http") }
+        if list.count > frames.count {
+            // Safari does not let the extension script srcdoc/about:blank frames (rich-text editors
+            // such as TinyMCE); reach them from the top document.
+            frames += aeFrames(id).filter { $0.ok && $0.url.hasPrefix("about:") }.map { (-$0.id, $0.url) }
         }
         var fo = o
         let fm = o["max_chars"] as? Int ?? 6000
@@ -616,7 +619,7 @@ final class Tools {
             }
             out += "\n--- frame \(pre) \(clip(f.url, 120))\n" + fixed.joined(separator: "\n")
         }
-        if unread > 0 { out += "\n(\(unread) iframe\(unread > 1 ? "s" : "") not read: \(safari.isExtension ? "the extension could not reach them" : "cross-origin or the page blocks scripts; needs the Safari CLI Bridge extension"))" }
+        if unread > 0 { out += "\n(\(unread) iframe\(unread > 1 ? "s" : "") not read: the extension could not reach them)" }
         return out
     }
 
@@ -722,25 +725,11 @@ final class Tools {
         return (q.first(where: { $0.name == "t" })?.value ?? "", u)
     }
 
-    /// Safari hides data: and other extensions' pages from our extension (blank URL and title),
-    /// which is how sleeping tabs look. Ask Apple Events for those, matching windows by tab
-    /// count and the URLs both sides can see. Only used for the `tabs` listing.
-    private func hiddenURLs() -> [Int: String] {
-        guard usingExt == true else { return [:] }
-        let blank = order.filter { tabs[$0].map { $0.url.isEmpty && $0.title.isEmpty } ?? false }
-        if blank.isEmpty { return [:] }
-        guard let list = try? apple.listTabs() else { return [:] }
-        let aeWins = Dictionary(grouping: list, by: \.ref.wid).mapValues { $0.sorted { $0.ref.idx < $1.ref.idx } }
-        var out: [Int: String] = [:]
-        for (wid, ids) in Dictionary(grouping: order, by: { tabs[$0]?.pos.wid ?? -1 }) where ids.contains(where: blank.contains) {
-            let mine = ids.compactMap { tabs[$0] }.sorted { $0.pos.idx < $1.pos.idx }
-            let hits = aeWins.values.filter { ae in
-                ae.count == mine.count && zip(mine, ae).allSatisfy { $0.url.isEmpty || $0.url == $1.url }
-            }
-            guard hits.count == 1, wid >= 0 else { continue }
-            for (t, a) in zip(mine, hits[0]) where t.url.isEmpty { out[t.id] = a.url }
+    /// Safari never lets extensions into file:// pages, so safari cannot work in them.
+    private func noFile(_ url: String) throws {
+        if url.lowercased().hasPrefix("file:") {
+            throw ToolError("Safari does not let extensions into file:// pages; serve the folder over HTTP instead, e.g. (cd DIR && python3 -m http.server 8765 --bind 127.0.0.1), then open http://127.0.0.1:8765/FILE")
         }
-        return out
     }
 
     private func tabsTool(_ a: [String: Any]) throws -> String {
@@ -750,17 +739,17 @@ final class Tools {
             if order.isEmpty { return "(no tabs)" }
             var lines: [String] = []
             var lastWid: Int?
-            let hidden = hiddenURLs()
             for id in order {
                 guard let t = tabs[id] else { continue }
                 if let lastWid, lastWid != t.pos.wid { lines.append("-- another window --") }
                 lastWid = t.pos.wid
-                let s = sleeping(hidden[id] ?? t.url)
+                let s = sleeping(t.url)
                 lines.append("t\(id)\(t.visible ? "*" : "")\(opened.contains(id) ? " (agent)" : "")\(t.priv ? " (private)" : "")\(s != nil ? " (sleeping)" : "") \(clip(s?.title ?? t.title, 60)) | \(clip(s?.url ?? t.url, 120))")
             }
             return lines.joined(separator: "\n")
         case "new":
             var url = a["url"] as? String ?? ""
+            try noFile(url)
             if !url.isEmpty && !url.contains(":") { url = "https://" + url }
             let priv = a["private"] as? Bool ?? false
             try sync()
@@ -830,71 +819,217 @@ final class Tools {
         }
     }
 
-    /// Routes per tab, re-sent after a navigation to another site (sessionStorage is per site).
+    /// Routes per tab, newest last. A tab's routes go to its page, where main.js routes the
+    /// tab's own fetch/XHR (mocks to `mocks`). `--global` routes become the extension's network
+    /// rules instead, which cover every kind of request but, in Safari, every tab: its rules
+    /// ignore `tabIds`, and its request events do not reliably say which tab asked.
     private var routes: [Int: [[String: Any]]] = [:]
-
-    private func describe(_ r: [String: Any]) -> String {
-        let p = r["p"] as? String ?? ""
-        if r["blk"] as? Bool == true { return "\(p) → blocked" }
-        let b = r["b"] as? String ?? ""
-        return "\(p) → \(r["s"] as? Int ?? 200)" + (r["t"].map { " \($0)" } ?? "") + " (\(b.utf8.count) B body)"
+    private let mocks = MockServer()
+    /// Origin whose sessionStorage last got tab id's routes; another origin needs them again.
+    private var routeHost: [Int: String?] = [:]
+    static func origin(_ url: String?) -> String? {
+        guard let c = URLComponents(string: url ?? ""), let h = c.host else { return nil }
+        return "\(c.scheme ?? "")://\(h)" + (c.port.map { ":\($0)" } ?? "")
     }
 
-    /// Mocked answers for the page's fetch/XHR requests (`safari route`), and with the
-    /// extension a block rule for everything else the tab loads (images, scripts, styles).
+    private func describe(_ r: [String: Any]) -> String {
+        let p = (r["p"] as? String ?? "") + (r["g"] as? Bool == true ? " (global" + (r["doc"] as? Bool == true ? ", pages too)" : ")") : "")
+        let hdr = { (k: String, label: String) -> String in
+            let l = (r[k] as? [[String]] ?? []).map { $0[1].isEmpty ? "-\($0[0])" : "\($0[0]): \($0[1])" }
+            return l.isEmpty ? "" : " \(label) " + l.joined(separator: ", ")
+        }
+        switch r["k"] as? String {
+        case "block": return "\(p) → blocked"
+        case "redirect": return "\(p) → redirect \(r["to"] as? String ?? "")"
+        case "headers": return "\(p) →" + hdr("hq", "request") + hdr("hs", "response")
+        default:
+            let s = r["s"] as? Int ?? 200
+            let body = [101, 204, 205, 304].contains(s) ? "no body" : "\(r["n"] as? Int ?? 0) B body"
+            return "\(p) → \(s) \(r["t"] as? String ?? "") (\(body)" + ((r["delay"] as? Double).map { ", \(Int($0 * 1000)) ms delay" } ?? "") + ")" + hdr("hs", "headers")
+        }
+    }
+
+    /// A route pattern as a regex for the extension's rules: a glob ('*' = anything) matches
+    /// the whole URL, text without '*' anywhere, re:REGEX is passed on.
+    static func ruleRegex(_ p: String) -> String {
+        if p.hasPrefix("re:") { return String(p.dropFirst(3)) }
+        var out = ""
+        for ch in p {
+            if ch == "*" { out += ".*" } else if ".+?^${}()|[]\\/".contains(ch) { out += "\\" + String(ch) } else { out.append(ch) }
+        }
+        return p.contains("*") ? "^" + out + "$" : out
+    }
+
+    static let contentTypes = ["json": "application/json", "js": "text/javascript", "javascript": "text/javascript", "css": "text/css", "html": "text/html; charset=utf-8", "text": "text/plain; charset=utf-8", "xml": "application/xml", "svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "gif": "image/gif", "webp": "image/webp", "woff2": "font/woff2", "mp4": "video/mp4"]
+
+    /// The `--global` routes of every tab as extension rules, plus one rule per plain mock that
+    /// sends requests carrying its secret marker (added by main.js) to the mock server. No
+    /// "object": Safari drops a rule whose list has it next to other types.
+    private func networkRules() -> [[String: Any]] {
+        var out: [[String: Any]] = []
+        var types = Set<String>()
+        for r in routes.values.flatMap({ $0 }) where r["g"] as? Bool != true && r["k"] as? String == "mock" {
+            let t = ["xmlhttprequest", "other"]
+            types.formUnion(t)
+            out.append(["action": ["type": "redirect", "redirect": ["url": (r["url"] as? String ?? "") + "/p"]],
+                        "condition": ["regexFilter": "[?&]" + Tools.marker(r), "resourceTypes": t]])
+        }
+        for r in routes.values.flatMap({ $0 }) where r["g"] as? Bool == true {
+            var t = ["sub_frame", "stylesheet", "script", "image", "font", "xmlhttprequest", "ping", "media", "websocket", "other"]
+            if r["doc"] as? Bool == true { t.insert("main_frame", at: 0) }
+            types.formUnion(t)
+            let hs = { (k: String) in (r[k] as? [[String]] ?? []).map { h -> [String: Any] in
+                h[1].isEmpty ? ["header": h[0], "operation": "remove"] : ["header": h[0], "operation": "set", "value": h[1]] } }
+            let action: [String: Any]
+            switch r["k"] as? String {
+            case "block": action = ["type": "block"]
+            case "redirect": action = ["type": "redirect", "redirect": ["url": r["to"] as? String ?? ""]]
+            case "headers":
+                var x: [String: Any] = ["type": "modifyHeaders"]
+                if !hs("hq").isEmpty { x["requestHeaders"] = hs("hq") }
+                if !hs("hs").isEmpty { x["responseHeaders"] = hs("hs") }
+                action = x
+            default: action = ["type": "redirect", "redirect": ["url": (r["url"] as? String ?? "") + "/g"]]
+            }
+            out.append(["action": action, "condition": ["regexFilter": Tools.ruleRegex(r["p"] as? String ?? ""), "resourceTypes": t]])
+        }
+        if out.isEmpty { return [] }
+        // Our own answers must not be redirected again. Safari ignores every rule when an allow
+        // rule names no resource types.
+        out.append(["action": ["type": "allow"], "condition": ["regexFilter": "^http://127\\.0\\.0\\.1:474[0-9][0-9]/m/", "resourceTypes": Array(types)]])
+        return out
+    }
+
+    /// The query parameter main.js adds to a request a plain mock answers: the mock's secret id.
+    static func marker(_ r: [String: Any]) -> String {
+        "__smcp_m=" + ((r["url"] as? String ?? "").split(separator: "/").last.map(String.init) ?? "")
+    }
+
+    /// The tab's own routes as main.js takes them (its fetch/XHR).
+    private func pageRoutes(_ list: [[String: Any]]) -> [[String: Any]] {
+        list.filter { $0["g"] as? Bool != true }.map { r in
+            var o: [String: Any] = ["p": r["p"] ?? "", "k": r["k"] ?? "mock"]
+            for k in ["to", "hq", "hs"] { if let v = r[k] { o[k] = v } }
+            if r["k"] as? String == "mock" { o["mk"] = Tools.marker(r); o["hs"] = nil }
+            return o
+        }
+    }
+
+    /// Routes of tabs that are gone: their mocks are dropped, and their --global rules too.
+    private func pruneRoutes() {
+        let dead = routes.keys.filter { tabs[$0] == nil }
+        guard !dead.isEmpty else { return }
+        for id in dead {
+            for r in routes[id] ?? [] { if let u = r["url"] as? String { mocks.remove(url: u) } }
+            routes[id] = nil
+        }
+        _ = try? bridge.call("rules", ["rules": networkRules()], timeout: 5)
+    }
+
+    /// Sends all routes to the extension, and tab `id`'s to its page.
+    private func applyRoutes(page id: Int?) throws {
+        routes = routes.filter { tabs[$0.key] != nil }  // closed tabs
+        do {
+            _ = try bridge.call("rules", ["rules": networkRules()])
+        } catch let e as ToolError {
+            if e.msg.hasPrefix("unknown op") { throw ToolError("The Safari CLI Bridge extension is out of date; rebuild it with Extension/build.sh.") }
+            if let m = e.msg.firstMatch(of: #/The header `([^`]+)` is not recognized/#) {
+                throw ToolError("Safari lets extensions change only standard headers, and \(m.1) is not one (custom X- headers are refused)")
+            }
+            throw ToolError("Safari refused the route: \(e.msg)")
+        }
+        if let id {
+            _ = try agentCall(id, ["op": "route", "list": pageRoutes(routes[id] ?? [])])
+            routeHost[id] = Tools.origin(tabs[id]?.url)
+        }
+    }
+
+    /// `safari route`: mock, block, redirect or rewrite headers of the tab's requests, of every
+    /// kind: fetch/XHR, scripts, styles, images, fonts, media, frames, and with --doc the page.
     private func route(_ a: [String: Any]) throws -> String {
         let id = try resolve(a)
-        func send(_ list: [[String: Any]]?) throws -> [[String: Any]] {
-            var o: [String: Any] = ["op": "route"]
-            if let list { o["list"] = list }
-            let v = try agentCall(id, o)["v"] as? String ?? "[]"
-            return (try? JSONSerialization.jsonObject(with: Data(v.utf8))) as? [[String: Any]] ?? []
-        }
-        var list = try send(nil)
+        let list = routes[id] ?? []
         let action = a["action"] as? String ?? "list"
         var head: String
+        var next = list
+        var added: [String: Any]?
         switch action {
         case "add":
+            guard mocks.start() else { throw ToolError("route cannot answer requests: ports \(MockServer.ports) are all in use") }
             let p = a["pattern"] as? String ?? ""
             var r: [String: Any] = ["p": p]
-            if a["block"] as? Bool == true { r["blk"] = true } else {
-                r["s"] = a["status"] as? Int ?? 200
-                r["b"] = a["body"] as? String ?? ""
-                if let t = a["ctype"] { r["t"] = t }
+            if a["global"] as? Bool == true { r["g"] = true }
+            if a["doc"] as? Bool == true { r["doc"] = true }
+            if let hq = a["hq"] as? [[String]] { r["hq"] = hq }
+            if let hs = a["hs"] as? [[String]] { r["hs"] = hs }
+            var m = MockServer.Mock()
+            if a["block"] as? Bool == true { r["k"] = "block" }
+            else if let to = a["to"] as? String { r["k"] = "redirect"; r["to"] = to }
+            else if a["status"] == nil, a["body"] == nil, a["body64"] == nil, a["ctype"] == nil, a["latency"] == nil, r["hq"] != nil || r["hs"] != nil {
+                r["k"] = "headers"
+            } else {
+                let body = (a["body64"] as? String).flatMap { Data(base64Encoded: $0) } ?? Data((a["body"] as? String ?? "").utf8)
+                var ct = a["ctype"] as? String
+                if let c = ct { ct = Tools.contentTypes[c.lowercased()] ?? c }
+                if ct == nil { ct = body.first.map { $0 == UInt8(ascii: "{") || $0 == UInt8(ascii: "[") } == true ? "application/json" : "text/plain; charset=utf-8" }
+                m.headers = [("Content-Type", ct!)]
+                for h in r["hs"] as? [[String]] ?? [] where !h[1].isEmpty {
+                    m.headers.removeAll { $0.0.lowercased() == h[0].lowercased() }
+                    m.headers.append((h[0], h[1]))
+                }
+                m.status = a["status"] as? Int ?? 200
+                m.body = body
+                m.delay = a["latency"] as? Double ?? 0
+                r["k"] = "mock"; r["s"] = m.status; r["t"] = ct; r["n"] = body.count
+                if m.delay > 0 { r["delay"] = m.delay }
             }
-            list.removeAll { $0["p"] as? String == p }
-            list.append(r)
-            list = try send(list)
+            if r["k"] as? String == "mock" { r["url"] = mocks.add(m) }
+            added = r
+            next.removeAll { $0["p"] as? String == p }
+            next.append(r)
             head = "routed " + describe(r)
+            if r["g"] as? Bool == true { head += "\n\u{1E}--global: this applies to every Safari tab, the user's too, until `unroute` or t\(id) closes" }
         case "remove":
             if let p = a["pattern"] as? String {
                 guard list.contains(where: { $0["p"] as? String == p }) else {
                     throw ToolError("no route \(p) on t\(id)" + (list.isEmpty ? "" : "; routes: " + list.compactMap { $0["p"] as? String }.joined(separator: ", ")))
                 }
-                list.removeAll { $0["p"] as? String == p }
+                next.removeAll { $0["p"] as? String == p }
                 head = "removed route \(p)"
             } else {
                 head = list.isEmpty ? "no routes" : "removed \(list.count) route\(list.count == 1 ? "" : "s")"
-                list = []
+                next = []
             }
-            list = try send(list)
         default:
-            head = list.isEmpty ? "no routes on t\(id)" : list.map(describe).joined(separator: "\n")
+            return list.isEmpty ? "no routes on t\(id)" : list.map(describe).joined(separator: "\n")
         }
-        routes[id] = list.isEmpty ? nil : list
-        var notes: [String] = []
-        if action != "list" {
-            let blocked = list.filter { $0["blk"] as? Bool == true }.compactMap { $0["p"] as? String }
-            if safari.isExtension, let t = tabs[id] {
-                if !ext.block(t.pos, expect(t, url: false), blocked), !blocked.isEmpty {
-                    notes.append("--block covers fetch/XHR only: this Safari or extension build cannot block other requests")
-                }
-            } else if !blocked.isEmpty {
-                notes.append("--block covers fetch/XHR only without the Safari CLI Bridge extension")
-            }
-            if !safari.isExtension, !list.isEmpty { notes.append("without the extension, routes start once safari touches each new page; earlier requests go out") }
+        routes[id] = next.isEmpty ? nil : next
+        do {
+            try applyRoutes(page: id)
+        } catch {
+            routes[id] = list.isEmpty ? nil : list
+            if let u = added?["url"] as? String { mocks.remove(url: u) }
+            try? applyRoutes(page: id)
+            throw error
         }
-        return head + notes.map { "\n\u{1E}" + $0 }.joined()
+        for r in list where !next.contains(where: { $0["url"] as? String == r["url"] as? String }) {
+            if let u = r["url"] as? String { mocks.remove(url: u) }
+        }
+        return head
+    }
+
+    /// After a load in tab `id`: its fetch/XHR routes live in the site's sessionStorage, so a
+    /// new site needs them again.
+    private func reapplyRoutes(_ id: Int) {
+        guard let list = routes[id], !list.isEmpty else { return }
+        if (try? agentCall(id, ["op": "route", "list": pageRoutes(list)])) != nil { routeHost[id] = Tools.origin(tabs[id]?.url) }
+    }
+
+    /// After any call: a routed tab that is now on another site (a click, a script) gets its routes again.
+    private func followRoutes() {
+        for id in routes.keys where tabs[id] != nil {
+            if routeHost[id] ?? nil != Tools.origin(tabs[id]?.url) { reapplyRoutes(id) }
+        }
     }
 
     /// Cookies of the tab's site: through the extension (all, HttpOnly too), else `document.cookie`.
@@ -905,26 +1040,24 @@ final class Tools {
         var m: [String: Any] = ["act": act]
         for k in ["name", "value", "domain", "list"] { if let v = a[k] { m[k] = v } }
         var reply: [String: Any]?
-        if safari.isExtension {
-            var tries = 0
-            while reply == nil {
-                guard let t = tabs[id] else { throw gone(id) }
-                let r = try ext.cookies(t.pos, expect(t), m)
-                if r["no"] != nil { break }
-                if r["stale"] == nil { reply = r; break }
-                tries += 1
-                if tries == 3 { throw ToolError("Tab t\(id) keeps changing; run `safari tabs`.") }
-                try sync()
-            }
+        var tries = 0
+        while reply == nil {
+            guard let t = tabs[id] else { throw gone(id) }
+            let r = try ext.cookies(t.pos, expect(t), m)
+            if r["no"] != nil { break }  // a private tab whose cookie store Safari does not name
+            if r["stale"] == nil { reply = r; break }
+            tries += 1
+            if tries == 3 { throw ToolError("Tab t\(id) keeps changing; run `safari tabs`.") }
+            try sync()
         }
         let full = reply != nil
         if reply == nil {
-            if m["domain"] != nil { throw ToolError("--domain needs the Safari CLI Bridge extension; without it only the page's own cookies are visible") }
+            if m["domain"] != nil { throw ToolError("--domain is not available in this private window; only the page's own cookies are visible") }
             let v = try page("cookies", a.merging(m) { $1 }, ["act", "name", "value", "list"])
             reply = (try? JSONSerialization.jsonObject(with: Data(v.utf8))) as? [String: Any] ?? [:]
         }
         let host = URL(string: tabs[id]?.url ?? "")?.host ?? "this site"
-        let partial = full ? "" : "\n\u{1E}HttpOnly cookies are not visible here (no Safari CLI Bridge extension, or a private window it cannot reach)"
+        let partial = full ? "" : "\n\u{1E}HttpOnly cookies are not visible here (a private window whose cookie store the extension cannot reach)"
         if act == "load" { return "set \(reply?["ok"] as? Int ?? 0) cookies" + partial }
         let list = reply?["ok"] as? [[String: Any]] ?? []
         if act == "dump" {
@@ -963,12 +1096,6 @@ final class Tools {
             if list.isEmpty { return "(no cookies on \(host))" + partial }
             return list.map(line).joined(separator: "\n") + "\n\u{1E}\(list.count) cookie\(list.count == 1 ? "" : "s") on \(a["domain"] as? String ?? host)" + partial
         }
-    }
-
-    /// After a load in tab `id`: routes live in the site's sessionStorage, so a new site needs them again.
-    private func reapplyRoutes(_ id: Int) {
-        guard let list = routes[id], !list.isEmpty else { return }
-        _ = try? agentCall(id, ["op": "route", "list": list])
     }
 
     /// Sets the viewport of the tab's window to W x H. Only in a window that holds nothing but
@@ -1028,13 +1155,12 @@ final class Tools {
                 return (t.ref, t.xid)
             }
         }
-        throw ToolError(safari.isExtension
-            ? "Safari opened a private window, but the extension cannot see it: in Safari > Settings > Extensions, turn on Allow in Private Browsing for Safari CLI Bridge."
-            : "Safari did not open a private window.")
+        throw ToolError("Safari opened a private window, but the extension cannot see it: in Safari > Settings > Extensions, turn on Allow in Private Browsing for Safari CLI Bridge.")
     }
 
     private func navigate(_ a: [String: Any]) throws -> String {
         guard var url = a["url"] as? String, !url.isEmpty else { throw ToolError("url required") }
+        try noFile(url)
         let id = try resolve(a)
         // Mark the current document so the wait below cannot mistake it for the new one.
         mark += 1
@@ -1060,7 +1186,6 @@ final class Tools {
         }
         usleep(100_000)
         let (text, _) = waitLoad(id, marked: true, from: url == "reload" ? nil : from, timeout: 15, grace: 1.5)
-        if let r = routes[id], !r.isEmpty, let to = tabs[id]?.url, !sameHost(to, from) { reapplyRoutes(id) }
         if !["back", "forward", "reload"].contains(url), let s = peek(id), s.url.hasPrefix("safari-resource:") {
             throw ToolError("Safari could not open \(clip(url, 120)) (\(clip(s.title, 60))); the tab now shows Safari's error page.")
         }
@@ -1446,7 +1571,7 @@ final class Tools {
         let hasReturn = Tools.topLevelReturn(code)
         var note = ""
         var inMain = false
-        if safari.isExtension {
+        do {
             // The extension's own scripts cannot see page globals; run in the page via main.js.
             func startMain(_ src: String) throws -> String {
                 let env = try agent(id) { h in

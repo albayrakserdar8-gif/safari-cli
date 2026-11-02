@@ -83,6 +83,19 @@ check "highlight --hide takes no element" test "$(code t3 highlight e4 --hide)" 
 parses '"action":"add","body":"[1,2]","pattern":"*/api/*","status":500' t5 route '*/api/*' --status 500 --body '[1,2]'
 parses '"action":"add","block":true,"pattern":"*.png"' t5 route '*.png' --block
 parses '"action":"list","tab":"t5"},"out":null,"tool":"route"' t5 route --list
+parses '"doc":true,"global":true,"pattern":"*/x","tab":"t5","to":"https://e.com/"' t5 route '*/x' --redirect https://e.com/ --doc --global
+parses '"hq":[["Accept-Language","de"],["Referer",""]]' t5 route x --header 'Accept-Language: de' --header 'Referer:'
+parses '"hs":[["Retry-After","9"]],"latency":1.5' t5 route x --body hi --resp-header 'Retry-After: 9' --delay 1500
+check "empty route pattern is a usage error" test "$(code t5 route '' --block)" = 2
+check "--global matching everything is a usage error" test "$(code t5 route '*' --block --global)" = 2
+check "--doc without --global is a usage error" test "$(code t5 route x --body y --doc)" = 2
+check "unknown --type is a usage error" test "$(code t5 route x --body y --type nonsense)" = 2
+check "line break in a header is a usage error" test "$(code t5 route x --header "$(printf 'A: 1\nB: 2')")" = 2
+check "--block with --body is a usage error" test "$(code t5 route x --block --body y)" = 2
+check "--redirect needs http(s)" test "$(code t5 route x --redirect ftp://a)" = 2
+check "--header on a mock is a usage error" test "$(code t5 route x --body y --header 'Accept: a')" = 2
+check "header without a colon is a usage error" test "$(code t5 route x --header Accept)" = 2
+check "bad --delay on route is a usage error" test "$(code t5 route x --body y --delay soon)" = 2
 parses '"action":"remove","pattern":"*.png"' t5 unroute '*.png'
 check "route --block with --status is a usage error" test "$(code t3 route x --block --status 500)" = 2
 check "route with a bad status is a usage error" test "$(code t3 route x --status 99)" = 2
@@ -140,4 +153,25 @@ check "skill stays under 7500 chars" test "$size" -lt 7500
 for f in Skill/safari-browser/references/*.md; do
   check "$(basename "$f") stays under 4000 chars" test "$(wc -c < "$f")" -lt 4000
 done
+# With every bridge port taken, a new daemon cannot reach the extension: commands must say so.
+"$BIN" stop >/dev/null 2>&1
+python3 -c '
+import socket, time
+held, todo = [], set(range(47391, 47400))
+end = time.time() + 2.5   # a daemon that was just stopped may still hold its port
+while todo and time.time() < end:
+    for p in sorted(todo):
+        try:
+            k = socket.socket(); k.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            k.bind(("127.0.0.1", p)); k.listen(); held.append(k); todo.discard(p)
+        except OSError: pass
+    time.sleep(0.1)
+time.sleep(6)' &
+holder=$!
+sleep 3
+out=$("$BIN" t999 read 2>&1); rc=$?
+check "no extension: commands fail with the setup message" bash -c '[ "$1" = 1 ] && [[ $2 == *"extension is not connected"* ]] || { echo "$2" >&2; false; }' _ "$rc" "$out"
+check "no extension: status says why" bash -c '"$0" status | grep -q "NOT connected"' "$BIN"
+"$BIN" stop >/dev/null 2>&1
+kill $holder 2>/dev/null; wait $holder 2>/dev/null
 exit $fail

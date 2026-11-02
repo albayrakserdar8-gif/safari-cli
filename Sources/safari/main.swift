@@ -9,7 +9,7 @@ if argv.count == 2, argv[0] == "--grab" {
 
 // The daemon keeps tab ids and the extension connection between commands. Requests are
 // handled in order on the main thread, whose run loop must stay free when idle: the first
-// Apple Event registers the process with the window server, which then expects it to take
+// window-server call (capture, Accessibility) registers the process, which then expects it to take
 // events and otherwise reports it as "Not Responding" after the next app switch.
 if argv == ["--daemon"] {
     Daemon.main()
@@ -30,6 +30,14 @@ do {
         let r = try Client.send("reserve", a)
         print(String(format: "%.1f", r["wait"] as? Double ?? 0))
         exit(0)
+    }
+    // `safari --ext OP [JSON]` sends one raw op to the extension (debugging the bridge).
+    if argv.first == "--ext", argv.count >= 2 {
+        var a: [String: Any] = ["op": argv[1]]
+        if argv.count > 2, let d = argv[2].data(using: .utf8), let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] { a["args"] = o }
+        let r = try Client.send("ext", a)
+        print(r["text"] as? String ?? "")
+        exit(r["ok"] as? Bool == true ? 0 : 1)
     }
     let (tool, args, out) = try CLI.parse(argv)
     if tool == "help" {

@@ -50,13 +50,21 @@ final class Bridge {
         return false
     }
 
-    /// Sends one command and waits for its reply. Throws `BridgeDown` when not connected
-    /// or the connection drops, so the caller can fall back to Apple Events.
+    /// Why the extension is not connected, for errors and `safari status`.
+    var downReason: String {
+        port == 0 ? "ports \(Bridge.ports.lowerBound)-\(Bridge.ports.upperBound) are all in use (stop other safari-cli or safari-mcp servers)"
+            : "turn on Safari CLI Bridge in Safari > Settings > Extensions and allow it on every website (build it once with Extension/build.sh; it needs Xcode)"
+    }
+
+    private var down: ToolError { ToolError("The Safari CLI Bridge extension is not connected: " + downReason + ".") }
+
+    /// Sends one command and waits for its reply. Throws a setup message when the extension
+    /// is not connected or the connection drops.
     func call(_ op: String, _ args: [String: Any] = [:], timeout: Double = 20) throws -> [String: Any] {
         let sem = DispatchSemaphore(value: 0)
         let box = Box()
         let id: Int = try q.sync {
-            guard let c = conns.first else { throw BridgeDown() }
+            guard let c = conns.first else { throw down }
             seq += 1
             pending[seq] = (sem, box, c)
             var m = args
@@ -69,7 +77,7 @@ final class Bridge {
             q.sync { _ = pending.removeValue(forKey: id) }
             throw ToolError("Safari did not answer in time; the page may be showing a dialog.")
         }
-        guard let r = box.value else { throw BridgeDown() }
+        guard let r = box.value else { throw ToolError("The Safari CLI Bridge extension disconnected during the call (Safari restarted or updated it); try again.") }
         if let e = r["err"] as? String { throw ToolError(e) }
         return r
     }
@@ -194,8 +202,6 @@ final class Bridge {
         (0..<n).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
     }
 }
-
-struct BridgeDown: Error {}
 
 func log(_ s: String) {
     FileHandle.standardError.write(Data(("safari: " + s + "\n").utf8))

@@ -15,6 +15,7 @@
     "webRequest",
     "nativeMessaging",
     "declarativeNetRequest",
+    "declarativeNetRequestWithHostAccess",
     "cookies",
     "<all_urls>"
   ],

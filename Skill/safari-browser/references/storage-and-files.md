@@ -13,7 +13,7 @@ safari t5 cookies --clear         # every cookie of this site
 safari t5 cookies --domain .example.com   # list another domain's cookies
 ```
 
-Without the Safari CLI Bridge extension only cookies the page itself can see are listed (no HttpOnly, no domain or expiry), and a note on stderr says so.
+In a private window whose cookie store Safari does not name, only cookies the page itself can see are listed (no HttpOnly), and a note on stderr says so.
 
 ## `storage`: localStorage and sessionStorage
 

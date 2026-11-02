@@ -3,21 +3,29 @@ enum PageAgent {
     static let absent = "__smcp_absent__"
 
     /// Runs in the page's own JavaScript world: hooks console, fetch and XHR, answers
-    /// dialogs, and runs `js` code. With the extension it is main.js, injected at
-    /// document_start in every frame; with Apple Events it is injected with `source`.
-    /// The agent reaches it directly, or through `__smcp_q`/`__smcp_r` events from the
+    /// dialogs, and runs `js` code. It is the extension's main.js, injected at document_start
+    /// in every frame; the agent reaches it through `__smcp_q`/`__smcp_r` events from the
     /// extension's isolated world.
     static let mainSource = #"""
     (function(){
     if(window.__smcpM)return;
     var M=window.__smcpM={con:null,net:null,slots:{}};
-    // Mocked fetch/XHR answers (safari route), kept per tab and site in sessionStorage so they
-    // apply from the start of the next load.
+    // safari route for this tab's own fetch/XHR, kept per tab and site in sessionStorage so they
+    // apply from the start of the next load. Network rules cannot be limited to one tab in
+    // Safari, so the tab's fetch/XHR are routed here. A mocked request keeps its URL plus a
+    // secret marker (mk); a network rule for that marker alone sends it to the daemon's mock
+    // server. Fetching the http mock server directly would be blocked on https pages.
     M.routes=[];try{M.routes=JSON.parse(sessionStorage.getItem('__smcp_routes')||'[]')}catch(e){}
-    function rx(p){if(p.slice(0,3)==='re:')return new RegExp(p.slice(3));if(p.indexOf('*')<0)return{test:function(u){return u.indexOf(p)>=0}};
-      return new RegExp('^'+p.replace(/[.+?^${}()|[\]\\]/g,'\\$&').replace(/\*/g,'.*')+'$')}
-    function route(u){if(!M.routes.length)return null;var abs;try{abs=new URL(u,location.href).href}catch(e){abs=String(u)}
-      for(var i=M.routes.length-1;i>=0;i--){var r=M.routes[i];try{if(!r.rx)r.rx=rx(r.p);if(r.rx.test(abs))return r}catch(e){}}return null}
+    function rx(p){if(p.slice(0,3)==='re:')return new RegExp(p.slice(3),'i');var l=p.toLowerCase();if(p.indexOf('*')<0)return{test:function(u){return u.toLowerCase().indexOf(l)>=0}};
+      return new RegExp('^'+p.replace(/[.+?^${}()|[\]\\]/g,'\\$&').replace(/\*/g,'.*')+'$','i')}
+    function route(u){if(!M.routes.length)return null;var abs;try{abs=new URL(u,location.href).href}catch(e){abs=String(u)}abs=abs.split('#')[0];
+      for(var i=M.routes.length-1;i>=0;i--){var r=M.routes[i];try{if(!r.rx)r.rx=rx(r.p);if(r.rx.test(abs))return{r:r,abs:abs}}catch(e){}}return null}
+    // Where a routed request goes instead: the mock server, the --redirect target, or null (unchanged).
+    function dest(t){if(t.r.k==='redirect')return t.r.to;if(t.r.k!=='mock')return null;var u=t.abs.split('#')[0];return u+(u.indexOf('?')<0?'?':'&')+t.r.mk}
+    // Same-origin frames share the tab's sessionStorage: pick up routes set after they loaded.
+    addEventListener('storage',function(e){if(e.key==='__smcp_routes'){try{M.routes=JSON.parse(e.newValue||'[]')}catch(x){M.routes=[]}}});
+    M.setRoutes=function(l){if(l!=null){M.routes=l;try{l.length?sessionStorage.setItem('__smcp_routes',JSON.stringify(l)):sessionStorage.removeItem('__smcp_routes')}catch(e){}}return M.routes.length};
+    function hdrs(h,list){list.forEach(function(x){x[1]===''?h.delete(x[0]):h.set(x[0],x[1])});return h}
     // A CSS selector that finds e alone: test hooks and stable ids first, then a short path.
     function selOf(e){var root=e.getRootNode(),one=function(s){try{var m=root.querySelectorAll(s);return m.length===1&&m[0]===e}catch(x){return false}};
       var q=function(v){return'"'+String(v).replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"'};
@@ -60,18 +68,6 @@ enum PageAgent {
         if(e.tagName==='SELECT'){var s=rsel(e),o=e.options[e.selectedIndex];if(s&&o)radd('select '+s+' '+rq(o.text.trim()))}else if(field(e))rfill(e)},true);
       document.addEventListener('keydown',function(ev){if(!M.rec||!ev.isTrusted)return;var e=ev.target;
         if(ev.key==='Enter'&&(field(e)&&e.tagName!=='TEXTAREA'||e.tagName==='SELECT'||(e.tagName==='INPUT'&&/^(checkbox|radio)$/.test(e.type)))){M.rec.ke=Date.now();if(field(e))rfill(e);var s=rsel(e);if(s)radd('key Enter '+s)}else if(ev.key==='Escape')radd('key Escape')},true)}
-    function ctOf(r){return r.t||(/^\s*[\[{]/.test(r.b||'')?'application/json':'text/plain')}
-    M.setRoutes=function(l){if(l!=null){M.routes=l;try{l.length?sessionStorage.setItem('__smcp_routes',JSON.stringify(l)):sessionStorage.removeItem('__smcp_routes')}catch(e){}}
-      return JSON.stringify(M.routes.map(function(r){return{p:r.p,s:r.s,b:r.b,t:r.t,blk:r.blk}}))};
-    function mockX(x,rt,id){var st=rt.blk?0:(rt.s||200),b=rt.blk?'':(rt.b||''),ct=ctOf(rt),d=function(k,v){try{Object.defineProperty(x,k,{configurable:true,get:function(){return v}})}catch(e){}};
-      push(M.net,id+' '+x.__q[0]+' '+(rt.blk?'ERR':st)+' '+x.__q[1]+' 0ms (mocked)');if(!rt.blk)keep(id,ct,b);
-      setTimeout(function(){var ty=x.responseType,res=b;
-        if(ty==='json'){try{res=JSON.parse(b)}catch(e){res=null}}else if(ty==='blob')res=new Blob([b],{type:ct});else if(ty==='arraybuffer')res=new TextEncoder().encode(b).buffer;
-        else if(ty==='document')res=new DOMParser().parseFromString(b,ct.indexOf('xml')>=0?'application/xml':'text/html');
-        d('readyState',4);d('status',st);d('statusText',rt.blk?'':'OK');d('response',res);if(ty===''||ty==='text')d('responseText',b);
-        try{d('responseURL',rt.blk?'':new URL(x.__q[1],location.href).href)}catch(e){}
-        x.getResponseHeader=function(n){return!rt.blk&&/^content-type$/i.test(n)?ct:null};x.getAllResponseHeaders=function(){return rt.blk?'':'content-type: '+ct+'\r\n'};
-        ['readystatechange',rt.blk?'error':'load','loadend'].forEach(function(e){x.dispatchEvent(e==='readystatechange'?new Event(e):new ProgressEvent(e))})},0)}
     function clip(s,k){s=String(s==null?'':s).replace(/\s+/g,' ').trim();return s.length>k?s.slice(0,k-1)+'…':s}
     function fmt(v){if(typeof v==='string')return v;if(v instanceof Error)return v.name+': '+v.message;try{return JSON.stringify(v)}catch(e){return String(v)}}
     function push(arr,x){arr.push(x);arr.t=(arr.t||0)+1;if(arr.length>300)arr.shift()}
@@ -83,19 +79,24 @@ enum PageAgent {
       addEventListener('error',function(e){push(M.con,'exception '+(e.message||(e.target&&(e.target.src||e.target.href))||'')+(e.filename?' @'+e.filename.split('/').pop()+':'+e.lineno:''))},true);
       addEventListener('unhandledrejection',function(e){push(M.con,'rejection '+fmt(e.reason))});
       var f=window.fetch;
-      if(f)window.fetch=function(i,o){var u=typeof i==='string'?i:(i&&i.url)||String(i),m=(o&&o.method)||(i&&i.method)||'GET',t=performance.now(),id='n'+(++M.nn);
-        var rt=route(u);if(rt){push(M.net,id+' '+m+' '+(rt.blk?'ERR':(rt.s||200))+' '+u+' 0ms (mocked)');if(rt.blk)return Promise.reject(new TypeError('Load failed'));
-          var st=rt.s||200,nb=st===204||st===205||st===304;if(!nb)keep(id,ctOf(rt),rt.b||'');
-          return Promise.resolve(new Response(nb?null:(rt.b||''),{status:st,headers:{'content-type':ctOf(rt)}}))}
-        return f.apply(this,arguments).then(function(r){push(M.net,id+' '+m+' '+r.status+' '+u+' '+Math.round(performance.now()-t)+'ms');
+      if(f)window.fetch=function(i,o){var u=typeof i==='string'?i:(i&&i.url)||String(i),m=(o&&o.method)||(i&&i.method)||'GET',t=performance.now(),id='n'+(++M.nn),args=arguments;
+        var rt=route(u),tag='';if(rt){tag=' (mocked)';var k=rt.r.k;
+          if(k==='block'){push(M.net,id+' '+m+' ERR '+u+' 0ms (blocked)');return Promise.reject(new TypeError('Load failed'))}
+          var to=dest(rt);if(to)args=[i instanceof Request?new Request(to,i):to,o];
+          if(rt.r.hq){var h=hdrs(new Headers((o&&o.headers)||(i instanceof Request?i.headers:undefined)),rt.r.hq);args=[args[0],Object.assign({},o,{headers:h})]}}
+        var hs=rt&&rt.r.k==='headers'&&rt.r.hs;
+        return f.apply(this,args).then(function(r){if(hs)r=new Response(r.body,{status:r.status,statusText:r.statusText,headers:hdrs(new Headers(r.headers),hs)});
+          push(M.net,id+' '+m+' '+r.status+' '+u+' '+Math.round(performance.now()-t)+'ms'+tag);
           try{var ct=r.headers.get('content-type');if(/json|text|xml|javascript|html|csv/i.test(ct||''))r.clone().text().then(function(b){keep(id,ct,b)},function(){})}catch(e){}return r},
           function(e){push(M.net,id+' '+m+' ERR '+u+' '+e);throw e})};
       var xo=XMLHttpRequest.prototype.open,xs=XMLHttpRequest.prototype.send;
-      XMLHttpRequest.prototype.open=function(m,u){this.__q=[m,u];return xo.apply(this,arguments)};
-      XMLHttpRequest.prototype.send=function(){var x=this,t=performance.now(),id='n'+(++M.nn);
-        var rt=x.__q&&route(x.__q[1]);if(rt){mockX(x,rt,id);return}
-        x.addEventListener('loadend',function(){if(!x.__q)return;push(M.net,id+' '+x.__q[0]+' '+(x.status||'ERR')+' '+x.__q[1]+' '+Math.round(performance.now()-t)+'ms');
-          try{if(x.responseType===''||x.responseType==='text')keep(id,x.getResponseHeader('content-type'),x.responseText)}catch(e){}});return xs.apply(this,arguments)};
+      XMLHttpRequest.prototype.open=function(m,u){this.__q=[m,u];var rt=route(u),a=[].slice.call(arguments);this.__rt=rt;
+        if(rt){var to=dest(rt);if(to)a[1]=to}return xo.apply(this,a)};
+      XMLHttpRequest.prototype.send=function(){var x=this,t=performance.now(),id='n'+(++M.nn),rt=x.__rt;
+        if(rt&&rt.r.k==='block'){push(M.net,id+' '+x.__q[0]+' ERR '+x.__q[1]+' 0ms (blocked)');setTimeout(function(){['error','loadend'].forEach(function(e){x.dispatchEvent(new ProgressEvent(e))})},0);return}
+        if(rt&&rt.r.hq)rt.r.hq.forEach(function(h){if(h[1]!=='')try{x.setRequestHeader(h[0],h[1])}catch(e){}});
+        var q=x.__q;x.addEventListener('loadend',function(){if(!q)return;push(M.net,id+' '+q[0]+' '+(x.status||'ERR')+' '+q[1]+' '+Math.round(performance.now()-t)+'ms'+(rt?' (mocked)':''));
+          try{if(x.responseType===''||x.responseType==='text')keep(id,x.getResponseHeader('content-type'),x.responseText)}catch(e){}},{once:true});return xs.apply(this,arguments)};
       return true}
     var STATIC=/^(img|css|link|script|font|video|audio|image|icon|stylesheet|media)$/;
     function logs(a){var fresh=hook(),net=a.kind==='network'||!!a.id,kind=net?'net':'con',arr=net?M.net:M.con,note='';
@@ -117,7 +118,7 @@ enum PageAgent {
       if(a.clear){M.con.length=0;M.net.length=0;BOD.clear()}
       return note+(out||(a.new?'(nothing new)':'(no entries)'))}
 
-    // Page dialogs would block Apple Events until someone clicks them. Answer them here instead:
+    // Page dialogs would block every call until someone clicks them. Answer them here instead:
     // alert is acknowledged; confirm and prompt are dismissed unless act dialog chose otherwise.
     // Only pages the server works in are armed: everywhere else (the user's own browsing)
     // dialogs stay Safari's own. Arming reaches child frames by postMessage, and their
@@ -163,7 +164,7 @@ enum PageAgent {
     """#
 
     /// Injected once per page. Everything the tools need from the DOM lives here so a
-    /// normal call is a single Apple Event carrying a few bytes.
+    /// normal call is a single extension message carrying a few bytes.
     static let source = #"""
     (function(){
     if(window.__smcp)return;
@@ -730,8 +731,6 @@ enum PageAgent {
       var secs=a.secs==null?5:+a.secs,iv,to,x=function(){clearInterval(iv);clearTimeout(to);host.remove();var i=H.indexOf(x);if(i>=0)H.splice(i,1)};
       pos();iv=setInterval(function(){if(!e.isConnected)x();else pos()},100);if(secs>0)to=setTimeout(x,secs*1000);H.push(x);
       return'highlighted '+desc(e)+(secs>0?' for '+secs+' s':' until highlight --hide')}
-    function routes(a){try{return mcall('setRoutes',[a.list==null?null:a.list])}
-      catch(e){if(e.message==='NOMAIN')throw new Error('this page was loaded before the Safari CLI Bridge extension; reload it, then route again');throw e}}
     // For js with an element: tag it so code in either world can find it.
     function mark(a){var e=a.ref?get(a.ref):a.selector?document.querySelector(a.selector):deep(a.x,a.y);
       if(!e)throw new Error(a.selector?'no element matches '+a.selector:'no element at '+a.x+','+a.y);e.setAttribute('data-smcp-el',a.slot);return'ok'}
@@ -740,8 +739,10 @@ enum PageAgent {
         // For real input: what a click at the centre would hit, when that is not the target.
         if(a.ref){var h=deep(t.x,t.y);if(h&&!inside(t.el,h)&&!inside(h,t.el))g.cover=desc(h)}}return g}
 
-    // The main-world part: the same object when injected together (Apple Events), else
-    // reached through synchronous DOM events from the extension's isolated world.
+    function routes(a){try{return mcall('setRoutes',[a.list==null?null:a.list])}
+      catch(e){if(e.message==='NOMAIN')throw new Error('this page was loaded before the Safari CLI Bridge extension; reload it, then route again');throw e}}
+    // The main-world part (main.js): reached through synchronous DOM events from the extension's
+    // isolated world, or directly when the agent runs in the page itself (frames reached by jsFrame).
     function mcall(op,args){var M=window.__smcpM;if(M){M.arm();return M[op].apply(null,args||[])}
       var r=null,h=function(e){r=e.detail};document.addEventListener('__smcp_r',h);
       document.dispatchEvent(new CustomEvent('__smcp_q',{detail:JSON.stringify({op:op,a:args||[]})}));document.removeEventListener('__smcp_r',h);

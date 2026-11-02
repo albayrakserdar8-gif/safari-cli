@@ -4,7 +4,7 @@
 
 Kod ajanlarının (Claude Code, opencode, kabuğu olan herhangi bir ajan) senin açık Safari'ni, açık oturumlarınla kullanmasını sağlayan bir `safari` komutu. Tek bir Swift ikili dosyası, bağımlılığı yok. [safari-mcp](https://github.com/sadopc/safari-mcp)'den çatallandı: aynı motor, MCP sunucusu yerine bir CLI ve bir skill.
 
-Kuruluysa isteğe bağlı **Safari CLI Bridge** eklentisi üzerinden, değilse Apple Events üzerinden çalışır.
+Safari ile zorunlu **Safari CLI Bridge** eklentisi üzerinden konuşur: eklenti her sekmeye ve çerçeveye ulaşır, ağ trafiğine de müdahale edebilir.
 
 Anthropic ile bağlantısı olmayan bağımsız bir projedir. Claude in Chrome yalnızca Chromium tarayıcılarda çalıştığı için yazıldı.
 
@@ -19,12 +19,12 @@ Giriş yaptığın sitelerde günlük işler için uygundur: okuma, arama, form 
 | Tarayıcı | Senin açık Safari'n | Kendi başlattığı ayrı tarayıcı | Kendi Chromium, Firefox ya da WebKit'i (varsayılan başsız) ya da bağlandığı Chrome/Edge | Başsız Chromium (Playwright ile), yalnızca sayfa okumak için |
 | Açık oturumların | Var | Yalnızca kayıtlı profil ya da oturum durumuyla | Kalıcı profille ya da Chrome'una bağlanarak | Yok |
 | Tıklama, yazma, form | Var | Var | Var | Yok, yalnızca okur |
-| İletişim kutusu, dosya yükleme, iframe | Var (iframe eklentiyle) | Var | Var | — |
-| Ağ müdahalesi | fetch/XHR taklidi ve istek engelleme (`route`) | Var | Var (`route`) | — |
+| İletişim kutusu, dosya yükleme, iframe | Var | Var | Var | — |
+| Ağ müdahalesi | Sekme başına: fetch/XHR'yi taklit etme, engelleme, yönlendirme ya da başlıklarını değiştirme. `--global`: her istek (betikler, stiller, görseller, çerçeveler, sayfanın kendisi), bütün sekmelerde (`route`) | Var | Var (`route`) | — |
 | Çerezler, kayıtlı oturum, PDF | Var (`cookies`, `state`, `pdf`) | Var | Var | — |
 | Kaynak gösteren web araması | Açtığı siteler üzerinden | Yok | Açtığı siteler üzerinden | Var (SearxNG) |
 | LLM | Ajanınki | Kendi LLM'i yok | Ajanınki | Herhangi biri: Ollama, OpenAI, Claude, Gemini, Groq |
-| Kurulum | Swift derlemesi, isteğe bağlı Safari eklentisi | npm ya da pip paketi | npm paketi (Node 18+), skill `install --skills` ile | Docker imajı (SearxNG dahil) |
+| Kurulum | Swift derlemesi ve Safari eklentisi (Xcode gerekir) | npm ya da pip paketi | npm paketi (Node 18+), skill `install --skills` ile | Docker imajı (SearxNG dahil) |
 | Platform | macOS 14+ | macOS, Windows, Linux | macOS, Windows, Linux | Docker çalışan her yer |
 | En uygun iş | Giriş yaptığın sitelerde günlük işler | Test, CI, tekrarlanabilir otomasyon | Ayrı bir tarayıcıda ajanla test ve otomasyon | Kaynak gösteren, gizli araştırma soruları |
 
@@ -37,7 +37,7 @@ Giriş yaptığın sitelerde günlük işler için uygundur: okuma, arama, form 
 
 ## Kurulum
 
-macOS 14 ya da üstü ve Command Line Tools gerekir (Xcode yalnızca eklenti için).
+macOS 14 ya da üstü, Command Line Tools ve Safari eklentisi için Xcode gerekir.
 
 ```bash
 git clone https://github.com/albayrakserdar8-gif/safari-cli.git
@@ -54,9 +54,9 @@ Arka plandaki bir süreç (daemon), sekme kimliklerini ve eklenti bağlantısın
 
 Claude Code'da `~/.claude/settings.json` içindeki `permissions.allow` listesine `"Bash(safari:*)"` eklersen her komutta izin sorulmaz.
 
-### Safari eklentisi (önerilen)
+### Safari eklentisi (zorunlu)
 
-Eklentiyle Otomasyon ve "Allow JavaScript from Apple Events" izinleri gerekmez, iframe'ler okunur, HTTP durum kodu (404) bildirilir, ağ kaydı sayfa açıldığı anda başlar ve görünür sekmenin ekran görüntüsü için Ekran Kaydı izni gerekmez. Eklenti yoksa safari Apple Events'e döner.
+Her komut eklentiden geçer; eklenti yoksa komutlar, nasıl açılacağını söyleyen bir hatayla durur. Bağlı olup olmadığını `safari status` gösterir.
 
 Derlemek için Xcode gerekir:
 
@@ -67,23 +67,21 @@ Derlemek için Xcode gerekir:
    Extension/build.sh --schedule
    ```
    `--schedule`, eklentiyi her hafta yeniden imzalayan bir görev ekler; ücretsiz hesap imzalarının süresi dolar.
-4. Safari > Ayarlar > Uzantılar'da **Safari CLI Bridge**'i aç ve her web sitesinde izin ver. Gizli sekmeler için "Özel Dolaşımda İzin Ver"i de aç. Yeni bir izin ekleyen güncellemeden sonra (Kasım 2026 sürümünde çerezler) Safari eklentiyi sen yeniden açana kadar kapatabilir.
+4. Safari > Ayarlar > Uzantılar'da **Safari CLI Bridge**'i aç ve her web sitesinde izin ver. Gizli sekmeler için "Özel Dolaşımda İzin Ver"i de aç. Yeni bir izin ekleyen güncellemeden sonra (Kasım 2026'da çerezler ve `route` için ağ kuralları) Safari eklentiyi sen yeniden açana kadar kapatabilir; önceden açık sayfaları yenile.
 
-Daemon ve eklenti `127.0.0.1` üzerinden (47391–47399 portları) konuşur ve `~/.config/safari-mcp/token` dosyasındaki anahtarla birbirini doğrular; başka sayfalar ya da yerel programlar bağlanamaz. Eklenti safari-mcp'nin kullandığıyla aynıdır; ikisi aynı anda kurulu olabilir.
+Daemon ve eklenti `127.0.0.1` üzerinden (47391–47399 portları) konuşur ve `~/.config/safari-mcp/token` dosyasındaki anahtarla birbirini doğrular; başka sayfalar ya da yerel programlar bağlanamaz. Eklenti safari-mcp'nin kullandığıyla aynıdır; ikisi aynı anda kurulu olabilir. `route`, taklit yanıtları `127.0.0.1` üzerindeki ikinci bir dinleyiciden (47401–47409 portları), tahmin edilemeyen yollardan verir.
 
-Safari eklentileri `file://` sayfalarına sokmaz; bu sayfalarda hep Apple Events kullanılır.
+Safari eklentileri `file://` sayfalarına sokmaz, bu yüzden safari onları reddeder; klasörü HTTP ile sun (`python3 -m http.server`).
 
 ## İzinler
 
-| İzin | Ne için | Eklentiyle | Eklentisiz |
-|---|---|---|---|
-| Safari eklentisi, her web sitesinde | Her şey | Gerekli | — |
-| Otomasyon (Safari'yi denetleme) | Her şey | Gerekmez | Gerekli, ilk kullanımda sorulur |
-| Safari > Ayarlar > Geliştirici > "Allow JavaScript from Apple Events" | `tabs` dışındaki her şey | Gerekmez | Gerekli |
-| Ekran Kaydı | `shot` | Yalnızca sekme ekranda değilken | Gerekli |
-| Erişilebilirlik | `--os`, yerel iletişim kutuları, tam ekran görüntüsü kırpma | İsteğe bağlı | İsteğe bağlı; gizli pencere için gerekli |
+| İzin | Ne için | Gerekli mi |
+|---|---|---|
+| Safari eklentisi, her web sitesinde | Her şey | Gerekli |
+| Ekran Kaydı | Ekranda olmayan sekmenin `shot`'ı | Yalnızca o zaman |
+| Erişilebilirlik | `--os`, yerel iletişim kutuları, tam ekran görüntüsü kırpma, gizli pencere açma | İsteğe bağlı |
 
-Bu izinler ajanı çalıştıran uygulamaya (terminaline) verilir. Geliştirici sekmesi yoksa Ayarlar > Gelişmiş > "Web geliştiricileri için özellikleri göster"i aç. "Allow JavaScript from Apple Events", Safari'yi denetleme izni olan her uygulama için geçerlidir.
+Bu izinler ajanı çalıştıran uygulamaya (terminaline) verilir. Otomasyon ve "Allow JavaScript from Apple Events" artık kullanılmaz.
 
 ## Kullanım
 
@@ -110,8 +108,8 @@ Ajana doğrudan söylemen yeterli:
 | `T js KOD [R]` | Sayfada JavaScript çalıştırır (async işlev gövdesi, 15 sn sınırı; `-` stdin'den okur); koddan sonra verilen öğe kodda `el` olur |
 | `T shot [--full]` | Görünüm alanının, bir öğenin, bir bölgenin ya da bütün sayfanın JPEG'i; dosya yolunu yazar |
 | `T resize G Y` | Görünüm alanı boyutu; yalnızca ajan sekmelerinden oluşan bir pencerede |
-| `T route DESEN`, `T unroute` | Sayfanın fetch/XHR yanıtlarını taklit eder (`--status`, `--body`) ya da istekleri `--block` ile engeller |
-| `T storage`, `T cookies` | localStorage/sessionStorage'ı ya da sitenin çerezlerini listeler, okur, yazar, siler (eklentiyle HttpOnly çerezler de) |
+| `T route DESEN`, `T unroute` | Sekmenin fetch/XHR isteklerini taklit eder (`--status`, `--body`, `--resp-header`, `--delay`), `--block` ile engeller, `--redirect` ile yönlendirir ya da `--header` ile başlıklarını değiştirir. `--global` aynısını her tür istek için, bütün sekmelerde yapar; `--doc` sayfanın kendisini ekler |
+| `T storage`, `T cookies` | localStorage/sessionStorage'ı ya da sitenin çerezlerini listeler, okur, yazar, siler (HttpOnly çerezler de) |
 | `T state save\|load DOSYA` | Sitenin çerezlerini ve web depolamasını bir dosyaya (izin 0600) yazar ve geri yükler |
 | `T check R`, `T uncheck R` | Onay kutusunu ya da radyo düğmesini ayarlar; tekrar çalıştırmak güvenlidir |
 | `T pdf` | Sayfayı, DOM'unun anlık kopyasından arka planda üretilen sayfalı bir PDF olarak kaydeder |
@@ -182,25 +180,32 @@ Bu turlardan sonra düzeltilenler:
 - Gizli pencerede `cookies` ve `state load` normal pencerenin çerezlerine yazıyordu, bu yüzden taşınan giriş tutmuyordu; eklenti artık gizli sekmenin çerez deposunu kullanır.
 - `drag --to` ref'in yanında CSS seçici de alır; "eşleşme yok" iletilerinde regex desenleri yazıldığı gibi görünür; skill `go reload` der (bir ajan `reload` denemişti).
 
+Sekizinci tur (Kasım 2026), Apple Events altyapısının kaldırılmasının ve `route`'un yeniden yazılmasının ardından yapıldı. Her adım önce Safari 27.2'de `route.html`, `fixture.html`, example.com ve httpbin.org üzerinde elle denendi; CLAUDE.md'deki ağ kuralı tuhaflıkları böyle bulundu. Ardından Claude Haiku ajanları tek daemon üzerinde paralel çalıştı: bütün günlük komutların gerileme sınaması (hepsi geçti), `route` için iki tur özellik sınaması ve iki tur saldırgan sınama. İlk saldırgan tur, Safari'nin ağ kurallarını her sekmeye uyguladığını gösterdi; sekme başına route ile `--global` ayrımı bundan doğdu.
+
+Bu turlardan sonra düzeltilenler:
+- Düz taklitler https sayfalarında çalışmıyordu (karışık içerik); artık taklit sunucusuna gizli bir işarete bağlı bir ağ kuralı yönlendirmesiyle ulaşıyorlar.
+- Boş desen her isteğe uyuyordu, satır sonu içeren bir başlık değeri iki başlık oluyordu; ikisi de, her şeye uyan bir `--global` desen de reddedilir.
+- Başka bir porta geçişte ya da betikle yapılan gezinmede kurallar yeniden uygulanmıyordu; `#parça` içeren adresler ve kuraldan önce yüklenen iframe'ler kaçıyordu; yeniden kullanılan bir XHR başarısız diye kaydediliyordu.
+- Kapanan bir daemon'un genel kuralları 5 sn sonra kaldırılır; böylece ölü bir taklit sunucusu kullanıcının sekmelerini bozamaz.
+
 Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenmedi.
 
 ## Sınırlar
 
-- Kapalı shadow DOM okunmaz. En çok 8 iframe okunur; eklentisiz yalnızca aynı kökenli ve CSP'si izin veren çerçeveler.
+- Kapalı shadow DOM okunmaz. En çok 8 iframe okunur.
 - Bazı siteler sayfa içi olayları yok sayar; `hover` yalnızca okunabilen CSS `:hover` kurallarını taklit eder. Bu durumlarda `--os` kullan.
 - Katı CSP'li sitelerde (GitHub, Gmail) eklenti `js`'i ayrı bir ortamda çalıştırır: DOM'u görür, sayfanın JavaScript değişkenlerini görmez.
-- HTTP durum kodu yalnızca eklentiyle bildirilir.
-- Eklentisiz modda kayıtlar safari'nin sayfaya ilk girdiği andan başlar; ondan önce açılan iletişim kutuları çağrıları 20 sn bekletir (Erişilebilirlik ile yanıtlanabilir).
+- safari'nin henüz girmediği bir sitenin ilk yüklenişinde açılan iletişim kutuları Safari'nin kendisinindir ve çağrıları 20 sn bekletir (`dialog` ile, Erişilebilirlik üzerinden yanıtlanabilir).
 - Ajanlar tek bir daemon'u paylaşır; birden fazla yeni sekme açıkken sekme kimliğini başa yazmalı (ya da `SAFARI_TAB` kullanmalı).
-- `route` sayfanın fetch ve XHR isteklerini taklit eder; sayfanın kendi belgesini, WebSocket'leri ve service worker'ları değil. Her sayfanın başından itibaren yalnızca eklentiyle geçerlidir. Siteden çıkan bir tıklama, `route` yeniden çalışana kadar kuralları düşürür.
-- `record` eklenti gerektirir, tek sekmede tek siteyi kapsar; zengin metin editörlerini ve parola değerlerini kaydetmez.
+- Düz `route` yalnızca sekmenin kendi fetch/XHR isteklerini sayfanın içinde yakalar (taklit edilenler ağa hiç çıkmaz; Worker, `sendBeacon` ve `EventSource` kapsanmaz). Betikler, stiller, görseller, çerçeveler ve sayfalar `--global` ister: Safari'nin ağ kuralları sekme süzgecini yok sayar ve istek olayları hangi sekmenin istediğini güvenilir biçimde söylemez; bu yüzden kurallar `unroute`'a, yönlendiren sekme kapanana ya da daemon durana kadar kullanıcınınkiler dahil bütün sekmelerde geçerlidir. `--global` ile Safari yalnızca standart başlık adlarını değiştirir (özel `X-` adlarını değil), regex motorunda `|`, `{n}` ve lookahead yoktur, `--block` çakışan bir taklitten üstündür ve `--doc` sayfasının kökeni taklidinkidir (`127.0.0.1`), sitenin çerezleri yoktur. Worker, service worker ve WebSocket mesajları taklit edilmez; taklit edilen fetch'in `response.url`'i yerel taklit adresidir.
+- `record` tek sekmede tek siteyi kapsar; zengin metin editörlerini ve parola değerlerini kaydetmez.
 - `shot --full` sayfanın kendisini kaydırır; içteki bir kutuyu kaydıran sayfalarda yalnızca ilk ekran çıkar.
 - `pdf`, sayfanın anlık kopyasını JavaScript kapalıyken yeniden dizer: kullanıcının girişini isteyen görseller, yüklemeden sonra betiklerin çizdiği içerik ve başka kaynaklı canvas'lar eksik çıkabilir.
-- Eklenti olmadan `cookies` yalnızca sayfanın okuyabildiği çerezleri görür (HttpOnly yok, alan adı ve bitiş tarihi yok); `state load` de HttpOnly çerezleri geri yükleyemez.
-- Eklentisiz modda, bir sekme başka bir siteye giderken aynı anda sekme açılıp kapanırsa sekme kaybolabilir; safari tahmin etmek yerine hata döner.
+- Safari'nin çerez deposunu adlandırmadığı bir gizli pencerede `cookies` yalnızca sayfanın okuyabildiği çerezleri görür (HttpOnly yok).
+- Data: adresleri (Tab Sleeper gibi eklentilerin uyuyan sekmeleri) eklentilerden gizlenir, bu yüzden `tabs` onları boş listeler.
 - Bot doğrulamaları başlık ve işaretlemeleriyle tanınır; başkaları fark edilmeden geçer. Hız sınırı `go`, `open` ve `crawl` için geçerlidir; sayfa yükleyen tıklamalar için değil.
 - `text` kipi bağlantı metinlerini ve veri tablosu hücrelerini kırpar (200 karakter, 60 satır); karmaşık tablolarda düzen bozulabilir. Sayfa düzeni için kullanılan tablolar metin olarak okunur.
-- Tam tarayıcı denetimi (gerçek girdi, bütün ağ trafiği) Safari'nin Web Inspector protokolünü gerektirir; kendi Safari'nde bunu yalnızca Apple imzalı uygulamalar kullanabilir. Apple'ın `safaridriver --mcp`'si bunu sekmelerini ve çerezlerini görmeyen ayrı, temiz bir oturumda sunar.
+- Her isteğin yanıt gövdesini okumak ve `--os` olmadan gerçek (güvenilir) girdi, Safari'nin Web Inspector protokolünü gerektirir; kendi Safari'nde bunu yalnızca Apple imzalı uygulamalar kullanabilir. Apple'ın `safaridriver --mcp`'si bunu sekmelerini ve çerezlerini görmeyen ayrı, temiz bir oturumda sunar.
 
 ## Geliştirme
 
@@ -209,7 +214,7 @@ Tests/smoke.sh                                             # CLI ve daemon testi
 (cd Tests && python3 -m http.server 8765 --bind 127.0.0.1)  # test sayfalarını sun
 ```
 
-Elle sınama için `http://127.0.0.1:8765/fixture.html`'i `safari open` ile aç (form, iletişim kutuları, gecikmeli öğe, tablo, fetch, iframe). `route.html` (fetch/XHR butonları ve bir görsel) ile `drop.html` (bir bırakma alanı) `route` ve `drop` içindir.
+Elle sınama için `http://127.0.0.1:8765/fixture.html`'i `safari open` ile aç (form, iletişim kutuları, gecikmeli öğe, tablo, fetch, iframe). `route.html` (fetch/XHR/Worker butonları; `route` taklit edene kadar eksik olan bir betik, stil dosyası ve görsel) ile `drop.html` (bir bırakma alanı) `route` ve `drop` içindir.
 
 ## Lisans
 

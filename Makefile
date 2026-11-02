@@ -23,5 +23,8 @@ uninstall:
 	  if [ "$$(readlink "$$d/safari-browser")" = "$(SKILL)" ]; then rm "$$d/safari-browser" && echo "removed $$d/safari-browser"; fi; \
 	done
 
+# Local checks (no CI): build, page-script syntax, CLI and daemon smoke test.
 test: build
+	awk '/static let source = #"""/{f=1;next} /^    """#/{f=0} f' Sources/safari/PageAgent.swift > "$${TMPDIR:-/tmp}/safari-agent.js"
+	node --check "$${TMPDIR:-/tmp}/safari-agent.js"
 	Tests/smoke.sh

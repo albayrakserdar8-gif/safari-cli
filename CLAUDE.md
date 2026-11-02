@@ -13,6 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 swift build -c release          # .build/release/safari (symlinked as /opt/homebrew/bin/safari)
 make install                    # build + link binary and skill (Claude Code, opencode); make uninstall
+make test                       # all checks, run locally (there is no CI): build, page-script syntax, smoke test
 Tests/smoke.sh                  # CLI parser + daemon lifecycle test, needs no Safari permission
 Tests/smoke.sh .build/debug/safari
 Extension/build.sh              # regenerate main.js, build, sign and install the Safari extension (needs Xcode)

@@ -51,8 +51,8 @@ out=$("$BIN" status 2>&1)
 check "daemon starts and answers status" grep -q "daemon pid" <<<"$out"
 pid=$(sed -E 's/daemon pid ([0-9]+).*/\1/' <<<"$out")
 check "second call reaches the same daemon" bash -c '"$0" status | grep -q "pid $1 "' "$BIN" "$pid"
-# Needs Safari (the unknown id makes the daemon list Safari's tabs): skipped on CI runners.
-[ -z "$CI" ] && check "tool errors exit 1" test "$(code t999 read)" = 1
+# Needs Safari: the unknown id makes the daemon list Safari's tabs.
+check "tool errors exit 1" test "$(code t999 read)" = 1
 reply=$(python3 -c '
 import socket, sys
 s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1])

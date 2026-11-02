@@ -87,7 +87,14 @@ final class Tools {
     /// Ids in Safari's order: windows front to back, tabs left to right.
     private var order: [Int] = []
     private var counts: [Int: Int] = [:]
-    private var nextTab = 1
+    /// Tab ids are never reused, not even by a later daemon: an agent still holding t5 from
+    /// before a restart must get "gone", not whichever tab the new daemon numbers t5.
+    private var nextTab: Int = {
+        let s = try? String(contentsOfFile: Paths.dir + "/next-tab", encoding: .utf8)
+        return max(1, Int(s?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? 1)
+    }() {
+        didSet { try? String(nextTab).write(toFile: Paths.dir + "/next-tab", atomically: true, encoding: .utf8) }
+    }
     private var synced = false
     /// Tab used when a call does not name one.
     private var current: Int?

@@ -4,11 +4,12 @@
 
 - One command for a form: `safari t5 fill e4=Ada e5=Large e6=true` (text, `<select>` option text or value, `true`/`false` for checkboxes and radios). Quote values with spaces: `e4="Ada Lovelace"`.
 - One field: `fill e4 "text"` replaces the value, `type e4 "text"` appends. `fill` replaces everything, so keep what must stay (a search filter like `is:issue`).
-- Checkboxes and radios: `check e6` / `uncheck e6` (or `fill e6=true`) set the state and are safe to repeat; `click` toggles.
+- Checkboxes and radios: `check e6` / `uncheck e6` (or `fill e6=true`) set the state and are safe to repeat; `click` toggles. A radio cannot be unchecked: check another option of its group.
+- Every element argument can also be `--sel CSS` or `--xy X,Y`: `fill --sel 'input[name=email]' a@b.c`.
 - `· also changed: …` lists fields the page changed itself (autofill, resets): check them before submitting.
 - Some fields commit only when you leave them (cart quantities): `fill e7 2 && key Tab e7`, then check the result.
-- `select e5 "Large"` picks an option; a miss lists the options.
-- Date pickers: type the date into the field (`fill e18 "10 Dec 1815" && key Enter e18`) instead of paging through months.
+- `select e5 "Large"` picks an option of a `<select>`; a miss lists the options. Custom dropdowns (react-select and the like) are not `<select>`: `fill e18 Maths && key Enter e18`, or `click` the box, then `read -q` the option and `click` it.
+- Date pickers: type the date into the field (`fill e18 "10 Dec 1815" && key Enter e18`) instead of paging through months. If typing is refused, open the picker, `select` its month and year boxes, then `click` the day (`read -q '/^15$/'`).
 - A search box missing from `read` is often behind a search button: click that, then `read -q search`.
 - To edit a list item that opens on double-click, `dblclick` its label, not its checkbox.
 

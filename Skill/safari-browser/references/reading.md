@@ -12,7 +12,7 @@
 - `read -q "sign in"`: controls and text anywhere on the page, best 10 hits.
 - `text -q "pricing refund"`: BM25-ranked blocks of the main content (header or nav text: `read -q`).
 - `links -q docs`: links whose text or URL contains every word.
-- Wrap a pattern in slashes for a regular expression, with optional flags: `read -q '/^(sign in|log in)$/i'`, `text -q '/\d+[.,]\d{2} TL/'`, `links -q '/\.pdf$/'`. `read` matches it against each control's name, `text` against each line (in page order, not ranked). A bad pattern exits 1.
+- Wrap a pattern in slashes for a regular expression, with optional flags: `read -q '/^(sign in|log in)$/i'`, `text -q '/\d+[.,]\d{2} TL/'`, `links -q '/\.pdf$/'`. `read` matches it against each control's name, `text` against each block (paragraph, list item, table row; in page order, not ranked), `links` against text and URL. A bad pattern exits 1.
 - A search with no hits (`no text matches …`) still exits 0.
 
 ## Scoping and caps

@@ -15,7 +15,7 @@ EOF
 - Several statements need `return`. Strings print as plain text, other values as JSON. Async code is fine; 15 s limit.
 - It runs in the top frame only; frame content: `read`/`text`.
 - Use it for data `read` and `text` do not show. Do not click or type with it when `click`/`fill` can.
-- `(page CSP blocks eval: …)` means the code ran with DOM access but without the page's own JavaScript variables.
+- `(page CSP blocks eval: …)` on stderr is normal on strict sites (GitHub, Hacker News): the code ran and the result is right; it only could not see the page's own JavaScript variables (`window.app…`). DOM reads work.
 - Output is capped at 4000 chars: `--max 0` or `-o FILE` for more.
 
 ## `logs`
@@ -30,6 +30,6 @@ safari t5 logs --id n4         # one response body
 safari t5 logs --clear
 ```
 
-- `ERR` means no response was seen (aborted, blocked or cached), not always a failure.
+- `ERR` means no response was seen (aborted, blocked or served from cache), not always a failure: an image can be `ERR` and still show. Check a suspect image with `js 'el.naturalWidth' e5` (0 = broken).
 - Capture starts when safari first touches the page (with the extension: when the page opens). Pages loaded before the extension was enabled need a reload.
 - After an action, `· failed: n7 POST 400 …` already names failed requests; `logs --id n7` shows the body.

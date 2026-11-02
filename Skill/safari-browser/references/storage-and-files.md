@@ -60,4 +60,4 @@ safari t5 drop --sel '.dropzone' --text 'plain text'
 safari t5 shot --full -o page.jpg
 ```
 
-Scrolls one screen at a time and stacks the captures (12 screens or 16000 px at most; a cut result says `top N of M px`). Fixed bars appear once. About 0.5 s per screen. Pages that scroll an inner box show only their first screen. Another width: open a separate window and `resize` it first (see `selectors.md`).
+Scrolls one screen at a time and stacks the captures, 12 screens at most (about 10,000 px of a page in a normal window; a cut result says `top N of M px`). For a long article, `pdf` or `text` is the better whole-page copy. Fixed bars appear once. About 0.5 s per screen. Pages that scroll an inner box show only their first screen. Another width: open a separate window and `resize` it first (see `selectors.md`).

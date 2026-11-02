@@ -1371,6 +1371,41 @@ final class Tools {
         return ("real \(action)\(what)", env)
     }
 
+    /// Whether the code has a `return` of its own, outside strings, comments and nested
+    /// functions or blocks: `xs.map(x => { return x })` is still a bare expression.
+    static func topLevelReturn(_ code: String) -> Bool {
+        let c = Array(code.unicodeScalars)
+        var i = 0, depth = 0
+        func word(at j: Int) -> Bool {
+            let w = Array("return".unicodeScalars)
+            guard j + w.count <= c.count, Array(c[j..<j + w.count]) == w else { return false }
+            func ident(_ u: Unicode.Scalar) -> Bool { u == "_" || u == "$" || u == "." || CharacterSet.alphanumerics.contains(u) }
+            if j > 0, ident(c[j - 1]) { return false }
+            if j + w.count < c.count, ident(c[j + w.count]), c[j + w.count] != "." { return false }
+            return true
+        }
+        while i < c.count {
+            let ch = c[i]
+            switch ch {
+            case "\"", "'", "`":
+                i += 1
+                while i < c.count, c[i] != ch { if c[i] == "\\" { i += 1 }; i += 1 }
+            case "/" where i + 1 < c.count && c[i + 1] == "/":
+                while i < c.count, c[i] != "\n" { i += 1 }
+            case "/" where i + 1 < c.count && c[i + 1] == "*":
+                i += 2
+                while i + 1 < c.count, !(c[i] == "*" && c[i + 1] == "/") { i += 1 }
+                i += 1
+            case "{", "(", "[": depth += 1
+            case "}", ")", "]": depth = max(0, depth - 1)
+            case "r" where depth == 0 && word(at: i): return true
+            default: break
+            }
+            i += 1
+        }
+        return false
+    }
+
     private func js(_ a: [String: Any]) throws -> String {
         guard var code = a["code"] as? String else { throw ToolError("code required") }
         let id = try resolve(a)
@@ -1393,7 +1428,7 @@ final class Tools {
         }
         // A bare expression is the common case; fall back to statements if it does not parse.
         while let last = code.last, last == ";" || last.isWhitespace { code.removeLast() }
-        let hasReturn = code.range(of: #"(^|[^.\w$])return\b"#, options: .regularExpression) != nil
+        let hasReturn = Tools.topLevelReturn(code)
         var note = ""
         var inMain = false
         if safari.isExtension {

@@ -33,7 +33,7 @@ safari t5 close
 | Need | Command |
 |---|---|
 | Buttons, links, fields to act on | `read` (visible controls only; prices and messages need `text`) |
-| One control or text anywhere | `read -q "sign in"` (top 10 hits; `-q '/sign (in\|up)/i'` is a regex) |
+| One control or text anywhere | `read -q "sign in"` (top 10 hits) |
 | Page text | `text` (markdown; `text -q "refund policy"` for the relevant blocks) |
 | Lists and tables as data | `table` (TSV with `link`, `id`; `--json`, `--rows ".card"`) |
 | Links | `links` (`-q` filters) |
@@ -41,32 +41,33 @@ safari t5 close
 | Below the fold | `read --full`, or `scroll` then `read --diff` |
 | Looks, images, canvas | `shot` → a JPEG path to open; costs far more than `read` |
 
-Output is capped (6000 chars; js 4000). The `… N more chars; --offset K` note goes to stderr; `--max 0` lifts the cap, `-o FILE` writes it all. Filter in the shell (`| grep -i price`) or save to a file. Refs belong to the current page: after a navigation or a "stale" error, read again.
+`-q` takes words, or a regex in slashes (`-q '/^sign (in|up)$/i'`) with `read`, `text` and `links`. Output is capped (6000 chars; js 4000). The `… N more chars; --offset K` note goes to stderr; `--max 0` lifts the cap, `-o FILE` writes it all. Filter in the shell (`| grep -i price`) or save to a file. Refs belong to the current page: after a navigation or a "stale" error, read again.
 
 ## Acting
 
-- `go URL` (or `back`, `forward`, `reload`) loads and waits. Reuse your tab rather than opening many.
+- `go URL`, `go back`, `go forward`, `go reload` load and wait. Reuse your tab rather than opening many.
+- Every element argument is a ref (`e12`), `--sel CSS` or `--xy X,Y`: `fill --sel '#q' "text"`, `check --sel '#agree'`.
 - `click e12` (or `--sel CSS`, `--xy X,Y`). The result ends with `→ title | url` when the page changed (already waited), `· new text: …`, `· failed: n7 POST 400 …`, or `(no change on the page yet)`; then `wait` for what you expect and `read --diff`.
-- `fill e4=Ada e5=Large e6=true` fills a form; `check e6`/`uncheck e6` set a box; `type` appends; `select e5 "Large"`; `key Enter e4`.
+- `fill e4=Ada e5=Large e6=true` fills a form; `check e6`/`uncheck e6` set a box; `type` appends; `select e5 "Large"`; `key Enter e4`. Dates: type them into the field. Dropdowns that filter as you type: `fill e18 Maths && key Enter e18`.
 - `wait "Order placed"` (or `--sel`, `--gone`, `--load`); prefer it to sleeping. Do not `wait` right after a click that navigated.
 - Pages that ignore you: repeat with `--os` (real input; brings Safari forward).
 - Bot checks are waited out by `open`/`go`. One that stays (a captcha) exits 1: `show` the tab, ask the user to solve it, then `wait --load`.
-- Dialogs in your tabs are answered for you (`confirm` **dismissed**) and reported as `⚠ dialog …`. To accept: `click e12 --answer accept`, only when the user wants that action.
+- Dialogs in your tabs are answered for you (`confirm` **dismissed**) and reported as `⚠ dialog …`. To accept: `click e12 --answer accept` (a prompt: `--answer "text"`), only when the user wants that action.
 
 Chain known steps with `&&`; it stops at the first failure. A Bash call stops after about 2 minutes: run long loops in the background and write to files.
 
 ## Specific tasks
 
-Read the file in `references/` (next to this one) before using these:
+The files below sit in `references/` next to this one. **Before you start a task that matches a line, read that file** (one Read, a few hundred tokens); guessing costs more commands than reading.
 
-- **Forms, keys, rich text, dates, uploads, downloads, dialogs**: `forms-and-input.md`
-- **Reading details** (output format, scoping, frames, regex `-q`, screenshots): `reading.md`
-- **Slow scraping and paged lists** (`rate`, `table`, `crawl`): `scraping.md`
-- **JavaScript and console/network logs** (`js`, `logs`): `js-and-logs.md`
-- **Stable selectors, highlights, viewport size, cleaning up tabs** (`locator`, `highlight`, `resize`, `close --agents`): `selectors.md`
-- **Mocking or blocking requests** (`route`): `network-mocking.md`
-- **Recording what the user does** (`record`): `recording.md`
-- **Cookies, web storage, saved state, PDF, drop zones, full-page shots** (`cookies`, `storage`, `state`, `pdf`, `drop`, `shot --full`): `storage-and-files.md`
+- A form with date pickers, dropdowns, rich text, file uploads, downloads or dialogs; a page that ignores clicks or keys → `forms-and-input.md`
+- Output you do not understand, a long or framed page, `-q` with regex, screenshots → `reading.md`
+- Rows from a list or table, several pages of results, a site that blocks fast loading → `scraping.md`
+- Data that `read`/`text` do not show, console errors, failed requests → `js-and-logs.md`
+- A selector that survives reloads, pointing something out to the user, phone or desktop widths, cleaning up tabs → `selectors.md`
+- Faking or blocking API answers → `network-mocking.md`
+- Turning what the user does into commands → `recording.md`
+- Cookies, localStorage, saving or restoring a login, PDF, drop zones, whole-page screenshots → `storage-and-files.md`
 
 ## Troubleshooting
 

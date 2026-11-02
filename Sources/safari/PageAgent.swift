@@ -333,13 +333,14 @@ enum PageAgent {
     function foot(m,used){var f=[];m.urls.forEach(function(u,i){if(!used||used.has(i+1))f.push('['+(i+1)+']: '+u)});return f.length?'\n\n'+f.join('\n'):''}
     // BM25 over the markdown lines; the best ones are returned in page order, each under its nearest heading.
     // -q "/re/flags" is a regular expression; anything else is words.
+    function qshow(q){return /^\/.+\/[a-z]*$/s.test(q||'')?q:JSON.stringify(q)}
     function qre(q){var m=/^\/(.+)\/([a-z]*)$/s.exec(q||'');if(!m)return null;try{return new RegExp(m[1],m[2].replace(/[gy]/g,''))}catch(e){throw new Error('bad regular expression '+q+': '+e.message)}}
     function rank(m,q,max){
       var tok=function(s){return s.toLowerCase().match(/[\p{L}\p{N}]+/gu)||[]},L=m.lines,N=L.length,df={},docs=[],avg=0;
       L.forEach(function(l){var tf={},ts=tok(l);ts.forEach(function(w){tf[w]=(tf[w]||0)+1});for(var w in tf)df[w]=(df[w]||0)+1;docs.push({tf:tf,n:ts.length});avg+=ts.length});
       avg=avg/Math.max(N,1)||1;var qs=tok(q),sc=[],re=qre(q),lim=re?500:30;
       if(re)L.forEach(function(l,i){if(re.test(l))sc.push({i:i,s:1})});else docs.forEach(function(d,i){var s=0;if(/^\s*#/.test(L[i]))return;qs.forEach(function(w){var f=d.tf[w];if(!f)return;var idf=Math.log(1+(N-df[w]+0.5)/(df[w]+0.5));s+=idf*f*2.2/(f+1.2*(0.25+0.75*d.n/avg))});if(s>0)sc.push({i:i,s:s})});
-      if(!sc.length)return'no text matches '+JSON.stringify(q);
+      if(!sc.length)return'no text matches '+qshow(q);
       if(!re)sc.sort(function(x,y){return y.s-x.s});
       var pick=new Set(),size=0;
       for(var k=0;k<sc.length&&k<lim;k++){var len=L[sc[k].i].length;if(size+len>max&&pick.size)break;pick.add(sc[k].i);size+=len}
@@ -355,7 +356,7 @@ enum PageAgent {
         if(el.checkVisibility&&!el.checkVisibility({visibilityProperty:true,checkVisibilityCSS:true}))return;
         var nm=name(el,60),hay=(nm+' '+u).toLowerCase();if(re?!re.test(nm+' '+u):ws.some(function(w){return hay.indexOf(w)<0}))return;
         seen.add(u);inn.push(ref(el)+' '+JSON.stringify(nm)+' '+u)});
-      return inn.join('\n')||(q?'no link matches '+JSON.stringify(q):'(no links)')}
+      return inn.join('\n')||(q?'no link matches '+qshow(q):'(no links)')}
 
     // One window of a long result. The continuation note starts with \x1e: the client prints
     // such lines to stderr, so data piped to a file stays clean. max_chars 0 = everything.
@@ -431,7 +432,7 @@ enum PageAgent {
           if(x.inv)sc+=0.5;hits.push({sc:sc,x:x})});
         if(hits.some(function(h){return h.x.all}))hits=hits.filter(function(h){return h.x.all});
         hits.sort(function(p,r){return r.sc-p.sc});
-        body=hits.slice(0,10).map(function(h){var x=h.x;return(x.el?x.s:ref(x.tel)+' text '+JSON.stringify(clip(x.s,100)))+(x.inv?'':' (offscreen)')}).join('\n')||'no match for '+JSON.stringify(a.query);
+        body=hits.slice(0,10).map(function(h){var x=h.x;return(x.el?x.s:ref(x.tel)+' text '+JSON.stringify(clip(x.s,100)))+(x.inv?'':' (offscreen)')}).join('\n')||'no match for '+qshow(a.query);
       }else if(a.mode==='text'){
         md0=text(root);body=a.query?rank(md0,a.query,a.max_chars||6000):md0.lines.join('\n')||(root?'(no text there: try read --all, or shot for images and canvas)':'(no text on the page)');
       }else if(a.mode==='links'){
@@ -603,7 +604,7 @@ enum PageAgent {
       scrollBy(0,dy);return pos()}
     function checked(el){return el.type==='checkbox'||el.type==='radio'?el.checked:el.getAttribute('aria-checked')==='true'}
     // Sets a checkbox or radio to the wanted state; safe to repeat.
-    function tick(t,want){var el=t.el;if(checked(el)!==want)press(t);return(checked(el)===want?'':'! not changed: ')+desc(el)+(checked(el)?' checked':' unchecked')}
+    function tick(t,want){var el=t.el;if(!/^(checkbox|radio)$/.test(el.type||'')&&!/^(checkbox|radio|switch|menuitemcheckbox|menuitemradio)$/.test(el.getAttribute('role')||''))throw new Error(desc(el)+' is not a checkbox or radio');if(!want&&checked(el)&&(el.type==='radio'||el.getAttribute('role')==='radio'))throw new Error(desc(el)+' is a radio: it cannot be unchecked; check another option of its group');if(checked(el)!==want)press(t);return(checked(el)===want?'':'! not changed: ')+desc(el)+(checked(el)?' checked':' unchecked')}
     function form(f){return Object.keys(f).map(function(r){try{var v=f[r],el=get(r),y=(el.type||'').toLowerCase();
         if(typeof v==='boolean'||y==='checkbox'||y==='radio'||el.getAttribute('role')==='checkbox')return tick(target({ref:r}),v===true||v==='true'||v==='on');
         if(el.tagName==='SELECT')return pick({ref:r,text:v});

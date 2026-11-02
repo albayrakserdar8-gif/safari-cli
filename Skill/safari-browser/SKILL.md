@@ -31,6 +31,7 @@ Syntax: `safari [TAB] VERB [ARGS]`. `TAB` is an id like `t3`; refs like `e12` co
 | Below the fold | `read --full`, or `scroll` then `read --diff`. Lazy content exists only after scrolling to it. |
 | Layout, images, visual bugs | `safari t5 shot` prints a JPEG path; open that image file to see it. `shot e12` or `--region x,y,w,h` crops. Costs far more than `read`. |
 
+- Every read starts with `title | url | scroll Y/MAX`. A control's current value follows it as `="Small"`; table cells are separated by ` | ` (a literal pipe inside a cell is `\|`).
 - Output is plain text, so filter it in the shell: `safari t5 text | grep -i price`, `| head -50`, or save it with `> /tmp/page.md` and read only what you need.
 - Long output ends with `… N more chars; --offset K`; continue only if you need it. `--max N` caps a read.
 - Scope a read with `--ref e40` or `--sel "main table"`.

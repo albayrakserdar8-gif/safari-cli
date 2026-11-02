@@ -10,22 +10,22 @@ Independent project, not affiliated with Anthropic. It was written because Claud
 
 ## When to use it
 
-Good for everyday work on sites you are logged into: reading, searching, filling forms, navigating. For web app testing, CI or repeatable automation, use Playwright (or Apple's `safaridriver`) instead. To get researched answers with sources rather than act on pages, a search engine like [Vane](https://github.com/ItzCrazyKns/Vane) fits better.
+Good for everyday work on sites you are logged into: reading, searching, filling forms, navigating. For web app testing, CI or repeatable automation, use Playwright (or Apple's `safaridriver`) instead; [playwright-cli](https://github.com/microsoft/playwright-cli) gives an agent the same in a separate browser. To get researched answers with sources rather than act on pages, a search engine like [Vane](https://github.com/ItzCrazyKns/Vane) fits better.
 
-| | safari-cli | Playwright | Vane |
-|---|---|---|---|
-| What it is | CLI that drives your Safari | Browser automation library | Self-hosted AI answer engine |
-| Driven by | Claude Code, opencode, any agent with a shell | Your scripts, or an agent through Playwright MCP | Its own LLM pipeline, from its web UI or API |
-| Browser | Your open Safari | A separate browser it launches | Headless Chromium (via Playwright), only to read pages |
-| Your logged-in sessions | Yes | Only with saved profiles or state | No |
-| Clicks, typing, forms | Yes | Yes | No, read-only |
-| Dialogs, file upload, iframes | Yes (iframes with the extension) | Yes | — |
-| Network interception | No (logs only) | Yes | — |
-| Web search with cited sources | Through the sites it opens | No | Yes (SearxNG) |
-| LLM | The agent's | None of its own | Any: Ollama, OpenAI, Claude, Gemini, Groq |
-| Setup | Swift build, optional Safari extension | npm or pip package | Docker image (includes SearxNG) |
-| Platform | macOS 14+ | macOS, Windows, Linux | Anywhere Docker runs |
-| Best for | Everyday tasks on sites you are logged into | Testing, CI, repeatable automation | Private research questions with cited answers |
+| | safari-cli | Playwright | playwright-cli | Vane |
+|---|---|---|---|---|
+| What it is | CLI that drives your Safari | Browser automation library | Playwright's CLI for coding agents | Self-hosted AI answer engine |
+| Driven by | Claude Code, opencode, any agent with a shell | Your scripts, or an agent through Playwright MCP | Claude Code, Copilot, any agent with a shell (through its skill) | Its own LLM pipeline, from its web UI or API |
+| Browser | Your open Safari | A separate browser it launches | Its own Chromium, Firefox or WebKit (headless by default), or Chrome/Edge it attaches to | Headless Chromium (via Playwright), only to read pages |
+| Your logged-in sessions | Yes | Only with saved profiles or state | With a persistent profile, or by attaching to your Chrome | No |
+| Clicks, typing, forms | Yes | Yes | Yes | No, read-only |
+| Dialogs, file upload, iframes | Yes (iframes with the extension) | Yes | Yes | — |
+| Network interception | No (logs only) | Yes | Yes (`route`) | — |
+| Web search with cited sources | Through the sites it opens | No | Through the sites it opens | Yes (SearxNG) |
+| LLM | The agent's | None of its own | The agent's | Any: Ollama, OpenAI, Claude, Gemini, Groq |
+| Setup | Swift build, optional Safari extension | npm or pip package | npm package (Node 18+), skill via `install --skills` | Docker image (includes SearxNG) |
+| Platform | macOS 14+ | macOS, Windows, Linux | macOS, Windows, Linux | Anywhere Docker runs |
+| Best for | Everyday tasks on sites you are logged into | Testing, CI, repeatable automation | Agent-driven testing and automation in a separate browser | Private research questions with cited answers |
 
 ## Why a CLI instead of MCP
 

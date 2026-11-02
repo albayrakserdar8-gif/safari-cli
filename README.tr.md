@@ -10,22 +10,22 @@ Anthropic ile bağlantısı olmayan bağımsız bir projedir. Claude in Chrome y
 
 ## Ne zaman kullanılır
 
-Giriş yaptığın sitelerde günlük işler için uygundur: okuma, arama, form doldurma, gezinme. Web uygulaması testi, CI ve tekrarlanabilir otomasyon için Playwright (ya da Apple'ın `safaridriver`'ı) daha doğru araçtır. Sayfalarda işlem yapmak yerine kaynak gösteren araştırılmış cevaplar istiyorsan [Vane](https://github.com/ItzCrazyKns/Vane) gibi bir arama motoru daha uygundur.
+Giriş yaptığın sitelerde günlük işler için uygundur: okuma, arama, form doldurma, gezinme. Web uygulaması testi, CI ve tekrarlanabilir otomasyon için Playwright (ya da Apple'ın `safaridriver`'ı) daha doğru araçtır; [playwright-cli](https://github.com/microsoft/playwright-cli) aynısını ayrı bir tarayıcıda bir ajana sunar. Sayfalarda işlem yapmak yerine kaynak gösteren araştırılmış cevaplar istiyorsan [Vane](https://github.com/ItzCrazyKns/Vane) gibi bir arama motoru daha uygundur.
 
-| | safari-cli | Playwright | Vane |
-|---|---|---|---|
-| Ne | Safari'ni süren komut satırı aracı | Tarayıcı otomasyon kütüphanesi | Kendi sunucunda çalışan yapay zekâ cevap motoru |
-| Kim yönetir | Claude Code, opencode, kabuğu olan her ajan | Senin betiklerin ya da Playwright MCP üzerinden bir ajan | Kendi LLM akışı; web arayüzünden ya da API'den |
-| Tarayıcı | Senin açık Safari'n | Kendi başlattığı ayrı tarayıcı | Başsız Chromium (Playwright ile), yalnızca sayfa okumak için |
-| Açık oturumların | Var | Yalnızca kayıtlı profil ya da oturum durumuyla | Yok |
-| Tıklama, yazma, form | Var | Var | Yok, yalnızca okur |
-| İletişim kutusu, dosya yükleme, iframe | Var (iframe eklentiyle) | Var | — |
-| Ağ müdahalesi | Yok (yalnızca kayıt) | Var | — |
-| Kaynak gösteren web araması | Açtığı siteler üzerinden | Yok | Var (SearxNG) |
-| LLM | Ajanınki | Kendi LLM'i yok | Herhangi biri: Ollama, OpenAI, Claude, Gemini, Groq |
-| Kurulum | Swift derlemesi, isteğe bağlı Safari eklentisi | npm ya da pip paketi | Docker imajı (SearxNG dahil) |
-| Platform | macOS 14+ | macOS, Windows, Linux | Docker çalışan her yer |
-| En uygun iş | Giriş yaptığın sitelerde günlük işler | Test, CI, tekrarlanabilir otomasyon | Kaynak gösteren, gizli araştırma soruları |
+| | safari-cli | Playwright | playwright-cli | Vane |
+|---|---|---|---|---|
+| Ne | Safari'ni süren komut satırı aracı | Tarayıcı otomasyon kütüphanesi | Playwright'ın kodlama ajanları için komut satırı aracı | Kendi sunucunda çalışan yapay zekâ cevap motoru |
+| Kim yönetir | Claude Code, opencode, kabuğu olan her ajan | Senin betiklerin ya da Playwright MCP üzerinden bir ajan | Claude Code, Copilot, kabuğu olan her ajan (skill'i üzerinden) | Kendi LLM akışı; web arayüzünden ya da API'den |
+| Tarayıcı | Senin açık Safari'n | Kendi başlattığı ayrı tarayıcı | Kendi Chromium, Firefox ya da WebKit'i (varsayılan başsız) ya da bağlandığı Chrome/Edge | Başsız Chromium (Playwright ile), yalnızca sayfa okumak için |
+| Açık oturumların | Var | Yalnızca kayıtlı profil ya da oturum durumuyla | Kalıcı profille ya da Chrome'una bağlanarak | Yok |
+| Tıklama, yazma, form | Var | Var | Var | Yok, yalnızca okur |
+| İletişim kutusu, dosya yükleme, iframe | Var (iframe eklentiyle) | Var | Var | — |
+| Ağ müdahalesi | Yok (yalnızca kayıt) | Var | Var (`route`) | — |
+| Kaynak gösteren web araması | Açtığı siteler üzerinden | Yok | Açtığı siteler üzerinden | Var (SearxNG) |
+| LLM | Ajanınki | Kendi LLM'i yok | Ajanınki | Herhangi biri: Ollama, OpenAI, Claude, Gemini, Groq |
+| Kurulum | Swift derlemesi, isteğe bağlı Safari eklentisi | npm ya da pip paketi | npm paketi (Node 18+), skill `install --skills` ile | Docker imajı (SearxNG dahil) |
+| Platform | macOS 14+ | macOS, Windows, Linux | macOS, Windows, Linux | Docker çalışan her yer |
+| En uygun iş | Giriş yaptığın sitelerde günlük işler | Test, CI, tekrarlanabilir otomasyon | Ayrı bir tarayıcıda ajanla test ve otomasyon | Kaynak gösteren, gizli araştırma soruları |
 
 ## Neden MCP yerine CLI
 

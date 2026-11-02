@@ -560,7 +560,7 @@ enum PageAgent {
         case'dialog':var dp=a.text==null?'accept':String(a.text);try{mcall('policy',[dp])}catch(e){throw new Error('dialogs cannot be answered on this page until it is reloaded')}return'next dialog: '+(dp==='accept'||dp==='dismiss'?dp:'answer '+JSON.stringify(dp));
         default:throw new Error('unknown action '+a.action)}}
     function geom(a){var t=target(a),g={iw:innerWidth,ih:innerHeight};
-      if(t){g.x=t.x;g.y=t.y;g.d=desc(t.el);if(t.r)g.r=[t.r.left,t.r.top,t.r.width,t.r.height];
+      if(t){g.x=t.x;g.y=t.y;g.d=desc(t.el);var ae=document.activeElement;if(ae&&ae!==document.body&&inside(t.el,ae))g.fo=1;if(t.r)g.r=[t.r.left,t.r.top,t.r.width,t.r.height];
         // For real input: what a click at the centre would hit, when that is not the target.
         if(a.ref){var h=deep(t.x,t.y);if(h&&!inside(t.el,h)&&!inside(h,t.el))g.cover=desc(h)}}return g}
 

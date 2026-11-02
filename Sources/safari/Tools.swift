@@ -1069,12 +1069,13 @@ final class Tools {
         case "dblclick": Input.click(try needPoint(), count: 2)
         case "hover": Input.move(try needPoint())
         case "type", "fill":
-            if let point { Input.click(point); usleep(200_000) }
+            // A click would drop the caret or selection already in the focused field.
+            if let point, action == "fill" || g["fo"] == nil { Input.click(point); usleep(200_000) }
             if action == "fill" { try Input.key("cmd+a") }
             Input.type(text)
         case "key":
             guard let k = a["key"] as? String else { throw ToolError("key required") }
-            if let point { Input.click(point); usleep(200_000) }
+            if let point, g["fo"] == nil { Input.click(point); usleep(200_000) }
             try Input.key(k)
         case "scroll":
             let dy = (a["dy"] as? Double).map { Int($0) } ?? Int(ih * 0.8)

@@ -599,9 +599,10 @@ enum PageAgent {
       while(el&&el!==document.body&&el!==de){var cs=getComputedStyle(el);if(el.scrollHeight>el.clientHeight+1&&/auto|scroll/.test(cs.overflowY)){el.scrollBy(0,dy);return'scrolled '+desc(el)+' to '+Math.round(el.scrollTop)+'/'+(el.scrollHeight-el.clientHeight)}el=el.parentElement}
       scrollBy(0,dy);return pos()}
     function checked(el){return el.type==='checkbox'||el.type==='radio'?el.checked:el.getAttribute('aria-checked')==='true'}
+    // Sets a checkbox or radio to the wanted state; safe to repeat.
+    function tick(t,want){var el=t.el;if(checked(el)!==want)press(t);return(checked(el)===want?'':'! not changed: ')+desc(el)+(checked(el)?' checked':' unchecked')}
     function form(f){return Object.keys(f).map(function(r){try{var v=f[r],el=get(r),y=(el.type||'').toLowerCase();
-        if(typeof v==='boolean'||y==='checkbox'||y==='radio'||el.getAttribute('role')==='checkbox'){var want=v===true||v==='true'||v==='on';
-          if(checked(el)!==want)press(target({ref:r}));return(checked(el)===want?'':'! not changed: ')+desc(el)+(checked(el)?' checked':' unchecked')}
+        if(typeof v==='boolean'||y==='checkbox'||y==='radio'||el.getAttribute('role')==='checkbox')return tick(target({ref:r}),v===true||v==='true'||v==='on');
         if(el.tagName==='SELECT')return pick({ref:r,text:v});
         return edit({action:'fill',ref:r,text:v})}catch(e){return'! '+r+': '+(e.message||e)}}).join('\n')}
     function mkfiles(a){var dt=new DataTransfer();(a.files||[]).forEach(function(f){var b=atob(f.b),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);dt.items.add(new File([u],f.n,{type:f.t}))});return dt}
@@ -660,7 +661,7 @@ enum PageAgent {
     function act(a){S.note='';if(a.text!=null&&(a.action==='dialog'||a.action==='click'))a.text=String(a.text).replace(/^answer\s*[:=]?\s*/i,'');var r=act1(a);return r+S.note}
     function act1(a){var t;S.fx=1;S.f0=null;S.slider=false;
       if(a.action==='click'||a.action==='dblclick'||a.action==='key'||a.action==='hover'){watch();S.t0=new Set(lines());S.n0=null;try{S.n0=mcall('ncount')}catch(e){}}
-      if(/^(click|dblclick|rclick|drag|key|hover|fill|select|type)$/.test(a.action)){fsnap(a);S.q0=null;try{S.q0=mcall('nn0')}catch(e){}}
+      if(/^(click|dblclick|rclick|drag|key|hover|fill|check|select|type)$/.test(a.action)){fsnap(a);S.q0=null;try{S.q0=mcall('nn0')}catch(e){}}
       switch(a.action){
         case'click':t=need(a);if(a.text!=null)try{mcall('policy',[String(a.text)])}catch(e){}if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.to.tagName)||t.to.isContentEditable)S.fx=1;if(S.hv)hov(t.to);press(t);return'clicked '+desc(t.el);
         case'dblclick':t=need(a);if(S.hv)hov(t.to);press(t);press(t,{detail:2});mev(t.to,'dblclick',t.x,t.y,{detail:2});return'double-clicked '+desc(t.el);
@@ -678,6 +679,7 @@ enum PageAgent {
           var h=hov(t.to);return'hovered '+desc(t.el)+(h.n?' ('+h.n+' :hover rules':' (no :hover styles found')+(h.bad?'; '+h.bad+' stylesheets from other sites unreadable, --os if nothing shows)':')');
         case'type':return edit(a);
         case'fill':return a.fields?form(a.fields):edit(a);
+        case'check':return tick(need(a),a.text!=='false');
         case'key':return key(a);
         case'select':return pick(a);
         case'scroll':return scroll(a);

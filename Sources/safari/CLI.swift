@@ -21,6 +21,8 @@ enum CLI {
         ("hover", "[T] hover R [--os]"),
         ("drag", "[T] drag R --to R2           drag and drop"),
         ("fill", "[T] fill R TEXT | fill R=V R2=V2 …  (true/false for checkboxes) [--os]"),
+        ("check", "[T] check R | uncheck R      set a checkbox or radio (safe to repeat)"),
+        ("uncheck", "[T] uncheck R"),
         ("type", "[T] type R TEXT [--os]       append"),
         ("select", "[T] select R OPTION | select R TEXT   (option of a <select>; text in a field or editor)"),
         ("key", "[T] key KEY [R] [--os]        Enter, Escape, cmd+a, shift+Tab…"),
@@ -54,7 +56,7 @@ enum CLI {
         --max N caps output (read/text/links/table 6000, js 4000; 0 = all); -o FILE writes it all.
         Notes such as "… N more chars" go to stderr.
 
-        """ + verbs.filter { !["dblclick", "hover"].contains($0.name) }.map { "  safari " + $0.usage }.joined(separator: "\n")
+        """ + verbs.filter { !["dblclick", "hover", "uncheck"].contains($0.name) }.map { "  safari " + $0.usage }.joined(separator: "\n")
     }
 
     private static let valued: [String: String] = [
@@ -80,7 +82,7 @@ enum CLI {
             "table": ["ref", "selector", "rows", "json", "max_chars", "offset", "out"],
             "crawl": ["selector", "rows", "json", "next", "pages", "delay", "out"], "rate": [],
             "click": el.union(["answer", "right"]), "drag": ["ref", "selector", "xy", "to"], "dblclick": el.union(["answer"]), "hover": el,
-            "fill": el, "type": el, "select": el, "key": el, "scroll": el,
+            "fill": el, "check": ["ref", "selector", "xy"], "uncheck": ["ref", "selector", "xy"], "type": el, "select": el, "key": el, "scroll": el,
             "wait": ["ref", "selector", "gone", "timeout", "load"], "upload": el.subtracting(["os"]), "dialog": [],
             "js": ["ref", "selector", "xy", "max_chars", "out"], "shot": ["ref", "selector", "region", "max_width", "out", "full"],
             "logs": ["net", "errors", "warn", "new", "pattern", "id", "limit", "clear"],
@@ -357,6 +359,12 @@ enum CLI {
             }
             args["action"] = "fill"
             args["fields"] = fields
+            return ("act", args, nil)
+        case "check", "uncheck":
+            try target(required: true)
+            try noMore()
+            args["action"] = "check"
+            args["text"] = verb == "check" ? "true" : "false"
             return ("act", args, nil)
         case "fill", "type", "select":
             try target(required: true)

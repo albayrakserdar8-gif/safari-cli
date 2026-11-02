@@ -96,6 +96,10 @@ parses '"stop":true,"tab":"t5"},"out":null,"tool":"record"' t5 record --stop
 check "record needs a tab" test "$(code record)" = 2
 parses '"full":true,"tab":"t5"},"out":null,"tool":"screenshot"' t5 shot --full
 check "shot --full with an element is a usage error" test "$(code t3 shot e4 --full)" = 2
+parses '"action":"check","ref":"e6","tab":"t5","text":"true"' t5 check e6
+parses '"action":"check","selector":"#agree","tab":"t5","text":"false"' t5 uncheck --sel '#agree'
+check "check needs an element" test "$(code t3 check)" = 2
+check "check does not take --os" test "$(code t3 check e4 --os)" = 2
 
 out=$("$BIN" status 2>&1)
 check "daemon starts and answers status" grep -q "daemon pid" <<<"$out"

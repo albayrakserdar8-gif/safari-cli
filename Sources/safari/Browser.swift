@@ -21,6 +21,8 @@ protocol Browser: AnyObject {
     func cgWindow(_ wid: Int) -> Int?
     /// JPEG of the window's visible tab, when the backend can take one itself.
     func capture(_ wid: Int) -> Data?
+    /// Sets the window's outer size, keeping its top-left corner. False: the backend cannot.
+    func resize(_ wid: Int, width: Int, height: Int) throws -> Bool
     var isExtension: Bool { get }
 }
 
@@ -30,6 +32,7 @@ extension Safari: Browser {
     func status(_ tab: TabRef) -> Int { 0 }
     func cgWindow(_ wid: Int) -> Int? { wid }
     func capture(_ wid: Int) -> Data? { nil }
+    func resize(_ wid: Int, width: Int, height: Int) throws -> Bool { try resizeWindow(wid, width, height) }
     var isExtension: Bool { false }
 }
 
@@ -121,6 +124,21 @@ final class ExtBrowser: Browser {
             return abs(rect.minX - x) < 2 && abs(rect.minY - y) < 2 && abs(rect.width - w) < 2 && abs(rect.height - h) < 2
         }
         return match?[kCGWindowNumber as String] as? Int
+    }
+
+    /// Replaces the tab's block rules (URL patterns, as `route` takes them). False: not supported here.
+    func block(_ tab: TabRef, _ e: Expect, _ patterns: [String]) -> Bool {
+        guard let r = try? bridge.call("block", at(tab, e).merging(["pats": patterns]) { $1 }) else { return false }
+        return r["ok"] != nil
+    }
+
+    func resize(_ wid: Int, width: Int, height: Int) throws -> Bool {
+        do {
+            _ = try bridge.call("resize", ["w": wid, "width": width, "height": height])
+            return true
+        } catch let e as ToolError where e.msg.hasPrefix("unknown op") {
+            return false
+        }
     }
 
     func capture(_ wid: Int) -> Data? {

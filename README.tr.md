@@ -20,7 +20,7 @@ Giriş yaptığın sitelerde günlük işler için uygundur: okuma, arama, form 
 | Açık oturumların | Var | Yalnızca kayıtlı profil ya da oturum durumuyla | Kalıcı profille ya da Chrome'una bağlanarak | Yok |
 | Tıklama, yazma, form | Var | Var | Var | Yok, yalnızca okur |
 | İletişim kutusu, dosya yükleme, iframe | Var (iframe eklentiyle) | Var | Var | — |
-| Ağ müdahalesi | Yok (yalnızca kayıt) | Var | Var (`route`) | — |
+| Ağ müdahalesi | fetch/XHR taklidi ve istek engelleme (`route`) | Var | Var (`route`) | — |
 | Kaynak gösteren web araması | Açtığı siteler üzerinden | Yok | Açtığı siteler üzerinden | Var (SearxNG) |
 | LLM | Ajanınki | Kendi LLM'i yok | Ajanınki | Herhangi biri: Ollama, OpenAI, Claude, Gemini, Groq |
 | Kurulum | Swift derlemesi, isteğe bağlı Safari eklentisi | npm ya da pip paketi | npm paketi (Node 18+), skill `install --skills` ile | Docker imajı (SearxNG dahil) |
@@ -98,26 +98,36 @@ Ajana doğrudan söylemen yeterli:
 
 | Komut | İş |
 |---|---|
-| `tabs`, `open URL [--private]`, `T show`, `T close` | Sekmeleri listeler, (arka planda) açar, gösterir, kapatır |
-| `T go URL\|back\|forward\|reload` | Yükler ve bekler |
+| `tabs`, `open URL [--private\|--window]`, `T show`, `T close`, `close --agents` | Sekmeleri listeler, (arka planda ya da kendi penceresinde) açar, gösterir, kapatır; `--agents` ekranda olmayan bütün ajan sekmelerini kapatır |
+| `T go URL\|back\|forward\|reload [--delay S]` | Yükler ve bekler |
 | `T read`, `T text`, `T links` | Ref'li öğeler, markdown olarak sayfa, bağlantılar; `-q` ile arama, `--diff` ile yalnızca değişen |
-| `T click R`, `dblclick`, `hover`, `fill`, `type`, `select`, `key`, `scroll`, `wait`, `upload`, `dialog` | Sayfada işlem yapar |
-| `T js KOD` | Sayfada JavaScript çalıştırır (async işlev gövdesi, 15 sn sınırı; `-` stdin'den okur) |
-| `T shot` | Görünüm alanının, bir öğenin ya da bölgenin JPEG'i; dosya yolunu yazar |
+| `T table [--rows CSS] [--json]` | Bir tabloyu ya da kart listesini TSV/JSON olarak verir; her satırın bağlantısı ve `data-id`'si de eklenir |
+| `T crawl [--next METİN] [--pages N]` | Sayfalı bir listenin her sayfasında `table` çalıştırır, "Sonraki"yi izler; sonuçları birleştirir, tekrarları atar |
+| `rate [SİTE [S\|off]]` | Site başına sayfa yüklemeleri arası saniye (`rate example.com 8-14`); kalıcıdır |
+| `T click R`, `dblclick`, `hover`, `fill`, `type`, `select`, `key`, `scroll`, `wait`, `upload`, `drop`, `dialog` | Sayfada işlem yapar (`drop` dosyaları bir bırakma alanına bırakır) |
+| `T locator R`, `T highlight R` | R için sayfa yüklemelerinden sonra da geçerli bir CSS seçici; senin ekranında R'nin çevresine çerçeve |
+| `T js KOD [R]` | Sayfada JavaScript çalıştırır (async işlev gövdesi, 15 sn sınırı; `-` stdin'den okur); koddan sonra verilen öğe kodda `el` olur |
+| `T shot [--full]` | Görünüm alanının, bir öğenin, bir bölgenin ya da bütün sayfanın JPEG'i; dosya yolunu yazar |
+| `T resize G Y` | Görünüm alanı boyutu; yalnızca ajan sekmelerinden oluşan bir pencerede |
+| `T route DESEN`, `T unroute` | Sayfanın fetch/XHR yanıtlarını taklit eder (`--status`, `--body`) ya da istekleri `--block` ile engeller |
+| `T storage` | localStorage/sessionStorage'ı listeler, okur, yazar, siler |
+| `T record`, `T record --stop` | Bir sekmede yaptıklarını kaydeder, tekrar oynatılacak `safari` komutları olarak yazar |
 | `T logs` | Konsol ve ağ kayıtları; `--id` ile yanıt gövdesi |
 | `downloads [--wait]` | Safari'nin listesinden son indirmeler; `--wait` bitmelerini bekler, sonra kaydedilen yolları yazar |
 
-Sonuçlar stdout'a gider; hatalar stderr'e, çıkış kodu 1 ile (yanlış kullanımda 2).
+Sonuçlar stdout'a gider; hatalar stderr'e, çıkış kodu 1 ile (yanlış kullanımda 2). Uzun sonuçlar kırpılır (`--max N`, hepsi için `--max 0`); `… N more chars; --offset K` gibi notlar ve satır sayıları stderr'e gider, böylece yönlendirilen veri temiz kalır. `-o DOSYA`, `read`, `text`, `links`, `table` ve `js` sonucunun tamamını dosyaya yazar.
 
 Nasıl davranır:
 
 - **Ref'ler.** `read` her öğeye `e12` gibi bir ref verir, işlemler bunu kullanır. Ref'ler yalnızca o sayfa için geçerlidir.
-- **Sekmeler.** Sekmeler `t3` gibi kalıcı kimlikler alır. Safari her işlemden önce sekmenin hâlâ beklenen sekme olduğunu doğrular; safari yanlış sekmede işlem yapmaz. Sekme kimliği verilmeyen komutlar son kullanılan sekmeye gider; yeni sekmeler arka planda açılır. `open --private` gizli pencere açar (sonraki gizli sekmeler ona eklenir); `tabs` bu sekmeleri `(private)` diye işaretler. `open` ile açılan sekmeler `(agent)` diye işaretlenir; 30 dakika boyunca hiçbir komut kullanmazsa daemon onu kapatır (görünen sekme ve `show` ile öne getirilen sekme hariç).
+- **Sekmeler.** Sekmeler `t3` gibi kalıcı kimlikler alır. Safari her işlemden önce sekmenin hâlâ beklenen sekme olduğunu doğrular; safari yanlış sekmede işlem yapmaz. Sekme kimliği verilmeyen komutlar son kullanılan sekmeye gider; yeni sekmeler arka planda açılır. `open --private` gizli pencere açar (sonraki gizli sekmeler ona eklenir); `tabs` bu sekmeleri `(private)` diye işaretler. `open` ile açılan sekmeler `(agent)` diye işaretlenir; 30 dakika boyunca hiçbir komut kullanmazsa daemon onu kapatır (senin pencerelerinden birinde görünen sekme ve `show` ile öne getirilen sekme hariç). Ortamdaki `SAFARI_TAB=t3`, sekme belirtmeyen komutlar için t3'ü kullandırır.
 - **Zengin metin.** `select R "kelimeler"` bir alanda ya da editörde metni seçer; ardından `key cmd+b R` (ya da `cmd+i`, `cmd+u`) onu biçimlendirir. Bu, odak alamayan frame'lerdeki editörlerde de çalışır.
 - **Sonuçlar.** İşlemler sayfa yüklenmesini bekler ve sayfa değişince `→ başlık | adres` bildirir. Yeni beliren metni, başarısız istekleri (4xx/5xx) ve değişen diğer alanları da yazar.
 - **Girdi.** Tıklama ve yazma varsayılan olarak sayfa içi olaylardır: Safari arka planda kalır, imleç sende kalır. `--os`, sayfa içi olayları yok sayan siteler için gerçek fare/klavye olayı gönderir ve Safari'yi kısa süre öne getirir.
 - **İletişim kutuları.** `alert` onaylanır; `confirm`/`prompt`, önceden `dialog` ya da `click --answer` ile yanıt verilmediyse reddedilir. Her biri sonuçta bildirilir. Yalnızca safari'nin çalıştığı sekmeler etkilenir; kendi gezinmende kutular normal çıkar.
 - **Ekran görüntüsü.** Safari başka bir masaüstündeyse ya da tam ekrandaysa yaklaşık bir saniye öne getirilir, sonra önceki uygulamaya dönülür.
+- **Bot doğrulamaları.** `open`, `go` ve `wait --load` doğrulama sayfalarını (Cloudflare "Just a moment…"/"Bir dakika lütfen", PerimeterX, captcha) tanır ve kendiliğinden geçmeleri için en çok 20 sn bekler; sonuç gerçek sayfayı anlatır. Geçmeyen bir doğrulama, sekmeyi adıyla anan bir hatadır: sekmeyi göster, çöz, sonra `wait --load`.
+- **Hız sınırı.** `safari rate SİTE 8-14` (ya da `go --delay 8-14`) bir sitedeki sayfa yüklemelerini aralıklandırır. Daemon zaman dilimi dağıtır, her komut kendi dilimini kendisi bekler; böylece aynı sitedeki birkaç ajan sıraya girer ve daemon serbest kalır. Bir bot doğrulaması ya da 429/503 yanıtı o siteyi oturum boyunca yavaşlatır (kural yoksa 4-8 sn, varsa iki katı).
 
 ## Kaynak kullanımı
 
@@ -137,6 +147,25 @@ Tek bir daemon bütün ajanlara ve oturumlara hizmet eder; 30 dakika boşta kal�
 
 Sayfa motoru safari-mcp'de, Claude Haiku ajanlarının araçları yalnızca açıklamalarından kullanarak gerçek görevler yaptığı altı turda sınandı: Wikipedia, Hacker News, MDN, GitHub, DuckDuckGo, demo mağazalarda hesap açma, sepet ve ödeme (automationexercise, Toolshop/Angular, saucedemo/React, demowebshop), the-internet ve TodoMVC. Her turda bulunan hatalar düzeltildi; son turlarda bütün görevler, işlemler için `js` ya da `os: true`'ya başvurmadan doğru bitti ve en zor görevlerde çağrı sayısı yaklaşık yarıya indi. CLI ardından, yalnızca skill'i bilen ve tek bir daemon'u paylaşan sekiz paralel Claude Haiku ajanıyla bir turda sınandı: Wikipedia, Hacker News, MDN site içi arama, GitHub (sürüm, issue arama, dosya ağacı), ekran görüntülü DuckDuckGo, saucedemo ödeme akışı, the-internet bileşenleri ve TodoMVC. Sekizi de `--os` kullanmadan, 7–37 komutta doğru bitti. `js` yalnızca CLI'nin göstermediği metni okumak için gerekti: tam bir Hacker News yorumu, bir öznitelikte duran tarih yılı ve bir GitHub kod görünümü. Bunlardan ilk ikisi ardından düzeltildi: düzen tabloları ve `<article>` sonuç listeleri artık tam okunuyor, tek bir alanda `read --ref` bütün değeri gösteriyor. Sekiz zor görevlik ikinci tur (tarih seçicili, otomatik tamamlamalı ve React select'li demoqa formu; Toolshop/Angular sepeti; the-internet'te TinyMCE, iç içe frame'ler, yükleme, hover, sonsuz kaydırma ve shadow DOM; books.toscrape'te sayfalı tarama ve dosyaya yazma; beş makalelik Wikipedia karşılaştırması; automationexercise'da kayıt, sipariş ve hesap silme; GitHub'da sürüm notu, kaynak kod, birleştirilmiş PR ve katkıcılar; Hacker News ve dış makaleler), o sırada komutu olmayan sağ tık dışında doğru bitti. Ardından `click --right`, yalnızca simgeden oluşan butonlar için adlar (bir ajan "btn" diye listelenen bir butonla sepetten ürün silmişti), `open --id-only`, düz metin `js` sonuçları ve daha açıklayıcı `select` hataları eklendi. Üçüncü tur başka alanları kapsadı: aynı anda birden çok sekme, gizli pencere (oturum sızmadı), hata ayıklama (JS hataları, kırık görseller, 404/500, yanıt gövdeleri), Quill ve CodeMirror editörleri, slider ve sürükle-bırak, Türkçe siteler (karakter bozulmadı), ekran görüntüsünden okunan canvas içeriği ve hatalı kullanım (bilinmeyen kimlik ve ref, erişilemeyen adres, zaman aşımı, yanlış argüman). Ardından `drag`, yüklenemeyen gezinme ve `js` zaman aşımı için çıkış kodu 1, çakışan öğe argümanları için kullanım hatası ve daemon yeniden başlasa da korunan sekme kimlikleri eklendi. Biçimlendirme, sayfanın odak alamadığı başka kökenli bir frame'deki Quill'de başarısız olmuştu. Ardından alanlar ve editörler için `select R "metin"`, sayfa almazsa tarayıcının düzenleme komutlarına düşen biçimlendirme kısayolları, ve sonuçta seçimin ve biçim durumunun gösterilmesi eklendi. İndirmeler (`safari downloads`) ve unutulan ajan sekmelerinin kapatılması da aynı turdan çıktı.
 
+Dördüncü tur, sahibinden.com'da yapılan gerçek bir tarama oturumunun ardından geldi ve `table`, `crawl`, `rate`, bot doğrulaması yönetimi ile temiz stdout'u (notlar stderr'e, `-o DOSYA`) ekledi. Ardından üç paralel Claude Haiku ajanı sahibinden.com'u sayfa başına 8-14 sn arayla taradı (3 sayfada 111 ilan, engel yok, tekrar yok), books.toscrape.com ve Wikipedia tablolarını okudu, yerel doğrulama ve hız sınırı sayfalarını sınadı. colspan/rowspan'li tablolarda kayan sütunlar ve kart listelerinde kısalan başlıklar bu turdan sonra düzeltildi. `table`, sayfa düzeni için kullanılan tabloları (Hacker News) hâlâ iyi okumuyor.
+
+Beşinci tur, playwright-cli'den alınan özellikleri sınadı: `locator`, `highlight`, öğeyle `js`, `open --window` ve `resize`, `SAFARI_TAB`, `close --agents`, `route`, `storage`, `drop`, `record`, `shot --full`. Her biri önce yerel test sayfalarında (`fixture.html`, `route.html`, `drop.html`) ve Wikipedia'da elle denendi. Ardından yalnızca skill'i ve `references/` dosyalarını bilen dört Claude Haiku ajanı tek bir daemon üzerinde paralel çalıştı:
+- the-internet'e, sayfa yeniden yüklendikten sonra `locator`'dan gelen seçicilerle, ref kullanmadan giriş;
+- demo.playwright.dev/api-mocking'in meyve API'sini ve yerel `route.html`'i taklit etme, 500 döndürme ve engelleme;
+- TodoMVC görevlerini localStorage üzerinden düzenleme, the-internet'in sürükle-bırak yükleme alanına dosya bırakma ve bir Wikipedia makalesinin tam sayfa görüntüsü;
+- Bootstrap sitesi, kendi penceresinde 1280x800 ve 390x844 boyutlarında, `SAFARI_TAB` betikleriyle birlikte.
+
+Beşinci bir ajan the-internet'te giriş ve çıkışı gerçek girdiyle (`--os`) kaydetti ve yeni bir sekmede tekrar oynattı. Bütün görevler 22–56 komutta bitti.
+
+Bu turdan sonra düzeltilenler:
+- `resize`, boyutu Safari'nin araç çubuğu oturmadan bildiriyordu (806 yerine 844).
+- `shot --full`, kesilmiş bir sayfaya "whole page" diyordu.
+- Üretilen ve kaydedilen seçiciler çıplak bir etiket (`button`) olabiliyordu.
+- Formda Enter, gönder butonuna fazladan bir tıklama kaydediyordu.
+- `go` boş bir sekmeden çalışmıyordu, bu yüzden tekrar oynatma oradan başlayamıyordu.
+
+Safari'nin yerel menüsünde gerçek girdiyle bir `<select>` seçeneği seçilemedi; bu yüzden `<select>` değişikliklerinin kaydı sınanmadı.
+
 Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenmedi.
 
 ## Sınırlar
@@ -146,8 +175,12 @@ Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenm
 - Katı CSP'li sitelerde (GitHub, Gmail) eklenti `js`'i ayrı bir ortamda çalıştırır: DOM'u görür, sayfanın JavaScript değişkenlerini görmez.
 - HTTP durum kodu yalnızca eklentiyle bildirilir.
 - Eklentisiz modda kayıtlar safari'nin sayfaya ilk girdiği andan başlar; ondan önce açılan iletişim kutuları çağrıları 20 sn bekletir (Erişilebilirlik ile yanıtlanabilir).
-- Ajanlar tek bir daemon'u paylaşır; birden fazla yeni sekme açıkken sekme kimliğini başa yazmalıdır.
+- Ajanlar tek bir daemon'u paylaşır; birden fazla yeni sekme açıkken sekme kimliğini başa yazmalı (ya da `SAFARI_TAB` kullanmalı).
+- `route` sayfanın fetch ve XHR isteklerini taklit eder; sayfanın kendi belgesini, WebSocket'leri ve service worker'ları değil. Her sayfanın başından itibaren yalnızca eklentiyle geçerlidir. Siteden çıkan bir tıklama, `route` yeniden çalışana kadar kuralları düşürür.
+- `record` eklenti gerektirir, tek sekmede tek siteyi kapsar; zengin metin editörlerini ve parola değerlerini kaydetmez.
+- `shot --full` sayfanın kendisini kaydırır; içteki bir kutuyu kaydıran sayfalarda yalnızca ilk ekran çıkar.
 - Eklentisiz modda, bir sekme başka bir siteye giderken aynı anda sekme açılıp kapanırsa sekme kaybolabilir; safari tahmin etmek yerine hata döner.
+- Bot doğrulamaları başlık ve işaretlemeleriyle tanınır; başkaları fark edilmeden geçer. Hız sınırı `go`, `open` ve `crawl` için geçerlidir; sayfa yükleyen tıklamalar için değil.
 - `text` kipi bağlantı metinlerini ve veri tablosu hücrelerini kırpar (200 karakter, 60 satır); karmaşık tablolarda düzen bozulabilir. Sayfa düzeni için kullanılan tablolar metin olarak okunur.
 - Tam tarayıcı denetimi (gerçek girdi, bütün ağ trafiği) Safari'nin Web Inspector protokolünü gerektirir; kendi Safari'nde bunu yalnızca Apple imzalı uygulamalar kullanabilir. Apple'ın `safaridriver --mcp`'si bunu sekmelerini ve çerezlerini görmeyen ayrı, temiz bir oturumda sunar.
 
@@ -158,7 +191,7 @@ Tests/smoke.sh                                             # CLI ve daemon testi
 (cd Tests && python3 -m http.server 8765 --bind 127.0.0.1)  # test sayfalarını sun
 ```
 
-Elle sınama için `http://127.0.0.1:8765/fixture.html`'i `safari open` ile aç (form, iletişim kutuları, gecikmeli öğe, tablo, fetch, iframe).
+Elle sınama için `http://127.0.0.1:8765/fixture.html`'i `safari open` ile aç (form, iletişim kutuları, gecikmeli öğe, tablo, fetch, iframe). `route.html` (fetch/XHR butonları ve bir görsel) ile `drop.html` (bir bırakma alanı) `route` ve `drop` içindir.
 
 ## Lisans
 

@@ -18,7 +18,7 @@ func jsonString(_ value: Any) -> String {
 }
 
 final class Tools {
-    static let names: Set = ["tabs", "navigate", "read", "act", "js", "screenshot", "logs"]
+    static let names: Set = ["tabs", "navigate", "read", "table", "act", "js", "screenshot", "logs", "locator", "highlight", "route", "storage", "record"]
 
     /// A tab we know about. `id` is ours and stable; `pos` is where Safari has it now.
     private struct Tab {
@@ -148,7 +148,18 @@ final class Tools {
         case "tabs": return [.text(try tabsTool(a))]
         case "navigate": return [.text(try navigate(a))]
         case "read": return [.text(try page("read", a, ["mode", "query", "ref", "selector", "full", "diff", "max_chars", "offset"]))]
+        case "table": return [.text(try page("table", a, ["ref", "selector", "rows", "json", "max_chars", "offset"]))]
         case "act": return [.text(try act(a))]
+        case "locator":
+            var v = try page("locator", a, ["ref", "selector", "x", "y"])
+            if let r = a["ref"] as? String, r.hasPrefix("f") { v += " (inside frame \(r.prefix { $0 != "e" }): --sel looks in the top page only)" }
+            return [.text(v)]
+        case "route": return [.text(try route(a))]
+        case "storage": return [.text(try page("storage", a, ["area", "key", "value", "del", "clear", "max_chars"]))]
+        case "record":
+            if !safari.isExtension { throw ToolError("record needs the Safari CLI Bridge extension (the recorder must start with each page).") }
+            return [.text(try page("record", a, ["stop"]))]
+        case "highlight": return [.text(try page("highlight", a, ["ref", "selector", "x", "y", "secs", "hide"]))]
         case "js": return [.text(try js(a))]
         case "screenshot": return try screenshot(a)
         case "logs":
@@ -312,14 +323,16 @@ final class Tools {
     }
 
     /// Closes tabs opened with `open` that no call has named for `limit` seconds, except
-    /// visible ones and ones brought forward with `show`. Returns "tN url" for each closed tab.
+    /// visible ones in the user's windows and ones brought forward with `show`. Returns "tN url" for each closed tab.
     func reap(olderThan limit: TimeInterval) -> [String] {
         guard !opened.isEmpty, (try? sync()) != nil else { return [] }
         let now = Date()
         var closed: [String] = []
         for id in opened.sorted() {
             guard let t = tabs[id] else { continue }
-            if t.visible || shown.contains(id) { continue }
+            // A visible tab is the user's view, unless its window holds only agent tabs (open --window).
+            let ownWindow = !tabs.values.contains { $0.pos.wid == t.pos.wid && !opened.contains($0.id) }
+            if (t.visible && !ownWindow) || shown.contains(id) { continue }
             // A tab restored from an earlier daemon starts its clock now (limit 0: at idle exit).
             let last = lastUse[id] ?? (limit > 0 ? now : .distantPast)
             lastUse[id] = last
@@ -353,7 +366,7 @@ final class Tools {
         }
         opened = opened.filter { tabs[$0] != nil }
         if opened.count > 1 {
-            throw ToolError("Several tabs opened here are open (\(opened.sorted().map { "t\($0)" }.joined(separator: ", "))); put the tab id first: safari t3 <verb>.")
+            throw ToolError("Several tabs opened here are open (\(opened.sorted().map { "t\($0)" }.joined(separator: ", "))); put the tab id first: safari t3 <verb> (or export SAFARI_TAB=t3 once).")
         }
         if let c = current {
             guard tabs[c] != nil else { throw gone(c) }
@@ -579,7 +592,8 @@ final class Tools {
             unread = all.count - frames.count
         }
         var fo = o
-        fo["max_chars"] = min((o["max_chars"] as? Int ?? 6000) / 2, 3000)
+        let fm = o["max_chars"] as? Int ?? 6000
+        fo["max_chars"] = fm == 0 ? 0 : min(fm / 2, 3000)
         var out = ""
         for f in frames.prefix(8) {
             guard let body = try? inFrame(f.id, { try agentCall(id, fo)["v"] as? String }) else {
@@ -752,7 +766,9 @@ final class Tools {
             // Prefer the current tab's window, but never mix private and normal tabs in one window.
             let cands = ([current].compactMap { $0 } + order).compactMap { tabs[$0] }.filter { $0.priv == priv }
             let pos: (ref: TabRef, xid: Int?)
-            if let wid = cands.first?.pos.wid {
+            if !priv, a["window"] as? Bool == true {
+                pos = try safari.newTab(in: nil, url: url)
+            } else if let wid = cands.first?.pos.wid {
                 pos = try safari.newTab(in: wid, url: url)
             } else if priv {
                 pos = try openPrivateWindow(url)
@@ -766,7 +782,7 @@ final class Tools {
             defaultLost = false
             opened.insert(id)
             saveState()
-            let loaded = url.isEmpty ? "" : ": " + waitLoad(id, marked: false, from: "about:blank", timeout: 15, grace: 8).text
+            let loaded = url.isEmpty ? "" : ": " + (try passCheck(id, waitLoad(id, marked: false, from: "about:blank", timeout: 15, grace: 8).text))
             // Stamp the page now, so the tab keeps its id even if the daemon restarts next.
             if !url.isEmpty { _ = try? agentCall(id, ["op": "nop"]) }
             return "opened t\(id)" + loaded
@@ -786,9 +802,131 @@ final class Tools {
             try guardedOp(id) { try safari.select($0, $1) }
             shown.insert(id)
             return "selected t\(id)"
+        case "closeagents":
+            let closed = reap(olderThan: 0)
+            let kept = opened.filter { tabs[$0] != nil }.sorted().map { "t\($0)" }
+            return (closed.isEmpty ? "no agent tabs to close" : "closed " + closed.map { String($0.prefix { $0 != " " }) }.joined(separator: ", "))
+                + (kept.isEmpty ? "" : "\n\u{1E}kept \(kept.joined(separator: ", ")) (on screen or shown; close them by id)")
+        case "resize":
+            return try resize(a)
         default:
             throw ToolError("action must be list, new, close or select.")
         }
+    }
+
+    /// Routes per tab, re-sent after a navigation to another site (sessionStorage is per site).
+    private var routes: [Int: [[String: Any]]] = [:]
+
+    private func describe(_ r: [String: Any]) -> String {
+        let p = r["p"] as? String ?? ""
+        if r["blk"] as? Bool == true { return "\(p) → blocked" }
+        let b = r["b"] as? String ?? ""
+        return "\(p) → \(r["s"] as? Int ?? 200)" + (r["t"].map { " \($0)" } ?? "") + " (\(b.utf8.count) B body)"
+    }
+
+    /// Mocked answers for the page's fetch/XHR requests (`safari route`), and with the
+    /// extension a block rule for everything else the tab loads (images, scripts, styles).
+    private func route(_ a: [String: Any]) throws -> String {
+        let id = try resolve(a)
+        func send(_ list: [[String: Any]]?) throws -> [[String: Any]] {
+            var o: [String: Any] = ["op": "route"]
+            if let list { o["list"] = list }
+            let v = try agentCall(id, o)["v"] as? String ?? "[]"
+            return (try? JSONSerialization.jsonObject(with: Data(v.utf8))) as? [[String: Any]] ?? []
+        }
+        var list = try send(nil)
+        let action = a["action"] as? String ?? "list"
+        var head: String
+        switch action {
+        case "add":
+            let p = a["pattern"] as? String ?? ""
+            var r: [String: Any] = ["p": p]
+            if a["block"] as? Bool == true { r["blk"] = true } else {
+                r["s"] = a["status"] as? Int ?? 200
+                r["b"] = a["body"] as? String ?? ""
+                if let t = a["ctype"] { r["t"] = t }
+            }
+            list.removeAll { $0["p"] as? String == p }
+            list.append(r)
+            list = try send(list)
+            head = "routed " + describe(r)
+        case "remove":
+            if let p = a["pattern"] as? String {
+                guard list.contains(where: { $0["p"] as? String == p }) else {
+                    throw ToolError("no route \(p) on t\(id)" + (list.isEmpty ? "" : "; routes: " + list.compactMap { $0["p"] as? String }.joined(separator: ", ")))
+                }
+                list.removeAll { $0["p"] as? String == p }
+                head = "removed route \(p)"
+            } else {
+                head = list.isEmpty ? "no routes" : "removed \(list.count) route\(list.count == 1 ? "" : "s")"
+                list = []
+            }
+            list = try send(list)
+        default:
+            head = list.isEmpty ? "no routes on t\(id)" : list.map(describe).joined(separator: "\n")
+        }
+        routes[id] = list.isEmpty ? nil : list
+        var notes: [String] = []
+        if action != "list" {
+            let blocked = list.filter { $0["blk"] as? Bool == true }.compactMap { $0["p"] as? String }
+            if safari.isExtension, let t = tabs[id] {
+                if !ext.block(t.pos, expect(t, url: false), blocked), !blocked.isEmpty {
+                    notes.append("--block covers fetch/XHR only: this Safari or extension build cannot block other requests")
+                }
+            } else if !blocked.isEmpty {
+                notes.append("--block covers fetch/XHR only without the Safari CLI Bridge extension")
+            }
+            if !safari.isExtension, !list.isEmpty { notes.append("without the extension, routes start once safari touches each new page; earlier requests go out") }
+        }
+        return head + notes.map { "\n\u{1E}" + $0 }.joined()
+    }
+
+    /// After a load in tab `id`: routes live in the site's sessionStorage, so a new site needs them again.
+    private func reapplyRoutes(_ id: Int) {
+        guard let list = routes[id], !list.isEmpty else { return }
+        _ = try? agentCall(id, ["op": "route", "list": list])
+    }
+
+    /// Sets the viewport of the tab's window to W x H. Only in a window that holds nothing but
+    /// tabs opened with `open`, so the user's own windows never change size.
+    private func resize(_ a: [String: Any]) throws -> String {
+        guard let w = a["width"] as? Int, let h = a["height"] as? Int else { throw ToolError("width and height required") }
+        let id = try resolve(a)
+        try sync()
+        guard let t = tabs[id] else { throw gone(id) }
+        let others = tabs.values.filter { $0.pos.wid == t.pos.wid && !opened.contains($0.id) }
+        if !others.isEmpty {
+            throw ToolError("t\(id) shares a window with tabs that are not yours; open one with `safari open URL --window` and resize that.")
+        }
+        func size() throws -> [Int] {
+            let v = try exec(id, "[outerWidth,outerHeight,innerWidth,innerHeight].join(',')").split(separator: ",").compactMap { Int($0) }
+            guard v.count == 4 else { throw ToolError("Could not read the window size (page not responding).") }
+            return v
+        }
+        // The window frame includes the toolbar: aim the outer size at viewport + chrome, twice
+        // because the chrome can change with the width (a toolbar that wraps).
+        // Safari re-lays out its toolbar a moment after a resize, so measure until it settles.
+        func settled() throws -> [Int] {
+            var v = try size()
+            for _ in 0..<6 {
+                usleep(150_000)
+                let n = try size()
+                if n == v { break }
+                v = n
+            }
+            return v
+        }
+        var v = try size()
+        for _ in 0..<3 {
+            if v[2] == w && v[3] == h { break }
+            guard try safari.resize(t.pos.wid, width: w + v[0] - v[2], height: h + v[1] - v[3]) else {
+                throw ToolError("The Safari CLI Bridge extension is out of date and cannot resize; rebuild it with Extension/build.sh.")
+            }
+            usleep(200_000)
+            v = try settled()
+        }
+        let note = v[2] == w && v[3] == h ? "" : " (asked \(w)x\(h); the screen or Safari's minimum size limits it)"
+        return "t\(id) viewport \(v[2])x\(v[3])" + note
     }
 
     /// A new private window: through the extension if Safari lets it, else File > New Private
@@ -816,7 +954,15 @@ final class Tools {
         let id = try resolve(a)
         // Mark the current document so the wait below cannot mistake it for the new one.
         mark += 1
-        let from = try exec(id, "window.__smcpOld=\(mark);location.href")
+        let from: String
+        do {
+            from = try exec(id, "window.__smcpOld=\(mark);location.href")
+        } catch let e as ToolError {
+            // A blank tab (about:blank, a new tab) is out of the extension's reach; just load.
+            let cur = tabs[id]?.url ?? ""
+            guard cur.isEmpty || cur.hasPrefix("about:") || cur.hasPrefix("favorites:"), !["back", "forward", "reload"].contains(url) else { throw e }
+            from = cur
+        }
         switch url {
         case "back", "forward":
             // A history of one entry has nowhere to go; say so at once instead of waiting.
@@ -830,6 +976,7 @@ final class Tools {
         }
         usleep(100_000)
         let (text, _) = waitLoad(id, marked: true, from: url == "reload" ? nil : from, timeout: 15, grace: 1.5)
+        if let r = routes[id], !r.isEmpty, let to = tabs[id]?.url, !sameHost(to, from) { reapplyRoutes(id) }
         if !["back", "forward", "reload"].contains(url), let s = peek(id), s.url.hasPrefix("safari-resource:") {
             throw ToolError("Safari could not open \(clip(url, 120)) (\(clip(s.title, 60))); the tab now shows Safari's error page.")
         }
@@ -839,7 +986,66 @@ final class Tools {
             let t = tabs[id]
             throw ToolError("Safari could not load \(clip(url, 120)): the page did not respond" + (t.map { "; the tab shows \(jsonString(clip($0.title, 60))) | \(clip($0.url, 120))" } ?? ""))
         }
-        return text
+        return try passCheck(id, text)
+    }
+
+    // MARK: bot checks and pacing
+
+    /// Per-site pacing for navigations; the client sleeps on the slots it hands out.
+    let rate = Rate()
+
+    /// The kind of bot check the page shows ("cloudflare", "captcha"…), "" for none, "~" while loading.
+    /// A captcha on a normal page (a login form) does not count: it needs a check-like title,
+    /// an HTTP error, or a page with almost nothing else on it.
+    private let botJS = #"(function(){if(document.readyState!=='complete')return'~';var d=document,t=(d.title||'').trim(),st=(performance.getEntriesByType('navigation')[0]||{}).responseStatus||0,"#
+        + #"n=d.querySelectorAll('a[href],button,input:not([type=hidden]),select,textarea').length,k='',"#
+        + #"tm=/^(just a moment|bir dakika|attention required|checking your browser|access denied|please wait|one more step|are you a (robot|human)|security check|güvenlik doğrulamas)/i.test(t);"#
+        + #"if(d.querySelector('#challenge-form,#challenge-running,#cf-challenge-running,#cf-please-wait,script[src*="/cdn-cgi/challenge-platform"]'))k='cloudflare';"#
+        + #"else if(d.querySelector('#px-captcha'))k='perimeterx';"#
+        + #"else if(d.querySelector('iframe[src*="hcaptcha.com"],iframe[src*="recaptcha"],iframe[src*="challenges.cloudflare.com"],.g-recaptcha,.h-captcha,.cf-turnstile'))k='captcha';"#
+        + #"else if(tm)k='bot check';return k&&(tm||st>=400||n<6)?k:''})()"#
+
+    private func host(_ id: Int) -> String { URL(string: tabs[id]?.url ?? "")?.host ?? "" }
+
+    /// After a load: a bot-check page that passes by itself is waited out (the result then
+    /// describes the real page); one that does not is an error naming the tab, so `&&` chains stop.
+    /// Either way the site is paced more slowly for the rest of the session.
+    private func passCheck(_ id: Int, _ text: String) throws -> String {
+        var text = text
+        let h = host(id)
+        if text.contains("(HTTP 429)") || text.contains("(HTTP 503)") { text += rate.backoff(host: h) }
+        guard let k = poll(id, botJS)?.result, !k.isEmpty, k != "~" else { return text }
+        let what = ["cloudflare": "Cloudflare check", "perimeterx": "PerimeterX check"][k] ?? k
+        let limit: Double = k == "cloudflare" || k == "bot check" ? 20 : 10
+        let start = Date()
+        var clear = 0
+        while Date().timeIntervalSince(start) < limit {
+            usleep(400_000)
+            guard tabs[id] != nil else { throw gone(id) }
+            let r = poll(id, botJS)?.result
+            clear = r == "" ? clear + 1 : 0
+            if clear >= 2, let s = peek(id) {
+                tabs[id]?.title = s.title
+                tabs[id]?.url = s.url
+                let st = s.status >= 400 ? " (HTTP \(s.status))" : ""
+                // Backoff counts from now, after the wait.
+                return (s.title.isEmpty ? "" : clip(s.title, 80) + " | ") + clip(s.url, 200) + st + " (passed a \(what))" + rate.backoff(host: h)
+            }
+        }
+        throw ToolError("t\(id): \(what) on \(h) did not clear in \(Int(limit)) s\(rate.backoff(host: h)). Show it to the user (safari t\(id) show), ask them to solve it, then: safari t\(id) wait --load")
+    }
+
+    /// Answers the client before a navigation: how long to wait for this site's next slot.
+    func reserve(_ a: [String: Any]) -> [String: Any] {
+        var u = a["url"] as? String ?? ""
+        if ["", "back", "forward", "reload"].contains(u) {
+            guard a["tab"] != nil || current != nil, let id = try? resolve(a) else { return ["wait": 0] }
+            u = tabs[id]?.url ?? ""
+        } else if !u.contains(":") { u = "https://" + u }
+        guard let h = URL(string: u)?.host else { return ["wait": 0] }
+        func rule(_ k: String) -> Rate.Rule? { (a[k] as? [Double]).flatMap { $0.count == 2 ? Rate.Rule(lo: $0[0], hi: $0[1]) : nil } }
+        guard let r = rate.reserve(host: h, override: rule("delay"), fallback: rule("fallback")) else { return ["wait": 0] }
+        return ["wait": r.wait, "site": r.key]
     }
 
     /// Reports a navigation the action caused, so the model need not look.
@@ -872,11 +1078,12 @@ final class Tools {
         var result: String
         var env: [String: Any]
         var frame = 0
-        if action == "upload" {
-            var o = pick(a, ["ref", "x", "y"])
+        if action == "upload" || action == "drop" {
+            var o = pick(a, ["ref", "selector", "x", "y"])
             o["op"] = "act"
-            o["action"] = "upload"
-            o["files"] = try files(a["text"] as? String ?? "")
+            o["action"] = action
+            if let t = a["text"] as? String, !t.isEmpty { o["files"] = try files(t) }
+            if let t = a["dtext"] as? String { o["text"] = t }
             env = try agentCall(id, o)
             result = env["v"] as? String ?? "ok"
         } else if a["os"] as? Bool == true {
@@ -982,6 +1189,12 @@ final class Tools {
     /// Polls the page until the text, ref or selector appears (or with gone, disappears).
     /// Keeps going across navigations, so it also works for "wait for the next page".
     private func waitFor(_ id: Int, _ a: [String: Any]) throws -> String {
+        if a["load"] as? Bool == true {
+            // The page has finished loading and is not a bot check (after the user solved one).
+            let limit = min(max(a["timeout"] as? Double ?? 15, 0.5), 30)
+            let (text, _) = waitLoad(id, marked: false, from: nil, timeout: limit, grace: 0)
+            return try passCheck(id, text)
+        }
         var o = pick(a, ["ref", "selector", "text"])
         guard !o.isEmpty else { throw ToolError("wait needs text, ref or selector") }
         o["op"] = "has"
@@ -1093,6 +1306,16 @@ final class Tools {
         guard var code = a["code"] as? String else { throw ToolError("code required") }
         let id = try resolve(a)
         let slot = nextID("s")
+        var prelude = ""
+        if a["ref"] != nil || a["selector"] != nil || a["x"] != nil {
+            // Mark the element in the DOM, which both the page's world and the extension's see.
+            var o = pick(a, ["ref", "selector", "x", "y"])
+            o["op"] = "mark"
+            o["slot"] = slot
+            let env = try agentCall(id, o)
+            if let e = env["e"] as? String { throw ToolError(e) }
+            prelude = "var el=document.querySelector('[data-smcp-el=\"\(slot)\"]');if(!el)throw new Error('the element is gone');el.removeAttribute('data-smcp-el');\n"
+        }
         var href = ""
         func start(_ src: String) throws {
             href = try agent(id) { h in
@@ -1113,8 +1336,8 @@ final class Tools {
                 href = env["u"] as? String ?? ""
                 return env["v"] as? String ?? ""
             }
-            var v = try startMain(hasReturn ? code : "return (\n\(code)\n)")
-            if v.hasPrefix("syntax") && !hasReturn { v = try startMain(code) }
+            var v = try startMain(prelude + (hasReturn ? code : "return (\n\(code)\n)"))
+            if v.hasPrefix("syntax") && !hasReturn { v = try startMain(prelude + code) }
             if v.hasPrefix("syntax") { throw ToolError("SyntaxError: " + v.dropFirst(8)) }
             if v == "ok" { inMain = true } else {
                 note = v == "csp" ? " (page CSP blocks eval: ran in the extension's context, page globals not visible)"
@@ -1122,10 +1345,10 @@ final class Tools {
             }
         }
         if !inMain { do {
-            try start(hasReturn ? code : "return (\n\(code)\n)")
+            try start(prelude + (hasReturn ? code : "return (\n\(code)\n)"))
         } catch is ScriptEmpty {
             do {
-                try start(code)
+                try start(prelude + code)
             } catch is ScriptEmpty {
                 let why = poll(id, "(function(){try{new Function(\(jsonString(code)))}catch(e){return e instanceof SyntaxError?String(e):''}return ''})()")?.result ?? ""
                 throw ToolError(why.isEmpty ? "The script did not run (page still loading, showing a dialog, or not a web page)." : why)
@@ -1147,8 +1370,10 @@ final class Tools {
             var v = env["v"] as? String ?? "undefined"
             // A string result prints as itself, not as a JSON literal, so shell tools can use it.
             if v.hasPrefix("\""), let d = v.data(using: .utf8), let str = try? JSONSerialization.jsonObject(with: d, options: .fragmentsAllowed) as? String { v = str }
+            // Notes start with \u{1E}: the client prints those lines to stderr, so the data stays clean.
             let max = a["max_chars"] as? Int ?? 4000
-            var out = (v.count > max ? String(v.prefix(max)) + "\n… \(v.count - max) more chars" : v) + note
+            var out = max > 0 && v.count > max ? String(v.prefix(max)) + "\n\u{1E}… \(v.count - max) more chars (--max 0 for all, or -o FILE)" : v
+            if !note.isEmpty { out += "\n\u{1E}" + note.trimmingCharacters(in: .whitespaces) }
             // The script sent the tab somewhere else: wait, so the next call sees the new page.
             var navigated = r.url != before
             if !navigated, code.range(of: #"location|history\.|\.submit\(|\.click\(|\.open\("#, options: .regularExpression) != nil {
@@ -1182,6 +1407,7 @@ final class Tools {
         var region = g["r"] as? [Double]
         if region == nil, let r = a["region"] as? [NSNumber] { region = r.map(\.doubleValue) }
         let maxWidth = a["max_width"] as? Int ?? 1024
+        if a["full"] as? Bool == true { return try fullShot(id, w, iw: iw, ih: ih, maxWidth: maxWidth) }
 
         // The extension captures the visible tab itself: no Screen Recording permission needed.
         if let jpeg = safari.capture(w), let shot = Capture.recode(jpeg, viewport: CGSize(width: iw, height: ih), region: region, maxWidth: maxWidth) {
@@ -1223,6 +1449,78 @@ final class Tools {
         // Tell the model how image pixels map to the viewport px that act expects.
         let k = Double(crop.width) / z / Double(shot.width)
         var note = shotNote(shot.width, shot.height, k: k, region: origin.x != 0 || origin.y != 0 ? [origin.x, origin.y] : nil)
+        if raised { note += "; Safari was brought forward briefly to capture" }
+        return [.image(shot.data), .text(note)]
+    }
+
+    /// The whole page: scroll one viewport at a time, capture each, and stack them. Fixed and
+    /// sticky elements (headers, cookie bars) are hidden after the first screen so they show once.
+    private func fullShot(_ id: Int, _ w: Int, iw: Double, ih: Double, maxWidth: Int) throws -> [Content] {
+        let info = try exec(id, "var d=document.scrollingElement||document.documentElement;[scrollX,scrollY,d.scrollHeight].join(',')").split(separator: ",").compactMap { Double($0) }
+        guard info.count == 3, iw > 0, ih > 0 else { throw ToolError("Could not measure the page.") }
+        let (x0, y0) = (info[0], info[1])
+        let limit = min(16000, ih * 12)
+        let total = min(info[2], limit)
+        var raised = false
+        let front = NSWorkspace.shared.frontmostApplication
+        defer {
+            _ = try? exec(id, "(window.__smcpHid||[]).forEach(function(e){e[0].style.setProperty('visibility',e[1],e[2])});delete window.__smcpHid;scrollTo(\(x0),\(y0));''")
+            if raised, let front, front.bundleIdentifier != "com.apple.Safari" { front.activate() }
+        }
+        func grab() throws -> CGImage {
+            var data = safari.capture(w)
+            if data == nil {
+                let wid = cg(w)
+                if !Capture.onScreen(wid) {
+                    try guardedOp(id) { try safari.raise($0, $1) }
+                    raised = true
+                    var tries = 0
+                    while !Capture.onScreen(wid) && tries < 20 { usleep(100_000); tries += 1 }
+                    usleep(250_000)
+                }
+                let (view, bounds) = try Capture.viewport(wid: wid, iw: iw, ih: ih)
+                data = try Capture.jpeg(wid: wid, bounds: bounds, crop: view, maxWidth: 10000).data
+            }
+            guard let d = data, let src = CGImageSourceCreateWithData(d as CFData, nil), let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else {
+                throw ToolError("The screenshot failed.")
+            }
+            return img
+        }
+        var slices: [(img: CGImage, y: Double)] = []
+        var y = 0.0
+        while true {
+            let at = Double(try exec(id, "scrollTo(0,\(min(y, max(0, total - ih))));scrollY")) ?? y
+            usleep(slices.isEmpty ? 250_000 : 400_000)  // paint, lazy images; Safari also limits captures per second
+            slices.append((try grab(), at))
+            if slices.count == 1 {
+                _ = try exec(id, "var H=window.__smcpHid=[];document.querySelectorAll('body *').forEach(function(e){var p=getComputedStyle(e).position;if(p==='fixed'||p==='sticky'){H.push([e,e.style.getPropertyValue('visibility'),e.style.getPropertyPriority('visibility')]);e.style.setProperty('visibility','hidden','important')}});''")
+            }
+            if at + ih >= total - 1 || slices.count >= 12 { break }
+            y = at + ih
+        }
+        let s = Double(slices[0].img.width) / iw
+        let height = min(total, (slices.last!.y) + ih)
+        let pw = slices[0].img.width, ph = Int((height * s).rounded())
+        guard let ctx = CGContext(data: nil, width: pw, height: ph, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { throw ToolError("Image too large.") }
+        // CoreGraphics puts y = 0 at the bottom. Later slices overwrite the overlap of earlier ones.
+        for sl in slices {
+            let top = sl.y * s
+            ctx.draw(sl.img, in: CGRect(x: 0, y: Double(ph) - top - Double(sl.img.height), width: Double(sl.img.width), height: Double(sl.img.height)))
+        }
+        guard let img = ctx.makeImage() else { throw ToolError("Could not build the image.") }
+        let data = NSMutableData()
+        guard let dst = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else { throw ToolError("Could not encode the image.") }
+        CGImageDestinationAddImage(dst, img, [kCGImageDestinationLossyCompressionQuality: 0.75] as CFDictionary)
+        guard CGImageDestinationFinalize(dst), let shot = Capture.recode(data as Data, viewport: CGSize(width: iw, height: height), region: nil, maxWidth: maxWidth) else {
+            throw ToolError("Could not encode the image.")
+        }
+        var note = shotNote(shot.width, shot.height, k: shot.k, region: nil)
+        if info[2] > height + 1 {
+            note += "; top \(Int(height)) of \(Int(info[2])) px (\(slices.count) screens, the limit)\n\u{1E}page cut: for the rest, scroll and shot, or `text`"
+        } else {
+            note += "; whole page, \(slices.count) screens"
+        }
         if raised { note += "; Safari was brought forward briefly to capture" }
         return [.image(shot.data), .text(note)]
     }

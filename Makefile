@@ -27,4 +27,6 @@ uninstall:
 test: build
 	awk '/static let source = #"""/{f=1;next} /^    """#/{f=0} f' Sources/safari/PageAgent.swift > "$${TMPDIR:-/tmp}/safari-agent.js"
 	node --check "$${TMPDIR:-/tmp}/safari-agent.js"
+	awk '/static let mainSource = #"""/{f=1;next} /^    """#/{f=0} f' Sources/safari/PageAgent.swift > "$${TMPDIR:-/tmp}/safari-main.js"
+	node --check "$${TMPDIR:-/tmp}/safari-main.js"
 	Tests/smoke.sh

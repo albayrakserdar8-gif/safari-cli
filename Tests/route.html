@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>route test</title>
+<h1>route test</h1>
+<button id="f" onclick="fetch('api/data.json').then(r=>r.text().then(t=>show('fetch '+r.status+' '+t))).catch(e=>show('fetch failed: '+e))">Fetch</button>
+<button id="x" onclick="var x=new XMLHttpRequest();x.open('GET','api/data.json');x.onload=()=>show('xhr '+x.status+' '+x.responseText);x.onerror=()=>show('xhr failed');x.send()">XHR</button>
+<button id="j" onclick="var x=new XMLHttpRequest();x.open('GET','api/data.json');x.responseType='json';x.onload=()=>show('xhr json '+x.status+' '+JSON.stringify(x.response));x.send()">XHR JSON</button>
+<p id="out">(nothing yet)</p>
+<img id="img" src="list.html" alt="probe">
+<script>function show(s){document.getElementById('out').textContent=s}
+fetch('api/data.json').then(r=>r.text()).then(t=>document.title='route test · '+t.trim()).catch(()=>document.title='route test · failed');</script>

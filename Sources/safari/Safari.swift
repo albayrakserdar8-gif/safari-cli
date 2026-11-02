@@ -160,6 +160,14 @@ final class Safari {
     	return ""
     end raisetab
 
+    on winsize(w, ww, hh)
+    	tell application "Safari"
+    		set b to bounds of window id w
+    		set bounds of window id w to {item 1 of b, item 2 of b, (item 1 of b) + ww, (item 2 of b) + hh}
+    	end tell
+    	return ""
+    end winsize
+
     on frontapp()
     	return (path to frontmost application as text)
     end frontapp
@@ -250,6 +258,11 @@ final class Safari {
         if let wid, let idx = Int((try? run("newtab", [wid, url])) ?? "") { return TabRef(wid, idx) }
         guard let w = Int(try run("newdoc", [url])) else { throw ToolError("Could not open a Safari window.") }
         return TabRef(w, 1)
+    }
+
+    func resizeWindow(_ wid: Int, _ w: Int, _ h: Int) throws -> Bool {
+        _ = try run("winsize", [wid, w, h])
+        return true
     }
 
     func frontApp() -> String? { try? run("frontapp") }

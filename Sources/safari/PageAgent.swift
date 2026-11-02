@@ -11,6 +11,67 @@ enum PageAgent {
     (function(){
     if(window.__smcpM)return;
     var M=window.__smcpM={con:null,net:null,slots:{}};
+    // Mocked fetch/XHR answers (safari route), kept per tab and site in sessionStorage so they
+    // apply from the start of the next load.
+    M.routes=[];try{M.routes=JSON.parse(sessionStorage.getItem('__smcp_routes')||'[]')}catch(e){}
+    function rx(p){if(p.slice(0,3)==='re:')return new RegExp(p.slice(3));if(p.indexOf('*')<0)return{test:function(u){return u.indexOf(p)>=0}};
+      return new RegExp('^'+p.replace(/[.+?^${}()|[\]\\]/g,'\\$&').replace(/\*/g,'.*')+'$')}
+    function route(u){if(!M.routes.length)return null;var abs;try{abs=new URL(u,location.href).href}catch(e){abs=String(u)}
+      for(var i=M.routes.length-1;i>=0;i--){var r=M.routes[i];try{if(!r.rx)r.rx=rx(r.p);if(r.rx.test(abs))return r}catch(e){}}return null}
+    // A CSS selector that finds e alone: test hooks and stable ids first, then a short path.
+    function selOf(e){var root=e.getRootNode(),one=function(s){try{var m=root.querySelectorAll(s);return m.length===1&&m[0]===e}catch(x){return false}};
+      var q=function(v){return'"'+String(v).replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"'};
+      var auto=function(id){return!id||/\d{3,}|^\d|:|[0-9a-f]{8,}|^(ember|react|radix|headlessui|mui|rc_|uid|ext-gen)/i.test(id)};
+      var tag=e.tagName.toLowerCase(),s=null;
+      if(!auto(e.id)&&one('#'+CSS.escape(e.id)))return'#'+CSS.escape(e.id);
+      ['data-testid','data-test','data-test-id','data-qa','data-cy','name','aria-label','placeholder','title','alt','href','for'].some(function(k){var v=e.getAttribute(k);
+        if(v==null||v===''||v.length>80)return false;var c=tag+'['+k+'='+q(v)+']';if(one(c)){s=c;return true}return false});
+      if(s)return s;
+      var parts=[],n=e;
+      for(var d=0;n&&n.nodeType===1&&d<10;d++,n=n.parentElement){var t=n.tagName.toLowerCase();
+        if(n!==e&&!auto(n.id)&&root.querySelectorAll('#'+CSS.escape(n.id)).length===1){parts.unshift('#'+CSS.escape(n.id));if(one(parts.join(' > ')))break;parts.shift()}
+        var same=n.parentElement?[].filter.call(n.parentElement.children,function(c){return c.tagName===n.tagName}):[];
+        // A bare tag ("button") is unique only by luck; keep at least one parent for context.
+        parts.unshift(same.length>1?t+':nth-of-type('+(same.indexOf(n)+1)+')':t);if((parts.length>1||/^(main|header|footer|nav|h1)$/.test(t))&&one(parts.join(' > ')))break}
+      s=parts.join(' > ');return one(s)?s:null}
+    M.loc=function(k){var e=document.querySelector('[data-smcp-el="'+k+'"]');if(!e)return null;e.removeAttribute('data-smcp-el');return selOf(e)};
+    // safari record: what the user does in this tab, as safari commands. State lives in the
+    // site's sessionStorage, so it carries over page loads within one site.
+    M.rec=null;try{M.rec=JSON.parse(sessionStorage.getItem('__smcp_rec')||'null')}catch(e){}
+    function rsave(){try{M.rec?sessionStorage.setItem('__smcp_rec',JSON.stringify(M.rec)):sessionStorage.removeItem('__smcp_rec')}catch(e){}}
+    function rq(s){return"'"+String(s).replace(/'/g,"'\\''")+"'"}
+    function radd(l,keep){var R=M.rec;if(!R||R.l.length>=500)return;R.l.push(l);if(!keep)R.la=Date.now();rsave()}
+    function rsel(e){var s=selOf(e);return s?'--sel '+rq(s):null}
+    function field(e){return e&&(e.tagName==='TEXTAREA'||(e.tagName==='INPUT'&&!/^(button|submit|reset|checkbox|radio|file|image|range|color|hidden)$/i.test(e.type)))}
+    function rfill(e){var s=rsel(e);if(!s)return;var v=e.type==='password'?'"$PASSWORD"':rq(e.value);if(M.rec.v[s]===v)return;M.rec.v[s]=v;
+      var L=M.rec.l,last=L[L.length-1];if(last&&last.indexOf('fill '+s+' ')===0)L.pop();radd('fill '+s+' '+v)}
+    M.recStart=function(){M.rec={l:['go '+rq(location.href)],v:{}};rsave();return'recording in this tab: act in Safari, then `record --stop` prints the commands'};
+    M.recStop=function(){var R=M.rec;M.rec=null;rsave();if(!R)throw new Error('not recording on this page (recording covers one site; it ends when the tab moves to another)');
+      return'# replay: export SAFARI_TAB=<tab>; run each line\n'+R.l.map(function(l){return l.charAt(0)==='#'?l:'safari '+l}).join('\n')};
+    if(window===top){
+      if(M.rec){var R=M.rec,nav=R.bu&&R.la&&R.bu-R.la<4000;radd(nav?'# → '+location.href:'go '+rq(location.href),nav);R.bu=0;R.la=0;rsave()}
+      addEventListener('beforeunload',function(){if(M.rec){M.rec.bu=Date.now();rsave()}},true);
+      document.addEventListener('click',function(ev){if(!M.rec||!ev.isTrusted)return;
+        var e=ev.target.closest&&ev.target.closest('a,button,input,select,textarea,label,summary,option,[role=button],[role=link],[role=tab],[role=menuitem],[role=option],[role=checkbox],[onclick],[tabindex]')||ev.target;
+        if(field(e)||e.tagName==='SELECT'||e.tagName==='OPTION')return;
+        // Enter in a form makes the browser click its submit button (a trusted click, detail 0): the recorded key covers it.
+        if(ev.detail===0&&Date.now()-(M.rec.ke||0)<1000&&(e.type==='submit'||(e.tagName==='BUTTON'&&!e.getAttribute('type'))))return;var s=rsel(e);if(s)radd((ev.detail===2?'dblclick ':'click ')+s)},true);
+      document.addEventListener('change',function(ev){if(!M.rec||!ev.isTrusted)return;var e=ev.target;
+        if(e.tagName==='SELECT'){var s=rsel(e),o=e.options[e.selectedIndex];if(s&&o)radd('select '+s+' '+rq(o.text.trim()))}else if(field(e))rfill(e)},true);
+      document.addEventListener('keydown',function(ev){if(!M.rec||!ev.isTrusted)return;var e=ev.target;
+        if(ev.key==='Enter'&&(field(e)&&e.tagName!=='TEXTAREA'||e.tagName==='SELECT'||(e.tagName==='INPUT'&&/^(checkbox|radio)$/.test(e.type)))){M.rec.ke=Date.now();if(field(e))rfill(e);var s=rsel(e);if(s)radd('key Enter '+s)}else if(ev.key==='Escape')radd('key Escape')},true)}
+    function ctOf(r){return r.t||(/^\s*[\[{]/.test(r.b||'')?'application/json':'text/plain')}
+    M.setRoutes=function(l){if(l!=null){M.routes=l;try{l.length?sessionStorage.setItem('__smcp_routes',JSON.stringify(l)):sessionStorage.removeItem('__smcp_routes')}catch(e){}}
+      return JSON.stringify(M.routes.map(function(r){return{p:r.p,s:r.s,b:r.b,t:r.t,blk:r.blk}}))};
+    function mockX(x,rt,id){var st=rt.blk?0:(rt.s||200),b=rt.blk?'':(rt.b||''),ct=ctOf(rt),d=function(k,v){try{Object.defineProperty(x,k,{configurable:true,get:function(){return v}})}catch(e){}};
+      push(M.net,id+' '+x.__q[0]+' '+(rt.blk?'ERR':st)+' '+x.__q[1]+' 0ms (mocked)');if(!rt.blk)keep(id,ct,b);
+      setTimeout(function(){var ty=x.responseType,res=b;
+        if(ty==='json'){try{res=JSON.parse(b)}catch(e){res=null}}else if(ty==='blob')res=new Blob([b],{type:ct});else if(ty==='arraybuffer')res=new TextEncoder().encode(b).buffer;
+        else if(ty==='document')res=new DOMParser().parseFromString(b,ct.indexOf('xml')>=0?'application/xml':'text/html');
+        d('readyState',4);d('status',st);d('statusText',rt.blk?'':'OK');d('response',res);if(ty===''||ty==='text')d('responseText',b);
+        try{d('responseURL',rt.blk?'':new URL(x.__q[1],location.href).href)}catch(e){}
+        x.getResponseHeader=function(n){return!rt.blk&&/^content-type$/i.test(n)?ct:null};x.getAllResponseHeaders=function(){return rt.blk?'':'content-type: '+ct+'\r\n'};
+        ['readystatechange',rt.blk?'error':'load','loadend'].forEach(function(e){x.dispatchEvent(e==='readystatechange'?new Event(e):new ProgressEvent(e))})},0)}
     function clip(s,k){s=String(s==null?'':s).replace(/\s+/g,' ').trim();return s.length>k?s.slice(0,k-1)+'…':s}
     function fmt(v){if(typeof v==='string')return v;if(v instanceof Error)return v.name+': '+v.message;try{return JSON.stringify(v)}catch(e){return String(v)}}
     function push(arr,x){arr.push(x);arr.t=(arr.t||0)+1;if(arr.length>300)arr.shift()}
@@ -23,12 +84,16 @@ enum PageAgent {
       addEventListener('unhandledrejection',function(e){push(M.con,'rejection '+fmt(e.reason))});
       var f=window.fetch;
       if(f)window.fetch=function(i,o){var u=typeof i==='string'?i:(i&&i.url)||String(i),m=(o&&o.method)||(i&&i.method)||'GET',t=performance.now(),id='n'+(++M.nn);
+        var rt=route(u);if(rt){push(M.net,id+' '+m+' '+(rt.blk?'ERR':(rt.s||200))+' '+u+' 0ms (mocked)');if(rt.blk)return Promise.reject(new TypeError('Load failed'));
+          var st=rt.s||200,nb=st===204||st===205||st===304;if(!nb)keep(id,ctOf(rt),rt.b||'');
+          return Promise.resolve(new Response(nb?null:(rt.b||''),{status:st,headers:{'content-type':ctOf(rt)}}))}
         return f.apply(this,arguments).then(function(r){push(M.net,id+' '+m+' '+r.status+' '+u+' '+Math.round(performance.now()-t)+'ms');
           try{var ct=r.headers.get('content-type');if(/json|text|xml|javascript|html|csv/i.test(ct||''))r.clone().text().then(function(b){keep(id,ct,b)},function(){})}catch(e){}return r},
           function(e){push(M.net,id+' '+m+' ERR '+u+' '+e);throw e})};
       var xo=XMLHttpRequest.prototype.open,xs=XMLHttpRequest.prototype.send;
       XMLHttpRequest.prototype.open=function(m,u){this.__q=[m,u];return xo.apply(this,arguments)};
       XMLHttpRequest.prototype.send=function(){var x=this,t=performance.now(),id='n'+(++M.nn);
+        var rt=x.__q&&route(x.__q[1]);if(rt){mockX(x,rt,id);return}
         x.addEventListener('loadend',function(){if(!x.__q)return;push(M.net,id+' '+x.__q[0]+' '+(x.status||'ERR')+' '+x.__q[1]+' '+Math.round(performance.now()-t)+'ms');
           try{if(x.responseType===''||x.responseType==='text')keep(id,x.getResponseHeader('content-type'),x.responseText)}catch(e){}});return xs.apply(this,arguments)};
       return true}
@@ -290,6 +355,61 @@ enum PageAgent {
         seen.add(u);inn.push(ref(el)+' '+JSON.stringify(nm)+' '+u)});
       return inn.join('\n')||(q?'no link matches '+JSON.stringify(q):'(no links)')}
 
+    // One window of a long result. The continuation note starts with \x1e: the client prints
+    // such lines to stderr, so data piped to a file stays clean. max_chars 0 = everything.
+    function chunk(body,a){var off=a.offset||0,max=a.max_chars===0?1/0:(a.max_chars||6000),tot=body.length,cut=body.slice(off,off+max);
+      if(off+max<tot){var nl=cut.lastIndexOf('\n');if(nl>max*0.6)cut=cut.slice(0,nl);cut+='\n\x1e… '+(tot-off-cut.length)+' more chars; --offset '+(off+cut.length)+' (or --max 0, -o FILE)'}
+      return cut}
+
+    // Rows of the biggest visible table (or of --rows matches) as TSV or JSON, with each row's
+    // first link and data-id when it has them.
+    function table(a){
+      var root=a.ref?get(a.ref):a.selector?document.querySelector(a.selector):null;
+      if(a.selector&&!root)throw new Error('selector matched nothing');
+      function vis(e){return e.getClientRects().length>0}
+      // Cell text; a cut-off link text ("A Light in the ...") is completed from its title attribute.
+      function ct(e){var t=(e.innerText||e.textContent||'').replace(/\s+/g,' ').trim();
+        if(/(\.\.\.|…)/.test(t))e.querySelectorAll('[title]').forEach(function(x){var v=(x.innerText||'').replace(/\s+/g,' ').trim(),b=v.replace(/\s*(\.\.\.|…)$/,''),ti=x.getAttribute('title').replace(/\s+/g,' ').trim();
+          if(b&&b!==v&&ti.indexOf(b)===0&&t.indexOf(v)>=0)t=t.replace(v,ti)});
+        return t}
+      var head=null,rows=[],src;
+      if(a.rows){
+        var els=[].filter.call((root||document).querySelectorAll(a.rows),vis);
+        if(!els.length)throw new Error('no visible element matches '+a.rows);
+        rows=els.map(function(el){var c=[].filter.call(el.children,vis);return{el:el,c:(c.length?c:[el]).map(ct)}});src=a.rows;
+      }else{
+        var t=root&&root.tagName==='TABLE'?root:null,best=0;
+        if(!t)(root||document).querySelectorAll('table').forEach(function(x){var n=[].filter.call(x.rows,vis).length;if(n>best){best=n;t=x}});
+        if(!t)throw new Error('no table here; for a list of cards give --rows CSS (one match per row)');
+        // Expand colspan and rowspan into a plain grid, so columns line up. Leading header rows
+        // (in thead, or all th) are merged into one name per column ("Height m").
+        var hold=[],heads=[];
+        [].forEach.call(t.rows,function(tr){if(!vis(tr))return;var cs=[],col=0,n=tr.cells.length;
+          function carry(){while(hold[col]&&hold[col].left>0){cs[col]=hold[col].t;hold[col].left--;n++;col++}}
+          carry();[].forEach.call(tr.cells,function(td){var sp=Math.min(td.colSpan||1,50),rs=Math.min(td.rowSpan||1,1000),tx=ct(td);
+            for(var k=0;k<sp;k++){cs[col]=tx;hold[col]=rs>1?{left:rs-1,t:tx}:null;col++;carry()}});
+          if(!rows.length&&(tr.parentNode.tagName==='THEAD'||[].every.call(tr.cells,function(c){return c.tagName==='TH'})))heads.push(cs);else rows.push({el:tr,c:cs,n:n})});
+        if(heads.length)head=[];heads.forEach(function(h){h.forEach(function(x,i){x=x.replace(/\[[^\]]{1,12}\]/g,'').trim();if(x&&head[i]!==x&&(head[i]||'').split(' ').pop()!==x)head[i]=head[i]?head[i]+' '+x:x})});
+        src='table'+(t.id?'#'+t.id:t.className?'.'+String(t.className).trim().split(/\s+/)[0]:'');
+      }
+      // Separator and ad rows have far fewer cells than the usual row.
+      var cnt={},w=0;rows.forEach(function(r){cnt[r.c.length]=(cnt[r.c.length]||0)+1});for(var k in cnt)if(!w||cnt[k]>cnt[w])w=+k;
+      rows=rows.filter(function(r){return(r.n||r.c.length)*2>w&&r.c.some(Boolean)});
+      if(!rows.length)throw new Error('the table has no data rows');
+      rows.forEach(function(r){while(r.c.length<w)r.c.push('');r.c.length=w;
+        var id=r.el.getAttribute('data-id')||'';if(!id)[].some.call(r.el.attributes,function(x){if(/^data-[\w-]*id$/i.test(x.name)&&x.value){id=x.value;return true}});r.id=id;
+        var l=[].find.call(r.el.querySelectorAll('a[href]'),function(x){var h=x.getAttribute('href');return h&&h[0]!=='#'&&!/^javascript:/i.test(h)});r.l=l?l.href:''});
+      head=(head||[]).slice(0,w);while(head.length<w)head.push('');
+      // Columns empty in every row (images, checkboxes) are left out.
+      var keep=[];for(var i=0;i<w;i++)if(rows.some(function(r){return r.c[i]}))keep.push(i);
+      var names=keep.map(function(i,j){return head[i]||'c'+(j+1)}),hasId=rows.some(function(r){return r.id}),hasL=rows.some(function(r){return r.l});
+      if(hasL)names.push('link');if(hasId)names.push('id');
+      var out=rows.map(function(r){var v=keep.map(function(i){return r.c[i]});if(hasL)v.push(r.l);if(hasId)v.push(r.id);return v});
+      var body;
+      if(a.json)body=JSON.stringify(out.map(function(v){var o={};names.forEach(function(n,i){o[n]=v[i]});return o}));
+      else body=[names].concat(out).map(function(v){return v.map(function(c){return String(c).replace(/[\t\r\n]+/g,' ')}).join('\t')}).join('\n');
+      return chunk(body,a)+'\n\x1e'+rows.length+' rows from '+src}
+
     var VM=60;
     function read(a){
       var root=a.ref?get(a.ref):a.selector?document.querySelector(a.selector):null;
@@ -320,8 +440,7 @@ enum PageAgent {
       if(!qm){
         var k=(a.mode||'interactive')+'|'+(a.ref||a.selector||'')+'|'+(a.full?1:0)+'|'+(a.query||''),old=S.last[k];S.last[k]=body;
         if(a.diff)body=old==null?'(first read of this page in this mode; full result)\n'+body:diff(old,body)}
-      var off=a.offset||0,max=a.max_chars||6000,tot=body.length,cut=body.slice(off,off+max);
-      if(off+max<tot){var nl=cut.lastIndexOf('\n');if(nl>max*0.6)cut=cut.slice(0,nl);cut+='\n\u2026 '+(tot-off-cut.length)+' more chars; --offset '+(off+cut.length)}
+      var cut=chunk(body,a);
       // Each chunk lists the URLs of the [n] links it contains.
       if(md0){var used=new Set();cut.replace(/\[(\d+)\]/g,function(_,n){used.add(+n)});cut+=foot(md0,used)}
       // Say what this read left out, so the model does not go looking for it with js.
@@ -485,9 +604,15 @@ enum PageAgent {
           if(checked(el)!==want)press(target({ref:r}));return(checked(el)===want?'':'! not changed: ')+desc(el)+(checked(el)?' checked':' unchecked')}
         if(el.tagName==='SELECT')return pick({ref:r,text:v});
         return edit({action:'fill',ref:r,text:v})}catch(e){return'! '+r+': '+(e.message||e)}}).join('\n')}
+    function mkfiles(a){var dt=new DataTransfer();(a.files||[]).forEach(function(f){var b=atob(f.b),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);dt.items.add(new File([u],f.n,{type:f.t}))});return dt}
+    // Files (or text) dropped from outside the page onto a drop zone that has no file input.
+    function dropOn(a){var t=need(a),dt=mkfiles(a);if(a.text!=null)dt.setData('text/plain',a.text);
+      var de=function(ty){return t.to.dispatchEvent(new DragEvent(ty,{bubbles:true,cancelable:true,composed:true,clientX:t.x,clientY:t.y,dataTransfer:dt}))};
+      de('dragenter');de('dragover');var took=!de('drop');var n=(a.files||[]).length;
+      return'dropped '+(n?n+' file(s)':'text')+' on '+desc(t.el)+(took?'':' (no drop handler took it: wrong element?)')}
     function upload(a){var el=need(a).el;
       if(el.tagName!=='INPUT'||el.type!=='file')throw new Error(desc(el)+' is not a file input');
-      var dt=new DataTransfer();(a.files||[]).forEach(function(f){var b=atob(f.b),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);dt.items.add(new File([u],f.n,{type:f.t}))});
+      var dt=mkfiles(a);
       el.files=dt.files;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));
       return'set '+el.files.length+' file(s) on '+desc(el)}
     // For waits: is the text, ref or selector present (and visible)?
@@ -557,8 +682,44 @@ enum PageAgent {
         case'select':return pick(a);
         case'scroll':return scroll(a);
         case'upload':return upload(a);
+        case'drop':return dropOn(a);
         case'dialog':var dp=a.text==null?'accept':String(a.text);try{mcall('policy',[dp])}catch(e){throw new Error('dialogs cannot be answered on this page until it is reloaded')}return'next dialog: '+(dp==='accept'||dp==='dismiss'?dp:'answer '+JSON.stringify(dp));
         default:throw new Error('unknown action '+a.action)}}
+    function pickEl(a){var e=a.ref?get(a.ref):a.selector?document.querySelector(a.selector):deep(a.x,a.y);
+      if(!e)throw new Error(a.selector?'no element matches '+a.selector:'no element at '+a.x+','+a.y);return e}
+    // The selector is built in the page's world (main.js), which the recorder shares.
+    function loc(a){var e=pickEl(a);if(e.getRootNode()!==document)throw new Error(desc(e)+' is inside a shadow root, which --sel cannot reach; use its ref');
+      var k='l'+Date.now();e.setAttribute('data-smcp-el',k);var s;
+      try{s=mcall('loc',[k])}catch(x){e.removeAttribute('data-smcp-el');if(x.message==='NOMAIN')throw new Error('this page was loaded before the Safari CLI Bridge extension; reload it');throw x}
+      if(!s)throw new Error('no unique selector found for '+desc(e));return"--sel '"+s.replace(/'/g,"'\\''")+"'  "+desc(e)}
+    function storage(a){var st,area=a.area==='session'?'session':'local';try{st=area==='session'?sessionStorage:localStorage}catch(e){throw new Error(area+'Storage is not available on this page')}
+      var keys=[];for(var i=0;i<st.length;i++){var k=st.key(i);if(k.indexOf('__smcp_')!==0)keys.push(k)}keys.sort();
+      if(a.clear){keys.forEach(function(k){st.removeItem(k)});return'cleared '+keys.length+' '+area+'Storage key'+(keys.length===1?'':'s')}
+      if(a.del!=null){if(st.getItem(a.del)==null)throw new Error('no '+area+'Storage key '+JSON.stringify(a.del));st.removeItem(a.del);return'deleted '+JSON.stringify(a.del)}
+      if(a.key!=null&&a.value!=null){st.setItem(a.key,a.value);return'set '+JSON.stringify(a.key)+' ('+a.value.length+' chars)'}
+      if(a.key!=null){var v=st.getItem(a.key);if(v==null)throw new Error('no '+area+'Storage key '+JSON.stringify(a.key)+(keys.length?'; keys: '+keys.slice(0,20).join(', '):''));
+        var m=a.max_chars==null?6000:a.max_chars;return m>0&&v.length>m?v.slice(0,m)+'\n\u001e… '+(v.length-m)+' more chars (--max 0 for all)':v}
+      if(!keys.length)return'(no '+area+'Storage keys on '+location.host+')';
+      return keys.map(function(k){return k+' = '+clip(st.getItem(k),120)}).join('\n')+'\n\u001e'+keys.length+' '+area+'Storage key'+(keys.length===1?'':'s')+' on '+location.host}
+    function record(a){try{return mcall(a.stop?'recStop':'recStart',[])}catch(x){if(x.message==='NOMAIN')throw new Error('recording needs the page to be loaded with the Safari CLI Bridge extension on; reload it');throw x}}
+    // A box drawn around the element in the user's view, gone after a few seconds.
+    function light(a){var H=S.hls||(S.hls=[]);
+      if(a.hide){var k=H.length;H.slice().forEach(function(x){x()});return k?'removed '+k+' highlight'+(k>1?'s':''):'no highlights'}
+      var e=pickEl(a),host=document.createElement('div');host.setAttribute('data-smcp-hl','');
+      host.style.cssText='all:initial;position:fixed;left:0;top:0;width:0;height:0;z-index:2147483647;pointer-events:none';
+      var sh=host.attachShadow({mode:'closed'}),b=document.createElement('div');sh.appendChild(b);
+      b.style.cssText='position:fixed;box-sizing:border-box;border:3px solid #ff2d55;border-radius:5px;box-shadow:0 0 0 4px rgba(255,45,85,.25);background:rgba(255,45,85,.07);pointer-events:none';
+      (document.body||document.documentElement).appendChild(host);
+      var r0=e.getBoundingClientRect();if(r0.top<0||r0.bottom>innerHeight)e.scrollIntoView({block:'center'});
+      var pos=function(){var r=e.getBoundingClientRect();b.style.left=(r.left-4)+'px';b.style.top=(r.top-4)+'px';b.style.width=(r.width+8)+'px';b.style.height=(r.height+8)+'px'};
+      var secs=a.secs==null?5:+a.secs,iv,to,x=function(){clearInterval(iv);clearTimeout(to);host.remove();var i=H.indexOf(x);if(i>=0)H.splice(i,1)};
+      pos();iv=setInterval(function(){if(!e.isConnected)x();else pos()},100);if(secs>0)to=setTimeout(x,secs*1000);H.push(x);
+      return'highlighted '+desc(e)+(secs>0?' for '+secs+' s':' until highlight --hide')}
+    function routes(a){try{return mcall('setRoutes',[a.list==null?null:a.list])}
+      catch(e){if(e.message==='NOMAIN')throw new Error('this page was loaded before the Safari CLI Bridge extension; reload it, then route again');throw e}}
+    // For js with an element: tag it so code in either world can find it.
+    function mark(a){var e=a.ref?get(a.ref):a.selector?document.querySelector(a.selector):deep(a.x,a.y);
+      if(!e)throw new Error(a.selector?'no element matches '+a.selector:'no element at '+a.x+','+a.y);e.setAttribute('data-smcp-el',a.slot);return'ok'}
     function geom(a){var t=target(a),g={iw:innerWidth,ih:innerHeight};
       if(t){g.x=t.x;g.y=t.y;g.d=desc(t.el);var ae=document.activeElement;if(ae&&ae!==document.body&&inside(t.el,ae))g.fo=1;if(t.r)g.r=[t.r.left,t.r.top,t.r.width,t.r.height];
         // For real input: what a click at the centre would hit, when that is not the target.
@@ -580,7 +741,7 @@ enum PageAgent {
     S.call=function(a){if(a.h!==S.h)return JSON.stringify({m:S.h||''});
       // u0: the address before the call, so a history.pushState route change counts as a change.
       var u0=location.href;
-      try{var v=a.op==='read'?read(a):a.op==='act'?act(a):a.op==='geom'?geom(a):a.op==='logs'?logs(a):a.op==='has'?has(a):a.op==='delta'?delta():a.op==='pend'?pend():null,o={v:v,u:location.href,u0:u0,r:document.readyState},d;try{d=mcall('dlgTake')}catch(e){}if(d&&d.length)o.d=d;return JSON.stringify(o)}
+      try{var v=a.op==='read'?read(a):a.op==='table'?table(a):a.op==='act'?act(a):a.op==='geom'?geom(a):a.op==='mark'?mark(a):a.op==='route'?routes(a):a.op==='locator'?loc(a):a.op==='storage'?storage(a):a.op==='record'?record(a):a.op==='highlight'?light(a):a.op==='logs'?logs(a):a.op==='has'?has(a):a.op==='delta'?delta():a.op==='pend'?pend():null,o={v:v,u:location.href,u0:u0,r:document.readyState},d;try{d=mcall('dlgTake')}catch(e){}if(d&&d.length)o.d=d;return JSON.stringify(o)}
       catch(e){return JSON.stringify({e:String(e&&e.message||e)})}};
     })()
     """#

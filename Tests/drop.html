@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>drop test</title>
+<h1>drop test</h1>
+<div id="zone" style="width:300px;height:120px;border:2px dashed #888;display:flex;align-items:center;justify-content:center">Drop files here</div>
+<p id="out">(nothing dropped)</p>
+<script>
+const z = document.getElementById('zone');
+z.addEventListener('dragover', e => e.preventDefault());
+z.addEventListener('drop', async e => {
+  e.preventDefault();
+  const f = [...e.dataTransfer.files];
+  const t = e.dataTransfer.getData('text/plain');
+  document.getElementById('out').textContent = f.length
+    ? 'dropped ' + f.map(x => x.name + ' (' + x.size + ' B)').join(', ') + ': ' + (await f[0].text()).slice(0, 40)
+    : 'dropped text: ' + t;
+});
+</script>

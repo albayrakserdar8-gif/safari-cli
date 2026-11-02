@@ -166,11 +166,17 @@ final class Daemon {
             return ["restart": true]
         }
         if tool == "status" { return ["ok": true, "text": tools.status()] }
+        let args = m["args"] as? [String: Any] ?? [:]
+        // Pacing: the client asks for a slot before navigating and sleeps itself.
+        if tool == "reserve" { return tools.reserve(args).merging(["ok": true]) { a, _ in a } }
+        if tool == "rate" {
+            do { return ["ok": true, "text": try tools.rate.command(args)] } catch let e as ToolError { return ["ok": false, "text": e.msg] } catch { return ["ok": false, "text": "\(error)"] }
+        }
         guard Tools.names.contains(tool) else { return ["ok": false, "text": "unknown tool \(tool)"] }
         do {
             var text: [String] = []
             var images: [String] = []
-            for c in try tools.call(tool, m["args"] as? [String: Any] ?? [:]) {
+            for c in try tools.call(tool, args) {
                 switch c {
                 case .text(let t): text.append(t)
                 case .image(let d): images.append(d.base64EncodedString())

@@ -2,6 +2,67 @@
 (function(){
 if(window.__smcpM)return;
 var M=window.__smcpM={con:null,net:null,slots:{}};
+// Mocked fetch/XHR answers (safari route), kept per tab and site in sessionStorage so they
+// apply from the start of the next load.
+M.routes=[];try{M.routes=JSON.parse(sessionStorage.getItem('__smcp_routes')||'[]')}catch(e){}
+function rx(p){if(p.slice(0,3)==='re:')return new RegExp(p.slice(3));if(p.indexOf('*')<0)return{test:function(u){return u.indexOf(p)>=0}};
+  return new RegExp('^'+p.replace(/[.+?^${}()|[\]\\]/g,'\\$&').replace(/\*/g,'.*')+'$')}
+function route(u){if(!M.routes.length)return null;var abs;try{abs=new URL(u,location.href).href}catch(e){abs=String(u)}
+  for(var i=M.routes.length-1;i>=0;i--){var r=M.routes[i];try{if(!r.rx)r.rx=rx(r.p);if(r.rx.test(abs))return r}catch(e){}}return null}
+// A CSS selector that finds e alone: test hooks and stable ids first, then a short path.
+function selOf(e){var root=e.getRootNode(),one=function(s){try{var m=root.querySelectorAll(s);return m.length===1&&m[0]===e}catch(x){return false}};
+  var q=function(v){return'"'+String(v).replace(/\\/g,'\\\\').replace(/"/g,'\\"')+'"'};
+  var auto=function(id){return!id||/\d{3,}|^\d|:|[0-9a-f]{8,}|^(ember|react|radix|headlessui|mui|rc_|uid|ext-gen)/i.test(id)};
+  var tag=e.tagName.toLowerCase(),s=null;
+  if(!auto(e.id)&&one('#'+CSS.escape(e.id)))return'#'+CSS.escape(e.id);
+  ['data-testid','data-test','data-test-id','data-qa','data-cy','name','aria-label','placeholder','title','alt','href','for'].some(function(k){var v=e.getAttribute(k);
+    if(v==null||v===''||v.length>80)return false;var c=tag+'['+k+'='+q(v)+']';if(one(c)){s=c;return true}return false});
+  if(s)return s;
+  var parts=[],n=e;
+  for(var d=0;n&&n.nodeType===1&&d<10;d++,n=n.parentElement){var t=n.tagName.toLowerCase();
+    if(n!==e&&!auto(n.id)&&root.querySelectorAll('#'+CSS.escape(n.id)).length===1){parts.unshift('#'+CSS.escape(n.id));if(one(parts.join(' > ')))break;parts.shift()}
+    var same=n.parentElement?[].filter.call(n.parentElement.children,function(c){return c.tagName===n.tagName}):[];
+    // A bare tag ("button") is unique only by luck; keep at least one parent for context.
+    parts.unshift(same.length>1?t+':nth-of-type('+(same.indexOf(n)+1)+')':t);if((parts.length>1||/^(main|header|footer|nav|h1)$/.test(t))&&one(parts.join(' > ')))break}
+  s=parts.join(' > ');return one(s)?s:null}
+M.loc=function(k){var e=document.querySelector('[data-smcp-el="'+k+'"]');if(!e)return null;e.removeAttribute('data-smcp-el');return selOf(e)};
+// safari record: what the user does in this tab, as safari commands. State lives in the
+// site's sessionStorage, so it carries over page loads within one site.
+M.rec=null;try{M.rec=JSON.parse(sessionStorage.getItem('__smcp_rec')||'null')}catch(e){}
+function rsave(){try{M.rec?sessionStorage.setItem('__smcp_rec',JSON.stringify(M.rec)):sessionStorage.removeItem('__smcp_rec')}catch(e){}}
+function rq(s){return"'"+String(s).replace(/'/g,"'\\''")+"'"}
+function radd(l,keep){var R=M.rec;if(!R||R.l.length>=500)return;R.l.push(l);if(!keep)R.la=Date.now();rsave()}
+function rsel(e){var s=selOf(e);return s?'--sel '+rq(s):null}
+function field(e){return e&&(e.tagName==='TEXTAREA'||(e.tagName==='INPUT'&&!/^(button|submit|reset|checkbox|radio|file|image|range|color|hidden)$/i.test(e.type)))}
+function rfill(e){var s=rsel(e);if(!s)return;var v=e.type==='password'?'"$PASSWORD"':rq(e.value);if(M.rec.v[s]===v)return;M.rec.v[s]=v;
+  var L=M.rec.l,last=L[L.length-1];if(last&&last.indexOf('fill '+s+' ')===0)L.pop();radd('fill '+s+' '+v)}
+M.recStart=function(){M.rec={l:['go '+rq(location.href)],v:{}};rsave();return'recording in this tab: act in Safari, then `record --stop` prints the commands'};
+M.recStop=function(){var R=M.rec;M.rec=null;rsave();if(!R)throw new Error('not recording on this page (recording covers one site; it ends when the tab moves to another)');
+  return'# replay: export SAFARI_TAB=<tab>; run each line\n'+R.l.map(function(l){return l.charAt(0)==='#'?l:'safari '+l}).join('\n')};
+if(window===top){
+  if(M.rec){var R=M.rec,nav=R.bu&&R.la&&R.bu-R.la<4000;radd(nav?'# → '+location.href:'go '+rq(location.href),nav);R.bu=0;R.la=0;rsave()}
+  addEventListener('beforeunload',function(){if(M.rec){M.rec.bu=Date.now();rsave()}},true);
+  document.addEventListener('click',function(ev){if(!M.rec||!ev.isTrusted)return;
+    var e=ev.target.closest&&ev.target.closest('a,button,input,select,textarea,label,summary,option,[role=button],[role=link],[role=tab],[role=menuitem],[role=option],[role=checkbox],[onclick],[tabindex]')||ev.target;
+    if(field(e)||e.tagName==='SELECT'||e.tagName==='OPTION')return;
+    // Enter in a form makes the browser click its submit button (a trusted click, detail 0): the recorded key covers it.
+    if(ev.detail===0&&Date.now()-(M.rec.ke||0)<1000&&(e.type==='submit'||(e.tagName==='BUTTON'&&!e.getAttribute('type'))))return;var s=rsel(e);if(s)radd((ev.detail===2?'dblclick ':'click ')+s)},true);
+  document.addEventListener('change',function(ev){if(!M.rec||!ev.isTrusted)return;var e=ev.target;
+    if(e.tagName==='SELECT'){var s=rsel(e),o=e.options[e.selectedIndex];if(s&&o)radd('select '+s+' '+rq(o.text.trim()))}else if(field(e))rfill(e)},true);
+  document.addEventListener('keydown',function(ev){if(!M.rec||!ev.isTrusted)return;var e=ev.target;
+    if(ev.key==='Enter'&&(field(e)&&e.tagName!=='TEXTAREA'||e.tagName==='SELECT'||(e.tagName==='INPUT'&&/^(checkbox|radio)$/.test(e.type)))){M.rec.ke=Date.now();if(field(e))rfill(e);var s=rsel(e);if(s)radd('key Enter '+s)}else if(ev.key==='Escape')radd('key Escape')},true)}
+function ctOf(r){return r.t||(/^\s*[\[{]/.test(r.b||'')?'application/json':'text/plain')}
+M.setRoutes=function(l){if(l!=null){M.routes=l;try{l.length?sessionStorage.setItem('__smcp_routes',JSON.stringify(l)):sessionStorage.removeItem('__smcp_routes')}catch(e){}}
+  return JSON.stringify(M.routes.map(function(r){return{p:r.p,s:r.s,b:r.b,t:r.t,blk:r.blk}}))};
+function mockX(x,rt,id){var st=rt.blk?0:(rt.s||200),b=rt.blk?'':(rt.b||''),ct=ctOf(rt),d=function(k,v){try{Object.defineProperty(x,k,{configurable:true,get:function(){return v}})}catch(e){}};
+  push(M.net,id+' '+x.__q[0]+' '+(rt.blk?'ERR':st)+' '+x.__q[1]+' 0ms (mocked)');if(!rt.blk)keep(id,ct,b);
+  setTimeout(function(){var ty=x.responseType,res=b;
+    if(ty==='json'){try{res=JSON.parse(b)}catch(e){res=null}}else if(ty==='blob')res=new Blob([b],{type:ct});else if(ty==='arraybuffer')res=new TextEncoder().encode(b).buffer;
+    else if(ty==='document')res=new DOMParser().parseFromString(b,ct.indexOf('xml')>=0?'application/xml':'text/html');
+    d('readyState',4);d('status',st);d('statusText',rt.blk?'':'OK');d('response',res);if(ty===''||ty==='text')d('responseText',b);
+    try{d('responseURL',rt.blk?'':new URL(x.__q[1],location.href).href)}catch(e){}
+    x.getResponseHeader=function(n){return!rt.blk&&/^content-type$/i.test(n)?ct:null};x.getAllResponseHeaders=function(){return rt.blk?'':'content-type: '+ct+'\r\n'};
+    ['readystatechange',rt.blk?'error':'load','loadend'].forEach(function(e){x.dispatchEvent(e==='readystatechange'?new Event(e):new ProgressEvent(e))})},0)}
 function clip(s,k){s=String(s==null?'':s).replace(/\s+/g,' ').trim();return s.length>k?s.slice(0,k-1)+'…':s}
 function fmt(v){if(typeof v==='string')return v;if(v instanceof Error)return v.name+': '+v.message;try{return JSON.stringify(v)}catch(e){return String(v)}}
 function push(arr,x){arr.push(x);arr.t=(arr.t||0)+1;if(arr.length>300)arr.shift()}
@@ -14,12 +75,16 @@ function hook(){if(M.con)return false;M.con=[];M.net=[];M.nn=0;M.cur={};
   addEventListener('unhandledrejection',function(e){push(M.con,'rejection '+fmt(e.reason))});
   var f=window.fetch;
   if(f)window.fetch=function(i,o){var u=typeof i==='string'?i:(i&&i.url)||String(i),m=(o&&o.method)||(i&&i.method)||'GET',t=performance.now(),id='n'+(++M.nn);
+    var rt=route(u);if(rt){push(M.net,id+' '+m+' '+(rt.blk?'ERR':(rt.s||200))+' '+u+' 0ms (mocked)');if(rt.blk)return Promise.reject(new TypeError('Load failed'));
+      var st=rt.s||200,nb=st===204||st===205||st===304;if(!nb)keep(id,ctOf(rt),rt.b||'');
+      return Promise.resolve(new Response(nb?null:(rt.b||''),{status:st,headers:{'content-type':ctOf(rt)}}))}
     return f.apply(this,arguments).then(function(r){push(M.net,id+' '+m+' '+r.status+' '+u+' '+Math.round(performance.now()-t)+'ms');
       try{var ct=r.headers.get('content-type');if(/json|text|xml|javascript|html|csv/i.test(ct||''))r.clone().text().then(function(b){keep(id,ct,b)},function(){})}catch(e){}return r},
       function(e){push(M.net,id+' '+m+' ERR '+u+' '+e);throw e})};
   var xo=XMLHttpRequest.prototype.open,xs=XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open=function(m,u){this.__q=[m,u];return xo.apply(this,arguments)};
   XMLHttpRequest.prototype.send=function(){var x=this,t=performance.now(),id='n'+(++M.nn);
+    var rt=x.__q&&route(x.__q[1]);if(rt){mockX(x,rt,id);return}
     x.addEventListener('loadend',function(){if(!x.__q)return;push(M.net,id+' '+x.__q[0]+' '+(x.status||'ERR')+' '+x.__q[1]+' '+Math.round(performance.now()-t)+'ms');
       try{if(x.responseType===''||x.responseType==='text')keep(id,x.getResponseHeader('content-type'),x.responseText)}catch(e){}});return xs.apply(this,arguments)};
   return true}

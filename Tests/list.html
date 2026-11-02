@@ -1,0 +1,13 @@
+<!doctype html><meta charset="utf-8"><title>List</title>
+<!-- Paginated listing for table and crawl: list.html?p=1..3, 4 rows each, one ad row, a Next link. -->
+<table id="results"><thead><tr><th></th><th>Title</th><th>Year</th><th>Price</th></tr></thead><tbody></tbody></table>
+<p id="nav"></p>
+<script>
+var p=+(new URLSearchParams(location.search).get('p')||1),tb=document.querySelector('tbody');
+for(var i=1;i<=4;i++){var n=(p-1)*4+i,tr=document.createElement('tr');tr.setAttribute('data-id',String(1000+n));
+  tr.innerHTML='<td><img alt=""></td><td><a href="item.html?id='+n+'">Car\t'+n+'</a></td><td>'+(2020+n%5)+'</td><td>'+(n*1000).toLocaleString('tr-TR')+' TL</td>';tb.appendChild(tr)}
+var ad=document.createElement('tr');ad.innerHTML='<td colspan="4">Advertise here</td>';tb.insertBefore(ad,tb.children[2]);
+var hid=document.createElement('tr');hid.style.display='none';hid.innerHTML='<td>x</td><td>hidden</td><td>1</td><td>2</td>';tb.appendChild(hid);
+if(p<3)document.getElementById('nav').innerHTML='<a href="list.html?p='+(p+1)+'">Sonraki</a>';
+</script>
+<div class="cards"><div class="card"><b>A</b><span>1 TL</span></div><div class="card"><b>B</b><span>2 TL</span></div></div>

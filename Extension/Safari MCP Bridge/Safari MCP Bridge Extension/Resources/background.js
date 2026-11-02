@@ -41,7 +41,13 @@ function done(d, st) {
 }
 browser.webRequest.onCompleted.addListener((d) => done(d, d.statusCode), { urls: ['<all_urls>'] });
 browser.webRequest.onErrorOccurred.addListener((d) => done(d, 0), { urls: ['<all_urls>'] });
-browser.tabs.onRemoved.addListener((id) => { status.delete(id); reqs.delete(id); });
+const blockRules = new Map(); // tab id -> session rule ids
+let nextRule = 1;
+browser.tabs.onRemoved.addListener((id) => {
+  status.delete(id); reqs.delete(id);
+  const ids = blockRules.get(id);
+  if (ids && browser.declarativeNetRequest) { blockRules.delete(id); browser.declarativeNetRequest.updateSessionRules({ removeRuleIds: ids }).catch(() => {}); }
+});
 
 // Tabs are addressed like Apple Events does: window id + 1-based index, plus what the server
 // expects there (tab count of the window, URL). A mismatch answers "stale" and nothing runs.
@@ -114,6 +120,22 @@ const ops = {
     return { ok: fs.filter((f) => f.frameId !== 0).map((f) => ({ id: f.frameId, parent: f.parentFrameId, url: f.url })) };
   },
   async win(m) { const w = await browser.windows.get(m.w); return { x: w.left, y: w.top, width: w.width, height: w.height, focused: w.focused }; },
+  // Blocks every request of one tab that matches a route pattern (safari route --block).
+  async block(m) {
+    const dnr = browser.declarativeNetRequest;
+    if (!dnr || !dnr.updateSessionRules) return { no: 1 };
+    const t = await tabAt(m); if (!t) return { stale: 1 };
+    const old = blockRules.get(t.id) || [];
+    const rules = m.pats.map((p) => {
+      const c = { tabIds: [t.id], resourceTypes: ['sub_frame', 'stylesheet', 'script', 'image', 'font', 'object', 'xmlhttprequest', 'ping', 'media', 'websocket', 'other'] };
+      if (p.startsWith('re:')) c.regexFilter = p.slice(3); else c.urlFilter = p;
+      return { id: nextRule++, priority: 1, action: { type: 'block' }, condition: c };
+    });
+    await dnr.updateSessionRules({ removeRuleIds: old, addRules: rules });
+    if (rules.length) blockRules.set(t.id, rules.map((r) => r.id)); else blockRules.delete(t.id);
+    return { ok: rules.length };
+  },
+  async resize(m) { await browser.windows.update(m.w, { width: m.width, height: m.height }); return { ok: 1 }; },
   async shot(m) { return { ok: await browser.tabs.captureVisibleTab(m.w, { format: 'jpeg', quality: 85 }) }; },
 };
 

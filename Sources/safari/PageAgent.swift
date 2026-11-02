@@ -669,7 +669,7 @@ enum PageAgent {
       switch(a.action){
         case'click':t=need(a);if(a.text!=null)try{mcall('policy',[String(a.text)])}catch(e){}if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.to.tagName)||t.to.isContentEditable)S.fx=1;if(S.hv)hov(t.to);press(t);return'clicked '+desc(t.el);
         case'dblclick':t=need(a);if(S.hv)hov(t.to);press(t);press(t,{detail:2});mev(t.to,'dblclick',t.x,t.y,{detail:2});return'double-clicked '+desc(t.el);
-        case'drag':t=need(a);var dst=get(a.to),dr=dst.getBoundingClientRect(),dx=dr.left+dr.width/2,dy=dr.top+dr.height/2,dh=deep(dx,dy),dto=dh&&inside(dst,dh)?dh:dst;
+        case'drag':t=need(a);var dst=a.to_sel?document.querySelector(a.to_sel):get(a.to);if(!dst)throw new Error('no element matches '+a.to_sel);var dr=dst.getBoundingClientRect(),dx=dr.left+dr.width/2,dy=dr.top+dr.height/2,dh=deep(dx,dy),dto=dh&&inside(dst,dh)?dh:dst;
           // Pointer libraries (sortable lists, sliders) follow the mouse; HTML5 drag and drop needs drag events.
           mev(t.to,'pointerdown',t.x,t.y);mev(t.to,'mousedown',t.x,t.y);
           for(var st=1;st<=5;st++){var mx=t.x+(dx-t.x)*st/5,my=t.y+(dy-t.y)*st/5,mo=deep(mx,my)||dto;mev(mo,'pointermove',mx,my,{buttons:1});mev(mo,'mousemove',mx,my,{buttons:1})}

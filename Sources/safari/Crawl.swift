@@ -37,10 +37,14 @@ enum Crawl {
         func note(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
 
         do {
-            for p in 1...pages {
+            // A page that adds no new rows (a "Next" link back to the same content) does not count;
+            // two of them in a row end the crawl.
+            var p = 0, loads = 0, empty = 0
+            while p < pages && loads < pages + 3 {
+                loads += 1
                 let r = try Client.send("table", tableArgs)
                 guard r["ok"] as? Bool == true else {
-                    note("safari: page \(p): " + Client.split(r["text"] as? String ?? "").data)
+                    note("safari: page \(p + 1): " + Client.split(r["text"] as? String ?? "").data)
                     status = 1
                     break
                 }
@@ -56,7 +60,7 @@ enum Crawl {
                 } else {
                     let lines = data.split(separator: "\n", omittingEmptySubsequences: false).map { $0.split(separator: "\t", omittingEmptySubsequences: false).map(String.init) }
                     guard let h = lines.first else { break }
-                    if header == nil { header = h } else if header! != h { note("safari: page \(p) has other columns: \(h.joined(separator: ", "))") }
+                    if header == nil { header = h } else if header! != h { note("safari: page \(p + 1) has other columns: \(h.joined(separator: ", "))") }
                     let idCol = h.lastIndex(of: "id")
                     for l in lines.dropFirst() where !(l.count == 1 && l[0].isEmpty) {
                         total += 1
@@ -64,7 +68,15 @@ enum Crawl {
                         if seen.insert(k).inserted { rows.append(l); added += 1 }
                     }
                 }
-                note("page \(p)/\(pages) · \(total) rows, \(added) new")
+                if added == 0 && loads > 1 {
+                    empty += 1
+                    note("same rows again (\(total), 0 new); not counted")
+                    if empty >= 2 { note("no new rows; done"); break }
+                } else {
+                    empty = 0
+                    p += 1
+                    note("page \(p)/\(pages) · \(total) rows, \(added) new")
+                }
                 if p == pages { break }
 
                 let nx = try Client.send("js", ["tab": tab, "code": "return (function(){" + nextJS(args["next"] as? String) + "})()"])

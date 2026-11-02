@@ -139,7 +139,7 @@ Tek bir Mac'te ölçüldü:
 
 | | |
 |---|---|
-| Skill | yaklaşık 1.450 token, yalnızca tarayıcı işlerinde yüklenir; sekiz `references/` dosyası (her biri 400-850 token) yalnızca iş gerektirince okunur (MCP sürümü her oturumda yaklaşık 875 token araç şeması gönderiyordu, skill'i de ayrıca) |
+| Skill | yaklaşık 1.550 token, yalnızca tarayıcı işlerinde yüklenir; sekiz `references/` dosyası (her biri 400-850 token) yalnızca iş gerektirince okunur (MCP sürümü her oturumda yaklaşık 875 token araç şeması gönderiyordu, skill'i de ayrıca) |
 | Varsayılan `read` | yaklaşık 500 token (Wikipedia ana sayfa), 1.100 (Hacker News) |
 | Çağrı süresi | `read` 7–60 ms, işlemler 170–470 ms, `shot` 0,9–2,1 sn; komut başına yaklaşık 10 ms daha, daemon'u başlatan ilk komutta 0,2 sn |
 | Bellek | Boşta 9 MB, kullanımdan sonra yaklaşık 34 MB |
@@ -169,6 +169,18 @@ Bu turdan sonra düzeltilenler:
 - `go` boş bir sekmeden çalışmıyordu, bu yüzden tekrar oynatma oradan başlayamıyordu.
 
 Safari'nin yerel menüsünde gerçek girdiyle bir `<select>` seçeneği seçilemedi; bu yüzden `<select>` değişikliklerinin kaydı sınanmadı.
+
+Altıncı tur, playwright-cli'den alınan ikinci grubu (`check`/`uncheck`, regex `-q`, `cookies`, `state`, `pdf`) sınadı; skill bu turdan önce yaklaşık 1.450 token'lık bir çekirdeğe indirilmiş, ayrıntılar `references/` dosyalarına taşınmıştı. Beş Claude Haiku ajanı, her birine skill'in yolu verilerek, tek daemon üzerinde paralel çalıştı: yeni özellikler (fixture, Wikipedia, GitHub, TodoMVC); formlar ve akışlar (saucedemo ödeme, demoqa, uyarılar, dosya yükleme); tarama (yavaşlatmalı books.toscrape, Wikipedia tabloları, Hacker News); hata ayıklama ve taklit (loglar, kırık görseller, 404/500, `route`, `locator`, ekran görüntüleri); birkaç sekmede günlük araştırma (GitHub, MDN araması, DuckDuckGo, bir Türk haber sitesi, TinyMCE'de kalın yazı). Yanıtı 404 olan bir GitHub sayfası dışında bütün görevler 32-80 komutta bitti. Form ajanı hiçbir `references/` dosyasını açmadı; prompt'a yanıt verme, tarih seçiciler ve react-select açılır listelerinin yolunu deneyerek buldu. Bunun üzerine skill'deki görev listesi konu adları yerine durumlarla ("tarih seçicili, açılır listeli bir form…") yeniden yazıldı.
+
+Yedinci turda dört ajana yalnızca görev ve "kullanıcının Safari'sini kullan" denildi; skill'in yolu, adı ya da references'tan söz edilmedi; siteler de daha önce kullanılmamış sitelerdi: alışılmadık girdiler (Selenium'un renk, aralık, datalist ve tarih alanlı formu; çerçeve içindeki jQuery UI tarih seçicisi; tuş basma, kaydırıcı, hover, sürükle-bırak), dinamik sayfalar (geç gelen içerik, sonsuz kaydırma, shadow DOM, sıralanabilir tablo, scrapethissite'ta sayfalı tarama ve AJAX taklidi), girişler ve oturumlar (deneme girişi, saucedemo oturumunu gizli pencereye taşıma, httpbin ile doğrulanan çerezler, bir MDN PDF'i), paralel sekmeler ve dayanıklılık (üç sekmeli betik, quotes.toscrape taraması, 390 ve 1280 px'te Bootstrap, hepsiburada'da arama, kasıtlı hatalar). Her ajan skill'i kendisi yükledi; dördünden üçü görevine uyan reference'ı okudu, dördüncüsü `safari help` ile yetindi. Gizli pencereye taşınan giriş dışında bütün görevler yaklaşık 60-80 komutta bitti.
+
+Bu turlardan sonra düzeltilenler:
+- Blok gövdeli arrow fonksiyonlu `js` (`map(r => { …; return x })`) `undefined` döndürüyordu: koddaki herhangi bir `return`, kodu işlev gövdesi saydırıyordu.
+- Onay kutusu ya da radyo olmayan bir öğede `check` ve seçili bir radyoda `uncheck` "not changed" deyip 0 ile çıkıyordu; ikisi de artık nedenini yazıp 1 ile çıkar.
+- Ulaşılamayan bir adreste `open` 0 ile çıkıp sekme kimliği veriyordu; artık 1 ile çıkar ve sekmeyi kapatır.
+- `crawl`, aynı satırlara geri götüren bir "Next" bağlantısını (scrapethissite'ın ilk sayfası) sayfa sayıyordu; bu tür sayfalar artık atlanır.
+- Gizli pencerede `cookies` ve `state load` normal pencerenin çerezlerine yazıyordu, bu yüzden taşınan giriş tutmuyordu; eklenti artık gizli sekmenin çerez deposunu kullanır.
+- `drag --to` ref'in yanında CSS seçici de alır; "eşleşme yok" iletilerinde regex desenleri yazıldığı gibi görünür; skill `go reload` der (bir ajan `reload` denemişti).
 
 Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenmedi.
 

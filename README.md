@@ -139,7 +139,7 @@ Measured on one Mac:
 
 | | |
 |---|---|
-| Skill | about 1,450 tokens, loaded only for browser tasks; eight `references/` files (400-850 tokens each) are read only when a task needs them (the MCP version sent about 875 tokens of tool schemas every session, plus its skill) |
+| Skill | about 1,550 tokens, loaded only for browser tasks; eight `references/` files (400-850 tokens each) are read only when a task needs them (the MCP version sent about 875 tokens of tool schemas every session, plus its skill) |
 | Default `read` | about 500 tokens (Wikipedia home), 1,100 (Hacker News) |
 | Call time | `read` 7–60 ms, actions 170–470 ms, `shot` 0.9–2.1 s; about 10 ms more per command, 0.2 s for the first one that starts the daemon |
 | Memory | 9 MB idle, about 34 MB after use |
@@ -167,6 +167,18 @@ Fixed after the round:
 - `go` failed from a blank tab, so a replay could not start there.
 
 A `<select>` option could not be chosen with real input in Safari's native menu, so recording `<select>` changes is untested.
+
+A sixth round tested the second batch taken from playwright-cli (`check`/`uncheck`, regex `-q`, `cookies`, `state`, `pdf`) after the skill was cut to a core of about 1,450 tokens with details in `references/`. Five Claude Haiku agents worked in parallel on one daemon, each given the path of the skill: the new features on the fixture, Wikipedia, GitHub and TodoMVC; forms and flows (saucedemo checkout, demoqa, alerts, upload); scraping (books.toscrape with pacing, Wikipedia tables, Hacker News); debugging and mocking (logs, broken images, 404/500, `route`, `locator`, screenshots); and everyday research in several tabs (GitHub, MDN search, DuckDuckGo, a Turkish news site, bold text in TinyMCE). All tasks finished in 32-80 commands, except one GitHub page that answered 404. The forms agent never opened a `references/` file and found the answer to a prompt, date pickers and react-select dropdowns by trial; the skill's task list was then rewritten to name situations ("a form with date pickers, dropdowns…") instead of topics.
+
+A seventh round gave four agents only the task and "use the user's Safari", with no path and no mention of the skill or its references, on sites not used before: unusual inputs (Selenium's web form with colour, range, datalist and date; jQuery UI's datepicker in a frame; key presses, slider, hovers, drag and drop), dynamic pages (delayed content, infinite scroll, shadow DOM, a sortable table, a paged crawl and an AJAX mock on scrapethissite), logins and sessions (a test login, carrying a saucedemo login into a private window, cookies checked against httpbin, an MDN PDF), and parallel tabs and robustness (a three-tab script, a quotes.toscrape crawl, Bootstrap at 390 and 1280 px, a search on hepsiburada, deliberate errors). Every agent loaded the skill by itself, and three of the four read the reference that matched their task; the fourth used `safari help` instead. All tasks finished in about 60-80 commands, except the private-window login.
+
+Fixed after these rounds:
+- `js` with an arrow function that has a block body (`map(r => { …; return x })`) returned `undefined`: any `return` in the code made it a function body.
+- `check` on an element that is not a checkbox or radio, and `uncheck` on a selected radio, reported "not changed" with exit 0; both now exit 1 with the reason.
+- `open` on an unreachable host returned a tab id with exit 0; it now exits 1 and closes the tab.
+- `crawl` counted a "Next" link that led back to the same rows (scrapethissite's first page) as a page; such pages are now skipped.
+- In a private window `cookies` and `state load` wrote to the normal window's cookies, so the restored login did not take; the extension now uses the private tab's cookie store.
+- `drag --to` takes a CSS selector as well as a ref; regex patterns in "no match" messages are shown as typed; the skill says `go reload` (an agent tried `reload`).
 
 This was tested on one Mac (macOS 27), not across a wide range of sites.
 

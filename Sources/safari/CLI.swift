@@ -19,7 +19,7 @@ enum CLI {
         ("click", "[T] click R [--right] [--answer accept|dismiss|TEXT] [--os]   (dblclick, hover alike)"),
         ("dblclick", "[T] dblclick R [--os]"),
         ("hover", "[T] hover R [--os]"),
-        ("drag", "[T] drag R --to R2           drag and drop"),
+        ("drag", "[T] drag R --to R2|CSS        drag and drop"),
         ("fill", "[T] fill R TEXT | fill R=V R2=V2 …  (true/false for checkboxes) [--os]"),
         ("check", "[T] check R | uncheck R      set a checkbox or radio (safe to repeat)"),
         ("uncheck", "[T] uncheck R"),
@@ -375,8 +375,8 @@ enum CLI {
         case "drag":
             try target(required: true)
             try noMore()
-            guard let to = o["to"], isRef(to) else { throw bad("drag needs --to and a ref (e12) to drop on") }
-            args["to"] = to
+            guard let to = o["to"], !to.isEmpty else { throw bad("drag needs --to: a ref (e12) or a CSS selector to drop on") }
+            if isRef(to) { args["to"] = to } else { args["to_sel"] = to }
             args["action"] = "drag"
             return ("act", args, nil)
         case "fill" where !pos.isEmpty && pos.allSatisfy({ s in s.firstIndex(of: "=").map { isRef(String(s[..<$0])) } ?? false }):

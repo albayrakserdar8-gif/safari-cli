@@ -142,7 +142,14 @@ const ops = {
     if (!api || !api.getAll) return { no: 1 };
     const t = await tabAt(m); if (!t) return { stale: 1 };
     if (!/^https?:/.test(t.url || '')) return { err: 'cookies need an http(s) page' };
-    const store = t.cookieStoreId ? { storeId: t.cookieStoreId } : {};
+    // A private tab has its own cookie store; Safari may not put its id on the tab.
+    let store = t.cookieStoreId ? { storeId: t.cookieStoreId } : {};
+    if (!store.storeId && api.getAllCookieStores) {
+      const s = (await api.getAllCookieStores()).find((x) => (x.tabIds || []).includes(t.id));
+      if (s) store = { storeId: s.id };
+    }
+    // Without the store of a private tab we would read and write the normal one: let the page do it.
+    if (t.incognito && !store.storeId) return { no: 1 };
     const all = async () => {
       const q = m.domain ? { domain: m.domain } : { url: t.url };
       return (await api.getAll(Object.assign(q, store))).filter((c) => !m.name || c.name === m.name);

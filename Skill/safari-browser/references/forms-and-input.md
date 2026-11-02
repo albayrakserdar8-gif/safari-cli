@@ -15,7 +15,7 @@
 
 ## Clicks and pointer
 
-- `click e12 --right` opens a context menu. `drag e4 --to e6` drags and drops.
+- `click e12 --right` opens a context menu. `drag e4 --to e6` (or `--to '#column-b'`) drags and drops.
 - `hover e5` applies the page's CSS `:hover` rules, so hover menus open; use `--os` only when it says stylesheets were unreadable and nothing showed.
 - `--os` sends real mouse and keyboard events. It brings Safari forward for a moment and needs Accessibility permission for the terminal app, which only the user can grant.
 - `scroll` (one screen), `scroll -400`, `scroll e30` (into view), `scroll e30 400` (the box that holds it).

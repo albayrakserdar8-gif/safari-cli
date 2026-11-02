@@ -783,7 +783,22 @@ final class Tools {
             defaultLost = false
             opened.insert(id)
             saveState()
-            let loaded = url.isEmpty ? "" : ": " + (try passCheck(id, waitLoad(id, marked: false, from: "about:blank", timeout: 15, grace: 8).text))
+            var loaded = ""
+            if !url.isEmpty {
+                let text = waitLoad(id, marked: false, from: "about:blank", timeout: 15, grace: 8).text
+                // Unreachable host: Safari's error page, which no script can enter. Close the tab rather
+                // than hand back an id for a page that is not there (scripts use `open --id-only`).
+                let errorPage = peek(id)?.url.hasPrefix("safari-resource:") == true
+                if text.hasPrefix("(page did not respond)") || errorPage {
+                    if let t = tabs[id] { _ = try? safari.close(t.pos, expect(t, url: false)) }
+                    opened.remove(id)
+                    tabs[id] = nil
+                    if current == id { current = nil }
+                    saveState()
+                    throw ToolError("Safari could not load \(clip(url, 120)) (unreachable host, or not a web page); closed the tab it opened.")
+                }
+                loaded = ": " + (try passCheck(id, text))
+            }
             // Stamp the page now, so the tab keeps its id even if the daemon restarts next.
             if !url.isEmpty { _ = try? agentCall(id, ["op": "nop"]) }
             return "opened t\(id)" + loaded
@@ -909,7 +924,7 @@ final class Tools {
             reply = (try? JSONSerialization.jsonObject(with: Data(v.utf8))) as? [String: Any] ?? [:]
         }
         let host = URL(string: tabs[id]?.url ?? "")?.host ?? "this site"
-        let partial = full ? "" : "\n\u{1E}without the Safari CLI Bridge extension HttpOnly cookies are not visible"
+        let partial = full ? "" : "\n\u{1E}HttpOnly cookies are not visible here (no Safari CLI Bridge extension, or a private window it cannot reach)"
         if act == "load" { return "set \(reply?["ok"] as? Int ?? 0) cookies" + partial }
         let list = reply?["ok"] as? [[String: Any]] ?? []
         if act == "dump" {
@@ -1158,7 +1173,7 @@ final class Tools {
         } else if a["os"] as? Bool == true {
             (result, env) = try osAct(id, action, a)
         } else {
-            var o = pick(a, ["action", "ref", "x", "y", "text", "key", "dy", "fields", "selector", "to"])
+            var o = pick(a, ["action", "ref", "x", "y", "text", "key", "dy", "fields", "selector", "to", "to_sel"])
             o["op"] = "act"
             frame = try frameOf(&o, id)
             let targeted = o["ref"] != nil || o["selector"] != nil || o["x"] != nil || o["fields"] != nil

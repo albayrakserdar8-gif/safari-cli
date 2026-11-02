@@ -19,6 +19,8 @@ struct TabInfo {
     let url: String
     /// Safari's own tab id, only known through the extension. It never changes while the tab is open.
     var xid: Int? = nil
+    /// In a private window; only known through the extension.
+    var priv = false
 }
 
 /// What the caller believes about a tab position. Safari checks it in the same Apple Event

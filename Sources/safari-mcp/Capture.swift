@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
@@ -62,6 +63,26 @@ enum Capture {
             }
         }
         return nil
+    }
+
+    /// Presses Safari's File > New Private Window by its shortcut (shift-cmd-N), so it works in
+    /// any UI language. False without Accessibility permission or when the item is not found.
+    static func newPrivateWindow() -> Bool {
+        guard AXIsProcessTrusted(),
+              let pid = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Safari").first?.processIdentifier else { return false }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 2)
+        guard let bar = attr(app, kAXMenuBarAttribute), let menus = attr(bar as! AXUIElement, kAXChildrenAttribute) as? [AXUIElement] else { return false }
+        for m in menus {
+            for menu in attr(m, kAXChildrenAttribute) as? [AXUIElement] ?? [] {
+                for item in attr(menu, kAXChildrenAttribute) as? [AXUIElement] ?? []
+                where (attr(item, kAXMenuItemCmdCharAttribute) as? String)?.uppercased() == "N"
+                    && attr(item, kAXMenuItemCmdModifiersAttribute) as? Int == 1 {  // 1: shift (+ cmd)
+                    return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success
+                }
+            }
+        }
+        return false
     }
 
     /// The JavaScript dialog (alert, confirm, prompt) shown in the window's visible tab, found via

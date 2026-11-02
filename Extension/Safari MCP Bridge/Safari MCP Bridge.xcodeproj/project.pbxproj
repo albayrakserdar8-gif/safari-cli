@@ -20,6 +20,7 @@
 		749DFE93308BB24300195437 /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 749DFE90308BB24300195437 /* background.js */; };
 		749DFE94308BB24300195437 /* main.js in Resources */ = {isa = PBXBuildFile; fileRef = 749DFE91308BB24300195437 /* main.js */; };
 		749DFE95308BB24300195437 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 749DFE92308BB24300195437 /* manifest.json */; };
+		749DFEA2308BB24300195437 /* images in Resources */ = {isa = PBXBuildFile; fileRef = 749DFEA1308BB24300195437 /* images */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -61,6 +62,7 @@
 		749DFE90308BB24300195437 /* background.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = background.js; path = Resources/background.js; sourceTree = "<group>"; };
 		749DFE91308BB24300195437 /* main.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = main.js; path = Resources/main.js; sourceTree = "<group>"; };
 		749DFE92308BB24300195437 /* manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = manifest.json; path = Resources/manifest.json; sourceTree = "<group>"; };
+		749DFEA1308BB24300195437 /* images */ = {isa = PBXFileReference; lastKnownFileType = folder; name = images; path = Resources/images; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -135,6 +137,7 @@
 				749DFE90308BB24300195437 /* background.js */,
 				749DFE91308BB24300195437 /* main.js */,
 				749DFE92308BB24300195437 /* manifest.json */,
+				749DFEA1308BB24300195437 /* images */,
 			);
 			name = Resources;
 			path = "Safari MCP Bridge Extension";
@@ -232,6 +235,7 @@
 			files = (
 				749DFE93308BB24300195437 /* background.js in Resources */,
 				749DFE95308BB24300195437 /* manifest.json in Resources */,
+				749DFEA2308BB24300195437 /* images in Resources */,
 				749DFE94308BB24300195437 /* main.js in Resources */,
 			);
 		};

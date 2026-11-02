@@ -5,9 +5,10 @@ import UniformTypeIdentifiers
 final class Tools {
     // Descriptions are sent to the model every session; keep them terse.
     static let defs: [[String: Any]] = [
-        tool("tabs", "List, open, close or select Safari tabs. Ids (t3) last while the tab is open; * marks a window's visible tab.", [
+        tool("tabs", "List, open, close or select Safari tabs. Ids (t3) last while open; * = visible tab.", [
             "action": ["type": "string", "enum": ["list", "new", "close", "select"]],
             "url": str, "tab": str,
+            "private": ["type": "boolean"],
         ]),
         tool("navigate", "Load a URL, or back / forward / reload, and wait for the page.", ["url": str, "tab": str], ["url"]),
         tool("read", "Read the page. interactive (default): visible controls with refs. all: adds headings and text. text: main content as markdown. links: link refs and URLs. query: find by words on the whole page, or filter text/links.", [
@@ -36,7 +37,7 @@ final class Tools {
             "new": ["type": "boolean", "description": "only lines since the last logs call"],
             "pattern": str, "id": str, "limit": int, "clear": ["type": "boolean"], "tab": str,
         ]),
-        tool("batch", "Run several tool calls in order in one round trip; stops at the first error. tab is the default for steps.", [
+        tool("batch", "Run tool calls in order in one round trip; stops at the first error. tab is the default for steps.", [
             "steps": ["type": "array", "items": ["type": "object", "properties": ["tool": str, "args": ["type": "object"]], "required": ["tool"]]],
             "tab": str,
         ], ["steps"]),
@@ -64,6 +65,8 @@ final class Tools {
         var handle: String?
         /// Safari's tab id when the extension is in use; matched before anything else.
         var xid: Int? = nil
+        /// In a private window (reported by the extension, or opened by us as one).
+        var priv = false
     }
 
     private lazy var apple = Safari()
@@ -97,6 +100,7 @@ final class Tools {
             n.pos = hits[0].ref
             n.visible = hits[0].current
             n.xid = hits[0].xid
+            n.priv = n.priv || hits[0].priv
             fresh[t.id] = n
         }
         tabs = fresh
@@ -221,6 +225,7 @@ final class Tools {
             t.title = list[li].title
             t.visible = list[li].current
             t.xid = list[li].xid
+            t.priv = old.priv || list[li].priv
             result[t.id] = t
             slot[li] = t.id
         }
@@ -262,12 +267,15 @@ final class Tools {
             }
         }
         for li in list.indices where slot[li] == nil {
-            let t = Tab(id: nextTab, pos: list[li].ref, url: list[li].url, title: list[li].title, visible: list[li].current, handle: nil, xid: list[li].xid)
+            let t = Tab(id: nextTab, pos: list[li].ref, url: list[li].url, title: list[li].title, visible: list[li].current, handle: nil, xid: list[li].xid, priv: list[li].priv)
             nextTab += 1
             result[t.id] = t
             slot[li] = t.id
         }
 
+        // A tab in a window we know is private is private too.
+        let pw = Set(result.values.filter(\.priv).map(\.pos.wid))
+        for (k, t) in result where !t.priv && pw.contains(t.pos.wid) { result[k]?.priv = true }
         tabs = result
         order = slot.compactMap { $0 }
         counts = [:]
@@ -638,6 +646,36 @@ final class Tools {
 
     // MARK: tools
 
+    /// A tab put to sleep by the Tab Sleeper extension is a data: page with the original
+    /// address in its fragment (`#tabsleeper&u=…&t=…`).
+    private func sleeping(_ url: String) -> (title: String, url: String)? {
+        guard url.hasPrefix("data:"), let r = url.range(of: "#tabsleeper&") else { return nil }
+        let q = URLComponents(string: "?" + url[r.upperBound...])?.queryItems ?? []
+        guard let u = q.first(where: { $0.name == "u" })?.value, !u.isEmpty else { return nil }
+        return (q.first(where: { $0.name == "t" })?.value ?? "", u)
+    }
+
+    /// Safari hides data: and other extensions' pages from our extension (blank URL and title),
+    /// which is how sleeping tabs look. Ask Apple Events for those, matching windows by tab
+    /// count and the URLs both sides can see. Only used for the `tabs` listing.
+    private func hiddenURLs() -> [Int: String] {
+        guard usingExt == true else { return [:] }
+        let blank = order.filter { tabs[$0].map { $0.url.isEmpty && $0.title.isEmpty } ?? false }
+        if blank.isEmpty { return [:] }
+        guard let list = try? apple.listTabs() else { return [:] }
+        let aeWins = Dictionary(grouping: list, by: \.ref.wid).mapValues { $0.sorted { $0.ref.idx < $1.ref.idx } }
+        var out: [Int: String] = [:]
+        for (wid, ids) in Dictionary(grouping: order, by: { tabs[$0]?.pos.wid ?? -1 }) where ids.contains(where: blank.contains) {
+            let mine = ids.compactMap { tabs[$0] }.sorted { $0.pos.idx < $1.pos.idx }
+            let hits = aeWins.values.filter { ae in
+                ae.count == mine.count && zip(mine, ae).allSatisfy { $0.url.isEmpty || $0.url == $1.url }
+            }
+            guard hits.count == 1, wid >= 0 else { continue }
+            for (t, a) in zip(mine, hits[0]) where t.url.isEmpty { out[t.id] = a.url }
+        }
+        return out
+    }
+
     private func tabsTool(_ a: [String: Any]) throws -> String {
         switch a["action"] as? String ?? "list" {
         case "list":
@@ -645,21 +683,33 @@ final class Tools {
             if order.isEmpty { return "(no tabs)" }
             var lines: [String] = []
             var lastWid: Int?
+            let hidden = hiddenURLs()
             for id in order {
                 guard let t = tabs[id] else { continue }
                 if let lastWid, lastWid != t.pos.wid { lines.append("-- another window --") }
                 lastWid = t.pos.wid
-                lines.append("t\(id)\(t.visible ? "*" : "") \(clip(t.title, 60)) | \(clip(t.url, 120))")
+                let s = sleeping(hidden[id] ?? t.url)
+                lines.append("t\(id)\(t.visible ? "*" : "")\(t.priv ? " (private)" : "")\(s != nil ? " (sleeping)" : "") \(clip(s?.title ?? t.title, 60)) | \(clip(s?.url ?? t.url, 120))")
             }
             return lines.joined(separator: "\n")
         case "new":
             var url = a["url"] as? String ?? ""
             if !url.isEmpty && !url.contains(":") { url = "https://" + url }
+            let priv = a["private"] as? Bool ?? false
             try sync()
-            let wid = current.flatMap { tabs[$0]?.pos.wid } ?? order.first.flatMap { tabs[$0]?.pos.wid }
-            let pos = try safari.newTab(in: wid, url: url)
+            // Prefer the current tab's window, but never mix private and normal tabs in one window.
+            let cands = ([current].compactMap { $0 } + order).compactMap { tabs[$0] }.filter { $0.priv == priv }
+            let pos: (ref: TabRef, xid: Int?)
+            if let wid = cands.first?.pos.wid {
+                pos = try safari.newTab(in: wid, url: url)
+            } else if priv {
+                pos = try openPrivateWindow(url)
+            } else {
+                pos = try safari.newTab(in: nil, url: url)
+            }
             try sync()
             guard let id = (tabs.values.first { pos.xid != nil && $0.xid == pos.xid } ?? tabs.values.first { $0.pos == pos.ref })?.id else { throw ToolError("Opened a tab but lost track of it; run tabs.") }
+            if priv { tabs[id]?.priv = true }
             current = id
             defaultLost = false
             opened.insert(id)
@@ -682,6 +732,26 @@ final class Tools {
         default:
             throw ToolError("action must be list, new, close or select.")
         }
+    }
+
+    /// A new private window: through the extension if Safari lets it, else File > New Private
+    /// Window via Accessibility, then the window that was not there before.
+    private func openPrivateWindow(_ url: String) throws -> (ref: TabRef, xid: Int?) {
+        if let r = safari.newPrivateWindow(url: url) { return r }
+        let before = Set(try safari.listTabs().map(\.ref.wid))
+        guard Capture.newPrivateWindow() else {
+            throw ToolError("Opening a private window needs Accessibility permission for the app running this server (System Settings > Privacy & Security > Accessibility).")
+        }
+        for _ in 0..<30 {
+            usleep(100_000)
+            if let t = try safari.listTabs().first(where: { !before.contains($0.ref.wid) }) {
+                if !url.isEmpty { _ = try safari.setURL(t.ref, url, Expect(count: -1, url: nil)) }
+                return (t.ref, t.xid)
+            }
+        }
+        throw ToolError(safari.isExtension
+            ? "Safari opened a private window, but the extension cannot see it: in Safari > Settings > Extensions, turn on Allow in Private Browsing for Safari MCP Bridge."
+            : "Safari did not open a private window.")
     }
 
     private func navigate(_ a: [String: Any]) throws -> String {

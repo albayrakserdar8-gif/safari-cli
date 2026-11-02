@@ -60,7 +60,7 @@ Building it needs Xcode:
    Extension/build.sh --schedule
    ```
    `--schedule` adds a weekly job that re-signs the extension, because free-account signatures expire.
-4. In Safari > Settings > Extensions, enable **Safari MCP Bridge** and allow it on every website.
+4. In Safari > Settings > Extensions, enable **Safari MCP Bridge** and allow it on every website. For private tabs, also turn on "Allow in Private Browsing".
 
 The server and extension talk over `127.0.0.1` (ports 47391–47399) and authenticate each other with a key in `~/.config/safari-mcp/token`, so other pages or local programs cannot connect.
 
@@ -74,7 +74,7 @@ Safari does not let extensions into `file://` pages; those always use Apple Even
 | Automation (control Safari) | Everything | Not needed | Required, asked on first use |
 | Safari > Settings > Developer > "Allow JavaScript from Apple Events" | All tools except `tabs` | Not needed | Required |
 | Screen Recording | `screenshot` | Only when the tab is not on screen | Required |
-| Accessibility | `os: true`, native dialogs, exact screenshot cropping | Optional | Optional |
+| Accessibility | `os: true`, native dialogs, exact screenshot cropping | Optional | Optional; needed for private windows |
 
 If the Developer tab is missing, turn on Settings > Advanced > "Show features for web developers". Note that "Allow JavaScript from Apple Events" applies to every app allowed to control Safari.
 
@@ -90,7 +90,7 @@ Just ask Claude Code:
 
 | Tool | What it does |
 |---|---|
-| `tabs` | List, open, close, select tabs |
+| `tabs` | List, open (also private), close, select tabs |
 | `navigate` | Go to a URL, or `back` / `forward` / `reload`, and wait for the load |
 | `read` | Read the page: interactive elements (default), `all`, `text` (markdown), `links`; `query` to search; `diff` for changes only |
 | `act` | `click`, `dblclick`, `hover`, `type`, `fill`, `select`, `key`, `scroll`, `wait`, `upload`, `dialog` |
@@ -102,7 +102,7 @@ Just ask Claude Code:
 How it behaves:
 
 - **Refs.** `read` gives each element a ref like `e12`, which `act` uses. Refs last for the current page only.
-- **Tabs.** Tabs get stable ids like `t3`. Before every action Safari checks it is still the expected tab, so the server never acts on the wrong one. Calls without `tab` use the last tab used; new tabs open in the background.
+- **Tabs.** Tabs get stable ids like `t3`. Before every action Safari checks it is still the expected tab, so the server never acts on the wrong one. Calls without `tab` use the last tab used; new tabs open in the background. `tabs new private:true` opens a private window (later private tabs join it); `tabs` marks such tabs `(private)`.
 - **Results.** Actions wait for page loads and report `→ title | url` when the page changes. They also report new text, failed requests (4xx/5xx) and other fields that changed.
 - **Input.** By default clicks and typing are in-page events: Safari stays in the background and you keep your cursor. `os: true` sends real mouse/keyboard events for sites that ignore in-page events; it briefly brings Safari to the front.
 - **Dialogs.** `alert` is accepted, `confirm`/`prompt` are dismissed unless `act dialog` sets an answer first. Each one is reported in the result. Only tabs the server works in are affected; your own browsing keeps normal dialogs.

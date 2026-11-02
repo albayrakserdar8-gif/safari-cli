@@ -60,7 +60,7 @@ Derlemek için Xcode gerekir:
    Extension/build.sh --schedule
    ```
    `--schedule`, eklentiyi her hafta yeniden imzalayan bir görev ekler; ücretsiz hesap imzalarının süresi dolar.
-4. Safari > Ayarlar > Uzantılar'da **Safari MCP Bridge**'i aç ve her web sitesinde izin ver.
+4. Safari > Ayarlar > Uzantılar'da **Safari MCP Bridge**'i aç ve her web sitesinde izin ver. Gizli sekmeler için "Özel Dolaşımda İzin Ver"i de aç.
 
 Sunucu ve eklenti `127.0.0.1` üzerinden (47391–47399 portları) konuşur ve `~/.config/safari-mcp/token` dosyasındaki anahtarla birbirini doğrular; başka sayfalar ya da yerel programlar bağlanamaz.
 
@@ -74,7 +74,7 @@ Safari eklentileri `file://` sayfalarına sokmaz; bu sayfalarda hep Apple Events
 | Otomasyon (Safari'yi denetleme) | Her şey | Gerekmez | Gerekli, ilk kullanımda sorulur |
 | Safari > Ayarlar > Geliştirici > "Allow JavaScript from Apple Events" | `tabs` dışındaki araçlar | Gerekmez | Gerekli |
 | Ekran Kaydı | `screenshot` | Yalnızca sekme ekranda değilken | Gerekli |
-| Erişilebilirlik | `os: true`, yerel iletişim kutuları, tam ekran görüntüsü kırpma | İsteğe bağlı | İsteğe bağlı |
+| Erişilebilirlik | `os: true`, yerel iletişim kutuları, tam ekran görüntüsü kırpma | İsteğe bağlı | İsteğe bağlı; gizli pencere için gerekli |
 
 Geliştirici sekmesi yoksa Ayarlar > Gelişmiş > "Web geliştiricileri için özellikleri göster"i aç. "Allow JavaScript from Apple Events", Safari'yi denetleme izni olan her uygulama için geçerlidir.
 
@@ -90,7 +90,7 @@ Claude Code'a doğrudan söylemen yeterli:
 
 | Araç | İş |
 |---|---|
-| `tabs` | Sekmeleri listeler, açar, kapatır, seçer |
+| `tabs` | Sekmeleri listeler, açar (gizli de), kapatır, seçer |
 | `navigate` | URL'ye gider ya da `back` / `forward` / `reload`; yüklenmeyi bekler |
 | `read` | Sayfayı okur: etkileşimli öğeler (varsayılan), `all`, `text` (markdown), `links`; `query` ile arama; `diff` ile yalnızca değişen |
 | `act` | `click`, `dblclick`, `hover`, `type`, `fill`, `select`, `key`, `scroll`, `wait`, `upload`, `dialog` |
@@ -102,7 +102,7 @@ Claude Code'a doğrudan söylemen yeterli:
 Nasıl davranır:
 
 - **Ref'ler.** `read` her öğeye `e12` gibi bir ref verir, `act` bunu kullanır. Ref'ler yalnızca o sayfa için geçerlidir.
-- **Sekmeler.** Sekmeler `t3` gibi kalıcı kimlikler alır. Safari her işlemden önce sekmenin hâlâ beklenen sekme olduğunu doğrular; sunucu yanlış sekmede işlem yapmaz. `tab` verilmeyen çağrılar son kullanılan sekmeye gider; yeni sekmeler arka planda açılır.
+- **Sekmeler.** Sekmeler `t3` gibi kalıcı kimlikler alır. Safari her işlemden önce sekmenin hâlâ beklenen sekme olduğunu doğrular; sunucu yanlış sekmede işlem yapmaz. `tab` verilmeyen çağrılar son kullanılan sekmeye gider; yeni sekmeler arka planda açılır. `tabs new private:true` gizli pencere açar (sonraki gizli sekmeler ona eklenir); `tabs` bu sekmeleri `(private)` diye işaretler.
 - **Sonuçlar.** İşlemler sayfa yüklenmesini bekler ve sayfa değişince `→ başlık | adres` bildirir. Yeni beliren metni, başarısız istekleri (4xx/5xx) ve değişen diğer alanları da yazar.
 - **Girdi.** Tıklama ve yazma varsayılan olarak sayfa içi olaylardır: Safari arka planda kalır, imleç sende kalır. `os: true`, sayfa içi olayları yok sayan siteler için gerçek fare/klavye olayı gönderir ve Safari'yi kısa süre öne getirir.
 - **İletişim kutuları.** `alert` onaylanır; `confirm`/`prompt`, önceden `act dialog` ile yanıt verilmediyse reddedilir. Her biri sonuçta bildirilir. Yalnızca sunucunun çalıştığı sekmeler etkilenir; kendi gezinmende kutular normal çıkar.

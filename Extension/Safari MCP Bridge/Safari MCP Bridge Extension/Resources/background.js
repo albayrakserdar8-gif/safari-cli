@@ -60,7 +60,7 @@ const ops = {
     wins.sort((a, b) => (b.focused ? 1 : 0) - (a.focused ? 1 : 0));
     const out = [];
     for (const w of wins) for (const t of w.tabs.sort((a, b) => a.index - b.index)) {
-      out.push({ id: t.id, w: w.id, i: t.index + 1, cur: t.active, title: t.title || '', url: t.url || '' });
+      out.push({ id: t.id, w: w.id, i: t.index + 1, cur: t.active, ...(w.incognito ? { p: 1 } : {}), title: t.title || '', url: t.url || '' });
     }
     return { ok: out };
   },
@@ -96,6 +96,15 @@ const ops = {
     }
     const w = await browser.windows.create({ url: m.url, focused: false });
     return { tab: w.tabs && w.tabs[0] && w.tabs[0].id, w: w.id, i: 1 };
+  },
+  // Safari may ignore incognito; open blank, check, and only then load the URL so a normal
+  // window never sends the page the user's cookies.
+  async newpriv(m) {
+    const w = await browser.windows.create({ incognito: true, focused: false });
+    const t = w.tabs && w.tabs[0];
+    if (!w.incognito || !t) { await browser.windows.remove(w.id).catch(() => {}); return { no: 1 }; }
+    if (m.url) await browser.tabs.update(t.id, { url: m.url });
+    return { tab: t.id, w: w.id };
   },
   async status(m) { const t = await tabAt({ w: m.w, i: m.i, n: -1 }); return { ok: (t && status.get(t.id)) || 0 }; },
   async reqs(m) { const t = await tabAt({ w: m.w, i: m.i, n: -1 }); return { ok: (t && reqs.get(t.id)) || [] }; },

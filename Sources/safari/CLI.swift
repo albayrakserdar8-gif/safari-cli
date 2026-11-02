@@ -20,7 +20,7 @@ enum CLI {
         ("drag", "[T] drag R --to R2           drag and drop"),
         ("fill", "[T] fill R TEXT | fill R=V R2=V2 …  (true/false for checkboxes) [--os]"),
         ("type", "[T] type R TEXT [--os]       append"),
-        ("select", "[T] select R OPTION"),
+        ("select", "[T] select R OPTION | select R TEXT   (option of a <select>; text in a field or editor)"),
         ("key", "[T] key KEY [R] [--os]        Enter, Escape, cmd+a, shift+Tab…"),
         ("scroll", "[T] scroll [DY] [R] [--os]"),
         ("wait", "[T] wait TEXT | --ref R | --sel CSS  [--gone] [--timeout S]"),
@@ -31,6 +31,7 @@ enum CLI {
         ("logs", "[T] logs [--net] [--errors|--warn] [--new] [-p PAT] [--id nN] [--limit N] [--clear]"),
         ("show", "T show                        make the tab visible"),
         ("close", "T close"),
+        ("downloads", "downloads [--wait] [--timeout S]   recent downloads; --wait until one finishes"),
         ("status", "status                       daemon and extension state"),
         ("stop", "stop                         stop the daemon"),
     ]
@@ -52,14 +53,14 @@ enum CLI {
     private static let flags: [String: String] = [
         "--all": "all", "--full": "full", "--diff": "diff", "--os": "os", "--gone": "gone",
         "--private": "private", "--net": "net", "--errors": "errors", "--warn": "warn",
-        "--new": "new", "--clear": "clear", "--right": "right", "--id-only": "idonly",
+        "--new": "new", "--clear": "clear", "--right": "right", "--id-only": "idonly", "--wait": "wait",
     ]
     /// Options each verb takes.
     private static let allowed: [String: Set<String>] = {
         let page: Set = ["query", "ref", "selector", "max_chars", "offset", "diff"]
         let el: Set = ["ref", "selector", "xy", "os"]
         return [
-            "tabs": [], "open": ["private", "idonly"], "status": [], "stop": [], "show": [], "close": [], "go": [],
+            "tabs": [], "open": ["private", "idonly"], "downloads": ["wait", "timeout"], "status": [], "stop": [], "show": [], "close": [], "go": [],
             "read": page.union(["all", "full"]), "text": page, "links": page,
             "click": el.union(["answer", "right"]), "drag": ["ref", "selector", "xy", "to"], "dblclick": el.union(["answer"]), "hover": el,
             "fill": el, "type": el, "select": el, "key": el, "scroll": el,
@@ -68,7 +69,7 @@ enum CLI {
             "logs": ["net", "errors", "warn", "new", "pattern", "id", "limit", "clear"],
         ]
     }()
-    private static let global: Set = ["tabs", "open", "status", "stop", "help"]
+    private static let global: Set = ["tabs", "open", "status", "stop", "help", "downloads"]
 
     static func isRef(_ s: String) -> Bool { s.wholeMatch(of: #/(f\d+)?e\d+/#) != nil }
     static func isTab(_ s: String) -> Bool { s.wholeMatch(of: #/t\d+/#) != nil }
@@ -159,6 +160,14 @@ enum CLI {
         case "tabs", "status", "stop":
             try noMore()
             return (verb, args, nil)
+        case "downloads":
+            try noMore()
+            if f.contains("wait") { args["wait"] = true }
+            if let t = o["timeout"] {
+                guard let s = Double(t) else { throw bad("--timeout is in seconds") }
+                args["timeout"] = s
+            }
+            return (verb, args, nil)
         case "open":
             guard pos.count <= 1 else { throw bad("open takes one URL") }
             args["action"] = "new"
@@ -205,7 +214,7 @@ enum CLI {
             return ("act", args, nil)
         case "fill", "type", "select":
             try target(required: true)
-            args["text"] = try one(verb == "select" ? "an option" : "the text")
+            args["text"] = try one(verb == "select" ? "an option or text" : "the text")
             args["action"] = verb
             return ("act", args, nil)
         case "key":
@@ -257,6 +266,7 @@ enum CLI {
         case "shot":
             if let p = pos.first, isRef(p) { args["ref"] = p; pos.removeFirst() }
             if let r = o["ref"] { args["ref"] = r }
+            if let r = args["ref"] as? String, r.hasPrefix("f") { throw bad("shot cannot crop to a ref inside a frame; crop to the frame with --sel iframe, or use --region") }
             if let s = o["selector"] { args["selector"] = s }
             try noMore()
             if let r = o["region"] { args["region"] = try nums(r, 4, "--region") }

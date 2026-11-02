@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Editors</title>
+<link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
+</head><body>
+<h1>Editors</h1>
+<h2>Quill</h2>
+<div id="quill"><p>The quick brown fox jumps over the lazy dog.</p></div>
+<h2>Plain contenteditable</h2>
+<div id="plain" contenteditable="true" aria-label="plain editor" style="border:1px solid #888;min-height:3em"><p>First line here.</p><p>Second line here.</p></div>
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js"></script>
+<script>new Quill('#quill', {theme: 'snow'});</script>
+</body></html>

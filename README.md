@@ -40,20 +40,16 @@ Needs macOS 14 or later and the Command Line Tools (Xcode only for the extension
 
 ```bash
 git clone https://github.com/albayrakserdar8-gif/safari-cli.git
-cd safari-cli && swift build -c release
-ln -s "$PWD/.build/release/safari" /opt/homebrew/bin/safari     # or any folder on PATH
+cd safari-cli && make install
 ```
+
+`make install` builds the binary, links it into `/opt/homebrew/bin` (or `/usr/local/bin`; set `PREFIX=` for another place) and links the skill for Claude Code and opencode. `make uninstall` removes the links.
 
 A background daemon keeps tab ids and the extension connection between commands. The first `safari` command starts it (about 0.2 s), later commands take a few milliseconds, and it exits after 30 idle minutes. After a rebuild, the next command restarts it on the new binary. `safari status` shows its state, `safari stop` stops it.
 
 ### Skill
 
-`Skill/safari-browser/SKILL.md` teaches the agent the commands and the rules: work in its own tab, prefer `read` over screenshots, and ask before submitting, buying or deleting anything.
-
-```bash
-ln -s "$PWD/Skill/safari-browser" ~/.claude/skills/safari-browser            # Claude Code
-ln -s "$PWD/Skill/safari-browser" ~/.config/opencode/skills/safari-browser   # opencode
-```
+`Skill/safari-browser/SKILL.md` teaches the agent the commands and the rules: work in its own tab, prefer `read` over screenshots, and ask before submitting, buying or deleting anything. `make install` links it into `~/.claude/skills` and `~/.config/opencode/skills`.
 
 In Claude Code, adding `"Bash(safari:*)"` to `permissions.allow` in `~/.claude/settings.json` stops the per-command prompts.
 
@@ -109,13 +105,15 @@ Just ask the agent:
 | `T js CODE` | Run JavaScript in the page (async function body, 15 s limit; `-` reads stdin) |
 | `T shot` | JPEG of the viewport, an element or a region; prints its path |
 | `T logs` | Console and network logs, with response bodies by `--id` |
+| `downloads [--wait]` | Recent downloads from Safari's list; `--wait` until they finish, then the saved paths |
 
 Results go to stdout; errors to stderr with exit status 1 (2 for wrong usage).
 
 How it behaves:
 
 - **Refs.** `read` gives each element a ref like `e12`, which the actions use. Refs last for the current page only.
-- **Tabs.** Tabs get stable ids like `t3`. Before every action Safari checks it is still the expected tab, so safari never acts on the wrong one. Commands without a tab id use the last tab used; new tabs open in the background. `open --private` opens a private window (later private tabs join it); `tabs` marks such tabs `(private)`.
+- **Tabs.** Tabs get stable ids like `t3`. Before every action Safari checks it is still the expected tab, so safari never acts on the wrong one. Commands without a tab id use the last tab used; new tabs open in the background. `open --private` opens a private window (later private tabs join it); `tabs` marks such tabs `(private)`. Tabs opened with `open` are marked `(agent)`; if no command uses one for 30 minutes, the daemon closes it, unless it is the visible tab or was brought forward with `show`.
+- **Rich text.** `select R "words"` selects text in a field or editor; `key cmd+b R` (or `cmd+i`, `cmd+u`) then formats it, also in editors inside frames that cannot take focus.
 - **Results.** Actions wait for page loads and report `→ title | url` when the page changes. They also report new text, failed requests (4xx/5xx) and other fields that changed.
 - **Input.** By default clicks and typing are in-page events: Safari stays in the background and you keep your cursor. `--os` sends real mouse/keyboard events for sites that ignore in-page events; it briefly brings Safari to the front.
 - **Dialogs.** `alert` is accepted, `confirm`/`prompt` are dismissed unless `dialog` or `click --answer` sets an answer first. Each one is reported in the result. Only tabs safari works in are affected; your own browsing keeps normal dialogs.
@@ -127,7 +125,7 @@ Measured on one Mac:
 
 | | |
 |---|---|
-| Skill | about 2,800 tokens, loaded only for browser tasks (the MCP version sent about 875 tokens of tool schemas every session, plus its skill) |
+| Skill | about 3,100 tokens, loaded only for browser tasks (the MCP version sent about 875 tokens of tool schemas every session, plus its skill) |
 | Default `read` | about 500 tokens (Wikipedia home), 1,100 (Hacker News) |
 | Call time | `read` 7–60 ms, actions 170–470 ms, `shot` 0.9–2.1 s; about 10 ms more per command, 0.2 s for the first one that starts the daemon |
 | Memory | 9 MB idle, about 34 MB after use |
@@ -137,7 +135,7 @@ One daemon serves every agent and session; it exits after 30 idle minutes.
 
 ## Testing status
 
-The page engine was tested in safari-mcp over six rounds in which Claude Haiku agents did real tasks using only the tool descriptions: Wikipedia, Hacker News, MDN, GitHub, DuckDuckGo, sign-up, cart and checkout flows on demo shops (automationexercise, Toolshop/Angular, saucedemo/React, demowebshop), the-internet and TodoMVC. Bugs found in each round were fixed; by the last rounds all tasks finished correctly without falling back to `js` or `os: true` for actions, and call counts on the hardest tasks roughly halved. The CLI was then tested in one round of eight parallel Claude Haiku agents that had only the skill, sharing one daemon: Wikipedia, Hacker News, MDN site search, GitHub (release, issue search, file tree), DuckDuckGo with a screenshot, saucedemo checkout, the-internet widgets and TodoMVC. All eight finished correctly without `--os`, in 7–37 commands. `js` was needed only to read text the CLI did not show: a full Hacker News comment, a date year held in an attribute and a GitHub code view. The first two of these were fixed afterwards: layout tables and lists of `<article>` results now read in full, and `read --ref` on one field shows its whole value. A second round of eight harder tasks (demoqa form with date picker, autocomplete and React selects; Toolshop/Angular cart; TinyMCE, nested frames, upload, hovers, infinite scroll and shadow DOM on the-internet; a paged books.toscrape crawl to a file; a five-article Wikipedia comparison; automationexercise sign-up, order and account deletion; GitHub release notes, source, merged PRs and contributors; Hacker News plus external articles) finished correctly except a right-click, which had no command then. It led to `click --right`, names for icon-only buttons (one agent had removed a cart item through a button listed as "btn"), `open --id-only`, plain-text `js` strings and fuller `select` errors. A third round covered other areas: several tabs at once, private windows (no logins leaked), debugging (JS errors, broken images, 404/500, response bodies), Quill and CodeMirror editors, sliders and drag and drop, Turkish sites (no garbled characters), canvas content read from screenshots, and misuse (unknown ids and refs, unreachable hosts, timeouts, wrong arguments). It led to `drag`, exit 1 for a navigation that does not load and for a `js` timeout, usage errors for conflicting element arguments, and tab ids that survive a daemon restart. Rich-text formatting shortcuts (`cmd+b`, shift+arrow selection) still do not work without `--os`.
+The page engine was tested in safari-mcp over six rounds in which Claude Haiku agents did real tasks using only the tool descriptions: Wikipedia, Hacker News, MDN, GitHub, DuckDuckGo, sign-up, cart and checkout flows on demo shops (automationexercise, Toolshop/Angular, saucedemo/React, demowebshop), the-internet and TodoMVC. Bugs found in each round were fixed; by the last rounds all tasks finished correctly without falling back to `js` or `os: true` for actions, and call counts on the hardest tasks roughly halved. The CLI was then tested in one round of eight parallel Claude Haiku agents that had only the skill, sharing one daemon: Wikipedia, Hacker News, MDN site search, GitHub (release, issue search, file tree), DuckDuckGo with a screenshot, saucedemo checkout, the-internet widgets and TodoMVC. All eight finished correctly without `--os`, in 7–37 commands. `js` was needed only to read text the CLI did not show: a full Hacker News comment, a date year held in an attribute and a GitHub code view. The first two of these were fixed afterwards: layout tables and lists of `<article>` results now read in full, and `read --ref` on one field shows its whole value. A second round of eight harder tasks (demoqa form with date picker, autocomplete and React selects; Toolshop/Angular cart; TinyMCE, nested frames, upload, hovers, infinite scroll and shadow DOM on the-internet; a paged books.toscrape crawl to a file; a five-article Wikipedia comparison; automationexercise sign-up, order and account deletion; GitHub release notes, source, merged PRs and contributors; Hacker News plus external articles) finished correctly except a right-click, which had no command then. It led to `click --right`, names for icon-only buttons (one agent had removed a cart item through a button listed as "btn"), `open --id-only`, plain-text `js` strings and fuller `select` errors. A third round covered other areas: several tabs at once, private windows (no logins leaked), debugging (JS errors, broken images, 404/500, response bodies), Quill and CodeMirror editors, sliders and drag and drop, Turkish sites (no garbled characters), canvas content read from screenshots, and misuse (unknown ids and refs, unreachable hosts, timeouts, wrong arguments). It led to `drag`, exit 1 for a navigation that does not load and for a `js` timeout, usage errors for conflicting element arguments, and tab ids that survive a daemon restart. Formatting failed in Quill inside a cross-origin frame, where the page cannot take focus; this led to `select R "text"` for fields and editors, formatting shortcuts that fall back to the browser's editing commands, and reported selections and formatting state. Downloads (`safari downloads`) and the closing of forgotten agent tabs came out of the same round.
 
 This was tested on one Mac (macOS 27), not across a wide range of sites.
 

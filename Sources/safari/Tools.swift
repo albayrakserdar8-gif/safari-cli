@@ -104,6 +104,10 @@ final class Tools {
     /// Tabs opened with tabs new. Several agents can share this daemon; once more than one
     /// of these is open, "the last tab used" may be another agent's, so calls must name a tab.
     private var opened = Set<Int>()
+    /// When each tab was last named by a call; `reap` closes opened tabs left unused.
+    private var lastUse: [Int: Date] = [:]
+    /// Tabs brought forward with `show`: the user may be looking at them, so never reaped.
+    private var shown = Set<Int>()
     private let session = String(UInt32.random(in: 0...UInt32.max), radix: 36)
     private var seq = 0
     /// URL the last successful `exec` verified before it ran.
@@ -111,6 +115,7 @@ final class Tools {
 
     func call(_ name: String, _ a: [String: Any]) throws -> [Content] {
         dialogs = []
+        defer { if let c = current { lastUse[c] = Date() } }
         var out: [Content]
         do {
             out = try dispatch(name, a)
@@ -304,6 +309,30 @@ final class Tools {
             current = nil
             defaultLost = true
         }
+    }
+
+    /// Closes tabs opened with `open` that no call has named for `limit` seconds, except
+    /// visible ones and ones brought forward with `show`. Returns "tN url" for each closed tab.
+    func reap(olderThan limit: TimeInterval) -> [String] {
+        guard !opened.isEmpty, (try? sync()) != nil else { return [] }
+        let now = Date()
+        var closed: [String] = []
+        for id in opened.sorted() {
+            guard let t = tabs[id] else { continue }
+            if t.visible || shown.contains(id) { continue }
+            // A tab restored from an earlier daemon starts its clock now (limit 0: at idle exit).
+            let last = lastUse[id] ?? (limit > 0 ? now : .distantPast)
+            lastUse[id] = last
+            guard now.timeIntervalSince(last) >= limit else { continue }
+            if (try? guardedOp(id, { try safari.close($0, $1) })) != nil {
+                tabs[id] = nil
+                opened.remove(id)
+                closed.append("t\(id) \(t.url)")
+                if current == id { current = nil; defaultLost = true }
+            }
+        }
+        if !closed.isEmpty { try? sync(); saveState() }
+        return closed
     }
 
     private func resolve(_ a: [String: Any]) throws -> Int {
@@ -712,7 +741,7 @@ final class Tools {
                 if let lastWid, lastWid != t.pos.wid { lines.append("-- another window --") }
                 lastWid = t.pos.wid
                 let s = sleeping(hidden[id] ?? t.url)
-                lines.append("t\(id)\(t.visible ? "*" : "")\(t.priv ? " (private)" : "")\(s != nil ? " (sleeping)" : "") \(clip(s?.title ?? t.title, 60)) | \(clip(s?.url ?? t.url, 120))")
+                lines.append("t\(id)\(t.visible ? "*" : "")\(opened.contains(id) ? " (agent)" : "")\(t.priv ? " (private)" : "")\(s != nil ? " (sleeping)" : "") \(clip(s?.title ?? t.title, 60)) | \(clip(s?.url ?? t.url, 120))")
             }
             return lines.joined(separator: "\n")
         case "new":
@@ -755,6 +784,7 @@ final class Tools {
         case "select":
             let id = try resolve(a)
             try guardedOp(id) { try safari.select($0, $1) }
+            shown.insert(id)
             return "selected t\(id)"
         default:
             throw ToolError("action must be list, new, close or select.")

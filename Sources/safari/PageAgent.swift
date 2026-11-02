@@ -232,6 +232,9 @@ enum PageAgent {
         if(n.checkVisibility&&!n.checkVisibility({visibilityProperty:true,checkVisibilityCSS:true})&&getComputedStyle(n).display!=='contents')return;
         if(n!==root&&(t==='NAV'||ro==='navigation'))return;
         if(fit&&(NOISE[t]||NOISE[ro]))return;
+        // Formatting inside editors, so bold or italic set there can be checked with text.
+        var FM=n.isContentEditable&&{STRONG:['**','**'],B:['**','**'],EM:['_','_'],I:['_','_'],U:['<u>','</u>'],S:['~~','~~']}[t];
+        if(FM){buf+=FM[0];walk(n);buf+=FM[1];return}
         if(il){if(t==='IMG'){if(n.alt)buf+=' '+n.alt+' '}else{walk(n);if(BLK[t]||/^(LI|TD|TH)$/.test(t))buf+=' '}return}
         var h=/^H([1-6])$/.exec(t);
         if(h){flush();pf=ind+'#'.repeat(+h[1])+' ';walk(n);flush();pf=ind;return}
@@ -404,15 +407,31 @@ enum PageAgent {
       // Sliders: report the value; a native range input also needs the key's default action.
       var sl=el.getAttribute('role')==='slider'||el.tagName==='INPUT'&&el.type==='range';S.slider=sl;
       if(sl&&go&&el.tagName==='INPUT')rangeKey(el,k,i);
-      var ed=sl?' ='+JSON.stringify(clip(el.getAttribute('aria-valuetext')||el.getAttribute('aria-valuenow')||el.value||'',30)):k==='Tab'?'':go?keydef(el,k,i):/^(Backspace|Delete|Enter)$|^.$/.test(k)&&(el.isContentEditable||el.tagName==='TEXTAREA'||el.tagName==='INPUT')?fval(el):'';if(ed)S.fx=1;
+      var ed=sl?' ='+JSON.stringify(clip(el.getAttribute('aria-valuetext')||el.getAttribute('aria-valuenow')||el.value||'',30)):k==='Tab'?'':go?keydef(el,k,i):/^(Backspace|Delete|Enter)$|^.$/.test(k)&&(el.isContentEditable||el.tagName==='TEXTAREA'||el.tagName==='INPUT')?fval(el)+(el.isContentEditable?fmt(k,i):''):'';if(ed)S.fx=1;
       el.dispatchEvent(new KeyboardEvent('keyup',i));
       return'key '+a.key+(go?'':' (handled by page)')+moved+ed}
+    // Formatting shortcuts (cmd+b/i/u): the state at the selection afterwards.
+    var FMT={b:'bold',i:'italic',u:'underline'};
+    function fmt(k,i){var c=(i.metaKey||i.ctrlKey)&&!i.altKey&&FMT[k.toLowerCase()];if(!c)return'';
+      var on;try{on=document.queryCommandState(c)}catch(e){}return on==null?'':' ('+c+(on?' on)':' off)')}
+    function seltext(){var t=String(getSelection());return t?' (selected '+JSON.stringify(clip(t,60))+')':''}
     function fval(el){var inp=el.tagName==='INPUT'||el.tagName==='TEXTAREA';return' ='+JSON.stringify(inp&&secret(el)?(el.value?'\u2022\u2022\u2022':''):clip(inp?el.value:el.innerText,60))}
     function rangeKey(el,k,i){var mn=el.min===''?0:+el.min,mx=el.max===''?100:+el.max,st=!el.step||el.step==='any'?1:+el.step,v=+el.value,big=Math.max(st,(mx-mn)/10);
       var n={ArrowRight:v+st,ArrowUp:v+st,ArrowLeft:v-st,ArrowDown:v-st,PageUp:v+big,PageDown:v-big,Home:mn,End:mx}[k];if(n==null||i.metaKey||i.ctrlKey)return;
       n=Math.min(mx,Math.max(mn,n));if(n===v)return;
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,String(n));
       el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}))}
+    // select on a text field or editor: select the first match of the text (case-insensitive fallback).
+    function seltxt(el,want){if(!want)throw new Error('select needs the text to select in '+desc(el));
+      foc(el);var inp=!el.isContentEditable,all,ns=[];
+      if(inp)all=el.value;else{var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT),n;all='';while((n=w.nextNode())){ns.push([n,all.length]);all+=n.data}}
+      var x=all.indexOf(want);if(x<0)x=all.toLowerCase().indexOf(want.toLowerCase());
+      if(x<0)throw new Error('no text '+JSON.stringify(want)+' in '+desc(el)+' ='+JSON.stringify(clip(all,60)));
+      if(inp){el.setSelectionRange(x,x+want.length);return'selected '+JSON.stringify(all.substr(x,want.length))+' in '+desc(el)}
+      function at(o,end){for(var j=0;j<ns.length;j++){var s=ns[j][1],L=ns[j][0].data.length;if(end?o>s&&o<=s+L:o>=s&&o<s+L)return[ns[j][0],o-s]}}
+      var p=at(x,false),q=at(x+want.length,true),r=document.createRange(),g=getSelection();
+      r.setStart(p[0],p[1]);r.setEnd(q[0],q[1]);g.removeAllRanges();g.addRange(r);
+      return'selected '+JSON.stringify(clip(String(g),60))+' in '+desc(el)}
     // Default actions of editing keys in fields, which dispatched key events do not perform.
     function keydef(el,k,i){var inp=el.tagName==='TEXTAREA'||el.tagName==='INPUT'&&!/^(checkbox|radio|file|range|color|submit|button|reset|image|hidden)$/i.test(el.type);
       if(!inp&&!el.isContentEditable)return'';
@@ -420,14 +439,18 @@ enum PageAgent {
       function val(){return fval(el)}
       if(!inp&&(!g.rangeCount||!inside(el,g.anchorNode))){g.selectAllChildren(el);g.collapseToEnd()}
       if(mod&&!i.altKey&&/^a$/i.test(k)){if(inp)el.select();else g.selectAllChildren(el);return' (all selected)'}
-      if(mod||i.altKey){if(!/^(ArrowLeft|ArrowRight)$/.test(k))return''}
+      // Formatting shortcuts the page left alone (an editor in a frame that cannot take focus).
+      if(!inp&&mod&&!i.altKey&&FMT[k.toLowerCase()]){if(g.isCollapsed||!inside(el,g.anchorNode))return' (nothing selected: select R "text" first)';
+        try{document.execCommand(FMT[k.toLowerCase()])}catch(e){}return val()+fmt(k,i)}
+      if(mod||i.altKey){if(!/^Arrow/.test(k))return''}
+      if(inp&&/^Arrow(Up|Down)$/.test(k))return'';
       if(k==='Backspace'||k==='Delete'){try{ok=document.execCommand(k==='Backspace'?'delete':'forwardDelete')}catch(e){}
         if(inp&&el.value===before){var s=el.selectionStart,e=el.selectionEnd;if(s==null)s=e=el.value.length;
           if(s===e){if(k==='Backspace')s=Math.max(0,s-1);else e=Math.min(el.value.length,e+1)}
           if(s!==e){setv(el,el.value.slice(0,s)+el.value.slice(e));try{el.setSelectionRange(s,s)}catch(x){}}}
         return val()}
-      if(/^(ArrowLeft|ArrowRight|Home|End)$/.test(k)){var back=k==='ArrowLeft'||k==='Home',line=k==='Home'||k==='End'||i.metaKey;
-        if(!inp){try{g.modify(sh?'extend':'move',back?'backward':'forward',line?'lineboundary':i.altKey?'word':'character')}catch(e){}return''}
+      if(/^(Arrow(Left|Right|Up|Down)|Home|End)$/.test(k)){var back=/Left|Up|Home/.test(k),line=k==='Home'||k==='End'||i.metaKey,vert=/Up|Down/.test(k);
+        if(!inp){try{g.modify(sh?'extend':'move',back?'backward':'forward',vert?(i.metaKey?'documentboundary':'line'):line?'lineboundary':i.altKey?'word':'character')}catch(e){}return sh?seltext():''}
         var L=el.value.length,s=el.selectionStart,e=el.selectionEnd;if(s==null)return'';
         var bw=el.selectionDirection==='backward',f=sh?(bw?s:e):(back?s:e),an=sh?(bw?e:s):null;
         if(sh||s===e||line)f=line?(back?0:L):Math.max(0,Math.min(L,f+(back?-1:1)));
@@ -440,7 +463,8 @@ enum PageAgent {
         return val()}
       return''}
     function pick(a){var el=need(a).el,want=String(a.text==null?'':a.text);
-      if(el.tagName!=='SELECT')throw new Error(desc(el)+' is not a <select>; click it instead');
+      if(el.tagName!=='SELECT'){if(el.isContentEditable||el.tagName==='TEXTAREA'||el.tagName==='INPUT'&&typeof el.selectionStart==='number')return seltxt(el,want);
+        throw new Error(desc(el)+' is not a <select> or text field; click it instead')}
       var os=[].slice.call(el.options),o=os.find(function(o){return o.value===want||o.text.trim()===want})||os.find(function(o){return o.text.toLowerCase().indexOf(want.toLowerCase())>=0});
       if(!o){var tx=os.map(function(o){return o.text.trim()});throw new Error('no option '+JSON.stringify(want)+'; '+tx.length+' options: '+(tx.length>20?tx.slice(0,10).join(' | ')+' | … | '+tx.slice(-5).join(' | '):tx.join(' | ')))}
       foc(el);

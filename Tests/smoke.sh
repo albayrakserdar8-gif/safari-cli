@@ -41,12 +41,18 @@ check "drag needs --to" test "$(code t3 drag e1)" = 2
 parses '"kind":"network"' t5 logs --id n4
 parses '"region":[0,0,100,50]' t5 shot --region 0,0,100,50
 parses '"max_chars":300' t5 read --max=300
+parses '"action":"select","ref":"e9","tab":"t5","text":"brown fox"' t5 select e9 "brown fox"
+parses '"timeout":5,"wait":true},"out":null,"tool":"downloads"' downloads --wait --timeout 5
+check "downloads takes no tab" test "$(code t3 downloads)" = 2
+check "downloads lists without a daemon" bash -c '"$0" downloads >/dev/null && [ ! -S "$SAFARI_CLI_HOME/sock" ]' "$BIN"
+check "make install dry run" make -n install
 
 out=$("$BIN" status 2>&1)
 check "daemon starts and answers status" grep -q "daemon pid" <<<"$out"
 pid=$(sed -E 's/daemon pid ([0-9]+).*/\1/' <<<"$out")
 check "second call reaches the same daemon" bash -c '"$0" status | grep -q "pid $1 "' "$BIN" "$pid"
-check "tool errors exit 1" test "$(code t999 read)" = 1
+# Needs Safari (the unknown id makes the daemon list Safari's tabs): skipped on CI runners.
+[ -z "$CI" ] && check "tool errors exit 1" test "$(code t999 read)" = 1
 reply=$(python3 -c '
 import socket, sys
 s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1])

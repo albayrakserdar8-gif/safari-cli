@@ -82,11 +82,14 @@ func writeAll(fd: Int32, _ data: Data) -> Bool {
 /// a time on the main queue; the main run loop must stay free when idle (see main.swift).
 final class Daemon {
     static let idleLimit: TimeInterval = 30 * 60
+    /// Tabs opened with `open` and unused this long are closed (SAFARI_CLI_REAP, in seconds, for tests).
+    static let reapLimit: TimeInterval = Double(ProcessInfo.processInfo.environment["SAFARI_CLI_REAP"] ?? "") ?? 30 * 60
 
     private let tools = Tools()
     private let build = buildID()
     private var exiting = false
     private var idle: Timer?
+    private var reaper: Timer?
 
     static func main() -> Never {
         Paths.ensureDir()
@@ -114,7 +117,10 @@ final class Daemon {
 
         let d = Daemon()
         Thread.detachNewThread { d.acceptLoop(fd) }
-        DispatchQueue.main.async { d.touch() }
+        DispatchQueue.main.async {
+            d.touch()
+            d.reaper = Timer.scheduledTimer(withTimeInterval: min(300, max(5, Daemon.reapLimit / 2)), repeats: true) { [weak d] _ in d?.reap(Daemon.reapLimit) }
+        }
         RunLoop.main.run()
         exit(0)
     }
@@ -189,6 +195,15 @@ final class Daemon {
 
     private func touch() {
         idle?.invalidate()
-        idle = Timer.scheduledTimer(withTimeInterval: Daemon.idleLimit, repeats: false) { [weak self] _ in self?.quit() }
+        idle = Timer.scheduledTimer(withTimeInterval: Daemon.idleLimit, repeats: false) { [weak self] _ in
+            // Nothing has used the daemon for idleLimit, so every agent tab is idle that long.
+            self?.reap(0)
+            self?.quit()
+        }
+    }
+
+    private func reap(_ limit: TimeInterval) {
+        guard !exiting else { return }
+        for t in tools.reap(olderThan: limit) { log("closed unused agent tab \(t)") }
     }
 }

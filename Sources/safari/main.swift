@@ -28,6 +28,7 @@ do {
         print(args["text"] as? String ?? CLI.help)
         exit(0)
     }
+    if tool == "downloads" { exit(Downloads.run(args)) }
     exit(Client.run(tool, args, out: out))
 } catch let u as Usage {
     FileHandle.standardError.write(Data(("safari: " + u.msg + "\n").utf8))

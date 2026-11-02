@@ -40,20 +40,16 @@ macOS 14 ya da üstü ve Command Line Tools gerekir (Xcode yalnızca eklenti iç
 
 ```bash
 git clone https://github.com/albayrakserdar8-gif/safari-cli.git
-cd safari-cli && swift build -c release
-ln -s "$PWD/.build/release/safari" /opt/homebrew/bin/safari     # ya da PATH'teki herhangi bir klasör
+cd safari-cli && make install
 ```
+
+`make install` programı derler, `/opt/homebrew/bin`'e (ya da `/usr/local/bin`'e; başka bir yer için `PREFIX=`) bağlar ve skill'i Claude Code ile opencode için bağlar. `make uninstall` bağlantıları kaldırır.
 
 Arka plandaki bir süreç (daemon), sekme kimliklerini ve eklenti bağlantısını komutlar arasında tutar. İlk `safari` komutu onu başlatır (yaklaşık 0,2 sn), sonraki komutlar birkaç milisaniye sürer ve 30 dakika boşta kalınca kapanır. Yeniden derledikten sonraki ilk komut onu yeni sürümle yeniden başlatır. `safari status` durumunu gösterir, `safari stop` durdurur.
 
 ### Skill
 
-`Skill/safari-browser/SKILL.md`, ajana komutları ve kuralları öğretir: kendi sekmesinde çalışmak, ekran görüntüsü yerine `read` kullanmak, gönderme, satın alma ya da silmeden önce sormak.
-
-```bash
-ln -s "$PWD/Skill/safari-browser" ~/.claude/skills/safari-browser            # Claude Code
-ln -s "$PWD/Skill/safari-browser" ~/.config/opencode/skills/safari-browser   # opencode
-```
+`Skill/safari-browser/SKILL.md`, ajana komutları ve kuralları öğretir: kendi sekmesinde çalışmak, ekran görüntüsü yerine `read` kullanmak, gönderme, satın alma ya da silmeden önce sormak. `make install` onu `~/.claude/skills` ve `~/.config/opencode/skills` içine bağlar.
 
 Claude Code'da `~/.claude/settings.json` içindeki `permissions.allow` listesine `"Bash(safari:*)"` eklersen her komutta izin sorulmaz.
 
@@ -109,13 +105,15 @@ Ajana doğrudan söylemen yeterli:
 | `T js KOD` | Sayfada JavaScript çalıştırır (async işlev gövdesi, 15 sn sınırı; `-` stdin'den okur) |
 | `T shot` | Görünüm alanının, bir öğenin ya da bölgenin JPEG'i; dosya yolunu yazar |
 | `T logs` | Konsol ve ağ kayıtları; `--id` ile yanıt gövdesi |
+| `downloads [--wait]` | Safari'nin listesinden son indirmeler; `--wait` bitmelerini bekler, sonra kaydedilen yolları yazar |
 
 Sonuçlar stdout'a gider; hatalar stderr'e, çıkış kodu 1 ile (yanlış kullanımda 2).
 
 Nasıl davranır:
 
 - **Ref'ler.** `read` her öğeye `e12` gibi bir ref verir, işlemler bunu kullanır. Ref'ler yalnızca o sayfa için geçerlidir.
-- **Sekmeler.** Sekmeler `t3` gibi kalıcı kimlikler alır. Safari her işlemden önce sekmenin hâlâ beklenen sekme olduğunu doğrular; safari yanlış sekmede işlem yapmaz. Sekme kimliği verilmeyen komutlar son kullanılan sekmeye gider; yeni sekmeler arka planda açılır. `open --private` gizli pencere açar (sonraki gizli sekmeler ona eklenir); `tabs` bu sekmeleri `(private)` diye işaretler.
+- **Sekmeler.** Sekmeler `t3` gibi kalıcı kimlikler alır. Safari her işlemden önce sekmenin hâlâ beklenen sekme olduğunu doğrular; safari yanlış sekmede işlem yapmaz. Sekme kimliği verilmeyen komutlar son kullanılan sekmeye gider; yeni sekmeler arka planda açılır. `open --private` gizli pencere açar (sonraki gizli sekmeler ona eklenir); `tabs` bu sekmeleri `(private)` diye işaretler. `open` ile açılan sekmeler `(agent)` diye işaretlenir; 30 dakika boyunca hiçbir komut kullanmazsa daemon onu kapatır (görünen sekme ve `show` ile öne getirilen sekme hariç).
+- **Zengin metin.** `select R "kelimeler"` bir alanda ya da editörde metni seçer; ardından `key cmd+b R` (ya da `cmd+i`, `cmd+u`) onu biçimlendirir. Bu, odak alamayan frame'lerdeki editörlerde de çalışır.
 - **Sonuçlar.** İşlemler sayfa yüklenmesini bekler ve sayfa değişince `→ başlık | adres` bildirir. Yeni beliren metni, başarısız istekleri (4xx/5xx) ve değişen diğer alanları da yazar.
 - **Girdi.** Tıklama ve yazma varsayılan olarak sayfa içi olaylardır: Safari arka planda kalır, imleç sende kalır. `--os`, sayfa içi olayları yok sayan siteler için gerçek fare/klavye olayı gönderir ve Safari'yi kısa süre öne getirir.
 - **İletişim kutuları.** `alert` onaylanır; `confirm`/`prompt`, önceden `dialog` ya da `click --answer` ile yanıt verilmediyse reddedilir. Her biri sonuçta bildirilir. Yalnızca safari'nin çalıştığı sekmeler etkilenir; kendi gezinmende kutular normal çıkar.
@@ -127,7 +125,7 @@ Tek bir Mac'te ölçüldü:
 
 | | |
 |---|---|
-| Skill | yaklaşık 2.800 token, yalnızca tarayıcı işlerinde yüklenir (MCP sürümü her oturumda yaklaşık 875 token araç şeması gönderiyordu, skill'i de ayrıca) |
+| Skill | yaklaşık 3.100 token, yalnızca tarayıcı işlerinde yüklenir (MCP sürümü her oturumda yaklaşık 875 token araç şeması gönderiyordu, skill'i de ayrıca) |
 | Varsayılan `read` | yaklaşık 500 token (Wikipedia ana sayfa), 1.100 (Hacker News) |
 | Çağrı süresi | `read` 7–60 ms, işlemler 170–470 ms, `shot` 0,9–2,1 sn; komut başına yaklaşık 10 ms daha, daemon'u başlatan ilk komutta 0,2 sn |
 | Bellek | Boşta 9 MB, kullanımdan sonra yaklaşık 34 MB |
@@ -137,7 +135,7 @@ Tek bir daemon bütün ajanlara ve oturumlara hizmet eder; 30 dakika boşta kal�
 
 ## Sınanma durumu
 
-Sayfa motoru safari-mcp'de, Claude Haiku ajanlarının araçları yalnızca açıklamalarından kullanarak gerçek görevler yaptığı altı turda sınandı: Wikipedia, Hacker News, MDN, GitHub, DuckDuckGo, demo mağazalarda hesap açma, sepet ve ödeme (automationexercise, Toolshop/Angular, saucedemo/React, demowebshop), the-internet ve TodoMVC. Her turda bulunan hatalar düzeltildi; son turlarda bütün görevler, işlemler için `js` ya da `os: true`'ya başvurmadan doğru bitti ve en zor görevlerde çağrı sayısı yaklaşık yarıya indi. CLI ardından, yalnızca skill'i bilen ve tek bir daemon'u paylaşan sekiz paralel Claude Haiku ajanıyla bir turda sınandı: Wikipedia, Hacker News, MDN site içi arama, GitHub (sürüm, issue arama, dosya ağacı), ekran görüntülü DuckDuckGo, saucedemo ödeme akışı, the-internet bileşenleri ve TodoMVC. Sekizi de `--os` kullanmadan, 7–37 komutta doğru bitti. `js` yalnızca CLI'nin göstermediği metni okumak için gerekti: tam bir Hacker News yorumu, bir öznitelikte duran tarih yılı ve bir GitHub kod görünümü. Bunlardan ilk ikisi ardından düzeltildi: düzen tabloları ve `<article>` sonuç listeleri artık tam okunuyor, tek bir alanda `read --ref` bütün değeri gösteriyor. Sekiz zor görevlik ikinci tur (tarih seçicili, otomatik tamamlamalı ve React select'li demoqa formu; Toolshop/Angular sepeti; the-internet'te TinyMCE, iç içe frame'ler, yükleme, hover, sonsuz kaydırma ve shadow DOM; books.toscrape'te sayfalı tarama ve dosyaya yazma; beş makalelik Wikipedia karşılaştırması; automationexercise'da kayıt, sipariş ve hesap silme; GitHub'da sürüm notu, kaynak kod, birleştirilmiş PR ve katkıcılar; Hacker News ve dış makaleler), o sırada komutu olmayan sağ tık dışında doğru bitti. Ardından `click --right`, yalnızca simgeden oluşan butonlar için adlar (bir ajan "btn" diye listelenen bir butonla sepetten ürün silmişti), `open --id-only`, düz metin `js` sonuçları ve daha açıklayıcı `select` hataları eklendi. Üçüncü tur başka alanları kapsadı: aynı anda birden çok sekme, gizli pencere (oturum sızmadı), hata ayıklama (JS hataları, kırık görseller, 404/500, yanıt gövdeleri), Quill ve CodeMirror editörleri, slider ve sürükle-bırak, Türkçe siteler (karakter bozulmadı), ekran görüntüsünden okunan canvas içeriği ve hatalı kullanım (bilinmeyen kimlik ve ref, erişilemeyen adres, zaman aşımı, yanlış argüman). Ardından `drag`, yüklenemeyen gezinme ve `js` zaman aşımı için çıkış kodu 1, çakışan öğe argümanları için kullanım hatası ve daemon yeniden başlasa da korunan sekme kimlikleri eklendi. Zengin metin biçimlendirme kısayolları (`cmd+b`, shift+ok ile seçme) `--os` olmadan hâlâ çalışmıyor.
+Sayfa motoru safari-mcp'de, Claude Haiku ajanlarının araçları yalnızca açıklamalarından kullanarak gerçek görevler yaptığı altı turda sınandı: Wikipedia, Hacker News, MDN, GitHub, DuckDuckGo, demo mağazalarda hesap açma, sepet ve ödeme (automationexercise, Toolshop/Angular, saucedemo/React, demowebshop), the-internet ve TodoMVC. Her turda bulunan hatalar düzeltildi; son turlarda bütün görevler, işlemler için `js` ya da `os: true`'ya başvurmadan doğru bitti ve en zor görevlerde çağrı sayısı yaklaşık yarıya indi. CLI ardından, yalnızca skill'i bilen ve tek bir daemon'u paylaşan sekiz paralel Claude Haiku ajanıyla bir turda sınandı: Wikipedia, Hacker News, MDN site içi arama, GitHub (sürüm, issue arama, dosya ağacı), ekran görüntülü DuckDuckGo, saucedemo ödeme akışı, the-internet bileşenleri ve TodoMVC. Sekizi de `--os` kullanmadan, 7–37 komutta doğru bitti. `js` yalnızca CLI'nin göstermediği metni okumak için gerekti: tam bir Hacker News yorumu, bir öznitelikte duran tarih yılı ve bir GitHub kod görünümü. Bunlardan ilk ikisi ardından düzeltildi: düzen tabloları ve `<article>` sonuç listeleri artık tam okunuyor, tek bir alanda `read --ref` bütün değeri gösteriyor. Sekiz zor görevlik ikinci tur (tarih seçicili, otomatik tamamlamalı ve React select'li demoqa formu; Toolshop/Angular sepeti; the-internet'te TinyMCE, iç içe frame'ler, yükleme, hover, sonsuz kaydırma ve shadow DOM; books.toscrape'te sayfalı tarama ve dosyaya yazma; beş makalelik Wikipedia karşılaştırması; automationexercise'da kayıt, sipariş ve hesap silme; GitHub'da sürüm notu, kaynak kod, birleştirilmiş PR ve katkıcılar; Hacker News ve dış makaleler), o sırada komutu olmayan sağ tık dışında doğru bitti. Ardından `click --right`, yalnızca simgeden oluşan butonlar için adlar (bir ajan "btn" diye listelenen bir butonla sepetten ürün silmişti), `open --id-only`, düz metin `js` sonuçları ve daha açıklayıcı `select` hataları eklendi. Üçüncü tur başka alanları kapsadı: aynı anda birden çok sekme, gizli pencere (oturum sızmadı), hata ayıklama (JS hataları, kırık görseller, 404/500, yanıt gövdeleri), Quill ve CodeMirror editörleri, slider ve sürükle-bırak, Türkçe siteler (karakter bozulmadı), ekran görüntüsünden okunan canvas içeriği ve hatalı kullanım (bilinmeyen kimlik ve ref, erişilemeyen adres, zaman aşımı, yanlış argüman). Ardından `drag`, yüklenemeyen gezinme ve `js` zaman aşımı için çıkış kodu 1, çakışan öğe argümanları için kullanım hatası ve daemon yeniden başlasa da korunan sekme kimlikleri eklendi. Biçimlendirme, sayfanın odak alamadığı başka kökenli bir frame'deki Quill'de başarısız olmuştu. Ardından alanlar ve editörler için `select R "metin"`, sayfa almazsa tarayıcının düzenleme komutlarına düşen biçimlendirme kısayolları, ve sonuçta seçimin ve biçim durumunun gösterilmesi eklendi. İndirmeler (`safari downloads`) ve unutulan ajan sekmelerinin kapatılması da aynı turdan çıktı.
 
 Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenmedi.
 

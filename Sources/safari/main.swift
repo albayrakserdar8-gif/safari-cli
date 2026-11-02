@@ -37,6 +37,7 @@ do {
         exit(0)
     }
     if tool == "downloads" { exit(Downloads.run(args)) }
+    if tool == "state" { exit(State.run(args)) }
     if tool == "crawl" { exit(Crawl.run(args, out: out)) }
     exit(Client.run(tool, args, out: out))
 } catch let u as Usage {

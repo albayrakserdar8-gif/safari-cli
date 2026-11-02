@@ -105,6 +105,9 @@ parses '"act":"set","name":"k","tab":"t5","value":"v"},"out":null,"tool":"cookie
 parses '"act":"del","name":"k","tab":"t5"},"out":null,"tool":"cookies"' t5 cookies --delete k
 parses '"act":"clear","domain":".x.com","tab":"t5"},"out":null,"tool":"cookies"' t5 cookies --clear --domain .x.com
 check "cookies set with --domain is a usage error" test "$(code t3 cookies k v --domain x.com)" = 2
+parses '"act":"save","file":"/tmp/s.json","tab":"t5"},"out":null,"tool":"state"' t5 state save /tmp/s.json
+check "state needs a file" test "$(code t3 state save)" = 2
+check "state needs save or load" test "$(code t3 state keep f.json)" = 2
 
 out=$("$BIN" status 2>&1)
 check "daemon starts and answers status" grep -q "daemon pid" <<<"$out"

@@ -9,12 +9,12 @@ enum CLI {
     /// Short help per verb; `safari help` prints them all.
     static let verbs: [(name: String, usage: String)] = [
         ("tabs", "tabs                          list tabs (* = visible)"),
-        ("open", "open [URL] [--private]        new background tab → its id"),
+        ("open", "open [URL] [--private] [--id-only]   new background tab → its id"),
         ("go", "[T] go URL|back|forward|reload  load and wait"),
         ("read", "[T] read [-q Q] [--all] [--full] [--diff] [--ref R] [--sel CSS] [--max N] [--offset K]"),
         ("text", "[T] text [-q Q] [--diff] [--ref R] [--sel CSS] [--max N] [--offset K]   page as markdown"),
         ("links", "[T] links [-q Q] [--ref R] [--sel CSS] [--max N] [--offset K]"),
-        ("click", "[T] click R [--answer accept|dismiss|TEXT] [--os]   (dblclick, hover alike)"),
+        ("click", "[T] click R [--right] [--answer accept|dismiss|TEXT] [--os]   (dblclick, hover alike)"),
         ("dblclick", "[T] dblclick R [--os]"),
         ("hover", "[T] hover R [--os]"),
         ("fill", "[T] fill R TEXT | fill R=V R2=V2 …  (true/false for checkboxes) [--os]"),
@@ -51,16 +51,16 @@ enum CLI {
     private static let flags: [String: String] = [
         "--all": "all", "--full": "full", "--diff": "diff", "--os": "os", "--gone": "gone",
         "--private": "private", "--net": "net", "--errors": "errors", "--warn": "warn",
-        "--new": "new", "--clear": "clear",
+        "--new": "new", "--clear": "clear", "--right": "right", "--id-only": "idonly",
     ]
     /// Options each verb takes.
     private static let allowed: [String: Set<String>] = {
         let page: Set = ["query", "ref", "selector", "max_chars", "offset", "diff"]
         let el: Set = ["ref", "selector", "xy", "os"]
         return [
-            "tabs": [], "open": ["private"], "status": [], "stop": [], "show": [], "close": [], "go": [],
+            "tabs": [], "open": ["private", "idonly"], "status": [], "stop": [], "show": [], "close": [], "go": [],
             "read": page.union(["all", "full"]), "text": page, "links": page,
-            "click": el.union(["answer"]), "dblclick": el.union(["answer"]), "hover": el,
+            "click": el.union(["answer", "right"]), "dblclick": el.union(["answer"]), "hover": el,
             "fill": el, "type": el, "select": el, "key": el, "scroll": el,
             "wait": ["ref", "selector", "gone", "timeout"], "upload": el.subtracting(["os"]), "dialog": [],
             "js": ["max_chars"], "shot": ["ref", "region", "max_width", "out"],
@@ -162,6 +162,7 @@ enum CLI {
             args["action"] = "new"
             if let u = pos.first { args["url"] = u }
             if f.contains("private") { args["private"] = true }
+            if f.contains("idonly") { args["idonly"] = true }
             return ("tabs", args, nil)
         case "show", "close":
             try noMore()
@@ -181,7 +182,7 @@ enum CLI {
         case "click", "dblclick", "hover":
             try target(required: true)
             try noMore()
-            args["action"] = verb
+            args["action"] = f.contains("right") ? "rclick" : verb
             if let a = o["answer"] { args["text"] = a }
             return ("act", args, nil)
         case "fill" where !pos.isEmpty && pos.allSatisfy({ s in s.firstIndex(of: "=").map { isRef(String(s[..<$0])) } ?? false }):

@@ -5,6 +5,8 @@ import Foundation
 enum Client {
     static func run(_ tool: String, _ args: [String: Any], out: String? = nil) -> Int32 {
         signal(SIGPIPE, SIG_IGN)
+        var args = args
+        let idOnly = args.removeValue(forKey: "idonly") != nil
         var data = Data(jsonString(["v": buildID(), "tool": tool, "args": args]).utf8)
         data.append(0x0A)
         let canStart = tool != "stop"
@@ -25,7 +27,7 @@ enum Client {
                     usleep(100_000)
                     continue
                 }
-                return show(r, tab: args["tab"] as? String, out: out)
+                return show(r, tab: args["tab"] as? String, out: out, idOnly: idOnly)
             }
             if !canStart { print("no daemon running"); return 0 }
             if Date() > deadline { return fail("safari: could not start the daemon; see \(Paths.log)") }
@@ -73,7 +75,7 @@ enum Client {
         }
     }
 
-    private static func show(_ r: [String: Any], tab: String?, out: String?) -> Int32 {
+    private static func show(_ r: [String: Any], tab: String?, out: String?, idOnly: Bool = false) -> Int32 {
         var text = r["text"] as? String ?? ""
         let images = r["img"] as? [String] ?? []
         if !images.isEmpty {
@@ -91,6 +93,8 @@ enum Client {
             text = paths.joined(separator: " ") + (text.isEmpty ? "" : " " + text)
         }
         guard r["ok"] as? Bool == true else { return fail(text) }
+        // `open --id-only`: just the new tab id, for scripts.
+        if idOnly, let m = text.firstMatch(of: #/t\d+/#) { text = String(m.output) }
         if !text.isEmpty { print(text) }
         return 0
     }

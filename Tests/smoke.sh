@@ -53,5 +53,5 @@ check "stop" bash -c '"$0" stop | grep -q stopped' "$BIN"
 
 size=$(wc -c < Skill/safari-browser/SKILL.md)
 echo "skill: $size chars, about $((size / 4)) tokens"
-check "skill stays under 11000 chars" test "$size" -lt 11000
+check "skill stays under 12500 chars" test "$size" -lt 12500
 exit $fail

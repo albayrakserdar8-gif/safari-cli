@@ -814,7 +814,7 @@ final class Tools {
             }
         }
         if ["scroll", "dialog"].contains(action) { return result }
-        let twice = ["click", "dblclick", "key", "hover"].contains(action)
+        let twice = ["click", "dblclick", "rclick", "key", "hover"].contains(action)
         // The address from before the action, so a pushState route change shows up as one.
         var out = settle(id, result, href: env["u0"] as? String ?? env["u"] as? String ?? "", tabURL: verifiedURL,
                          wasReady: env["r"] as? String == "complete", twice: twice)
@@ -958,7 +958,7 @@ final class Tools {
         let verified = verifiedURL
         let g = env["v"] as? [String: Any] ?? [:]
         let iw = g["iw"] as? Double ?? 0, ih = g["ih"] as? Double ?? 0
-        if let cover = g["cover"] as? String, ["click", "dblclick", "type", "fill"].contains(action) {
+        if let cover = g["cover"] as? String, ["click", "dblclick", "rclick", "type", "fill"].contains(action) {
             throw ToolError("\(g["d"] as? String ?? "target") is covered by \(cover) at its centre; not clicking. Close what covers it, or use --xy.")
         }
         let view = try Capture.viewport(wid: wid, iw: iw, ih: ih).rect
@@ -975,6 +975,7 @@ final class Tools {
 
         switch action {
         case "click": Input.click(try needPoint())
+        case "rclick": Input.click(try needPoint(), right: true)
         case "dblclick": Input.click(try needPoint(), count: 2)
         case "hover": Input.move(try needPoint())
         case "type", "fill":
@@ -1052,7 +1053,9 @@ final class Tools {
             tabs[id]?.url = r.url
             if env["x"] != nil { return "(page navigated before the script returned) " + waitLoad(id, marked: false, from: nil, timeout: 10).text }
             if let e = env["e"] as? String { throw ToolError(clip(e, 600)) }
-            let v = env["v"] as? String ?? "undefined"
+            var v = env["v"] as? String ?? "undefined"
+            // A string result prints as itself, not as a JSON literal, so shell tools can use it.
+            if v.hasPrefix("\""), let d = v.data(using: .utf8), let str = try? JSONSerialization.jsonObject(with: d, options: .fragmentsAllowed) as? String { v = str }
             let max = a["max_chars"] as? Int ?? 4000
             var out = (v.count > max ? String(v.prefix(max)) + "\n… \(v.count - max) more chars" : v) + note
             // The script sent the tab somewhere else: wait, so the next call sees the new page.

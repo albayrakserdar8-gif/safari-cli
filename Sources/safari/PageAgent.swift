@@ -105,7 +105,7 @@ enum PageAgent {
     var S=window.__smcp={h:'',slots:{},con:null,net:null,last:{}};
     var R=new Map(),W=new WeakMap(),n=0;
     function ref(el){var id=W.get(el);if(!id){id='e'+(++n);W.set(el,id);R.set(id,new WeakRef(el))}return id}
-    function get(id){var w=R.get(id),el=w&&w.deref();if(!el||!el.isConnected)throw new Error('ref '+id+' is stale (page changed or element removed); call read again');return el}
+    function get(id){var w=R.get(id),el=w&&w.deref();if(!w&&!(+String(id).slice(1)<=n))throw new Error('ref '+id+' was never given on this page; take refs from read');if(!el||!el.isConnected)throw new Error('ref '+id+' is stale (page changed or element removed); call read again');return el}
     function clip(s,k){s=String(s==null?'':s).replace(/\s+/g,' ').trim();return s.length>k?s.slice(0,k-1)+'\u2026':s}
     var IR=/^(button|link|checkbox|radio|tab|menuitem|menuitemcheckbox|menuitemradio|option|switch|combobox|textbox|searchbox|slider|spinbutton|treeitem)$/;
     var SKIP={SCRIPT:1,STYLE:1,NOSCRIPT:1,TEMPLATE:1,HEAD:1,LINK:1,META:1,svg:1,SVG:1};
@@ -134,8 +134,20 @@ enum PageAgent {
         return clip(el.name||el.id||'',k)}
       if(t==='IMG')return clip(el.alt||el.title||'',k);
       var x=el.innerText||el.textContent||el.title;
-      if(!x||!x.trim()){var im=el.querySelector('img[alt]');x=(im&&im.alt)||(el.getAttribute('href')||'').split(/[?#]/)[0].split('/').filter(Boolean).pop()||el.id||String(el.getAttribute('class')||'').split(/\s+/)[0]||''}
+      if(!x||!x.trim()){var im=el.querySelector('img[alt]');x=(im&&im.alt)||iconName(el)||(el.getAttribute('href')||'').split(/[?#]/)[0].split('/').filter(Boolean).pop()||el.id||String(el.getAttribute('class')||'').split(/\s+/)[0]||''}
+      if(/(^|[\s_-])(danger|delete|remove|destroy|trash)([\s_-]|$)/i.test(String(el.getAttribute('class')||''))&&!/delete|remove|trash|danger/i.test(x))x+=' (danger)';
       return clip(x,k)}
+    // A control with no text: what its icon or test hooks say (a trash icon, data-test="delete").
+    var ICONSTOP=/^(solid|regular|light|thin|brands|duotone|sharp|fw|lg|xl|xs|sm|[0-9]+x|spin|pulse|inverse|border|pull|stack|outlined|round|filled|two|tone|icon|icons|fill|line)$/;
+    function iconName(el){
+      var d=el.querySelector('[aria-label],[title]');if(d){var v=d.getAttribute('aria-label')||d.getAttribute('title');if(v&&v.trim())return v}
+      var st=el.querySelector('svg title');if(st&&st.textContent.trim())return st.textContent;
+      var dt=el.getAttribute('data-test')||el.getAttribute('data-testid')||el.getAttribute('data-qa')||el.getAttribute('data-cy');if(dt)return dt.replace(/[-_]+/g,' ');
+      var cs=[el].concat([].slice.call(el.querySelectorAll('i,svg,span,use,em')));
+      for(var i=0;i<cs.length&&i<12;i++){var c=cs[i],di=c.getAttribute('data-icon');if(di)return di.replace(/[-_]+/g,' ');
+        var txt=String(c.getAttribute('class')||'')+' '+(c.getAttribute('href')||c.getAttribute('xlink:href')||''),re=/(?:^|[\s#])(?:fa[srlbdt]?|fas|far|bi|icon|icons|glyphicon|ti|ri|lucide|mdi|ion|feather|octicon|la|las)[-_]([a-z][a-z0-9-]*)/gi,m;
+        while((m=re.exec(txt))){var w=m[1].toLowerCase();if(!ICONSTOP.test(w))return w.replace(/-/g,' ')}}
+      return ''}
     function state(el){var t=el.tagName,s='';
       if(t==='INPUT'||t==='TEXTAREA'||t==='SELECT'){var y=(el.type||'').toLowerCase();
         if(y==='checkbox'||y==='radio'){if(el.checked)s+=' checked'}
@@ -430,7 +442,7 @@ enum PageAgent {
     function pick(a){var el=need(a).el,want=String(a.text==null?'':a.text);
       if(el.tagName!=='SELECT')throw new Error(desc(el)+' is not a <select>; click it instead');
       var os=[].slice.call(el.options),o=os.find(function(o){return o.value===want||o.text.trim()===want})||os.find(function(o){return o.text.toLowerCase().indexOf(want.toLowerCase())>=0});
-      if(!o)throw new Error('no option '+JSON.stringify(want)+'; options: '+os.slice(0,20).map(function(o){return o.text.trim()}).join(' | '));
+      if(!o){var tx=os.map(function(o){return o.text.trim()});throw new Error('no option '+JSON.stringify(want)+'; '+tx.length+' options: '+(tx.length>20?tx.slice(0,10).join(' | ')+' | … | '+tx.slice(-5).join(' | '):tx.join(' | ')))}
       foc(el);
       // The prototype setter, so frameworks that track the value (React) see a change.
       Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set.call(el,o.value);
@@ -499,10 +511,11 @@ enum PageAgent {
     function act(a){S.note='';if(a.text!=null&&(a.action==='dialog'||a.action==='click'))a.text=String(a.text).replace(/^answer\s*[:=]?\s*/i,'');var r=act1(a);return r+S.note}
     function act1(a){var t;S.fx=1;S.f0=null;S.slider=false;
       if(a.action==='click'||a.action==='dblclick'||a.action==='key'||a.action==='hover'){watch();S.t0=new Set(lines());S.n0=null;try{S.n0=mcall('ncount')}catch(e){}}
-      if(/^(click|dblclick|key|hover|fill|select|type)$/.test(a.action)){fsnap(a);S.q0=null;try{S.q0=mcall('nn0')}catch(e){}}
+      if(/^(click|dblclick|rclick|key|hover|fill|select|type)$/.test(a.action)){fsnap(a);S.q0=null;try{S.q0=mcall('nn0')}catch(e){}}
       switch(a.action){
         case'click':t=need(a);if(a.text!=null)try{mcall('policy',[String(a.text)])}catch(e){}if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.to.tagName)||t.to.isContentEditable)S.fx=1;if(S.hv)hov(t.to);press(t);return'clicked '+desc(t.el);
         case'dblclick':t=need(a);if(S.hv)hov(t.to);press(t);press(t,{detail:2});mev(t.to,'dblclick',t.x,t.y,{detail:2});return'double-clicked '+desc(t.el);
+        case'rclick':t=need(a);['pointerdown','mousedown','pointerup','mouseup','contextmenu'].forEach(function(e){mev(t.to,e,t.x,t.y,{button:2,buttons:/down/.test(e)?2:0})});return'right-clicked '+desc(t.el);
         case'hover':t=need(a);['pointerover','mouseover','pointerenter','mouseenter','pointermove','mousemove'].forEach(function(e){mev(t.to,e,t.x,t.y)});
           var h=hov(t.to);return'hovered '+desc(t.el)+(h.n?' ('+h.n+' :hover rules':' (no :hover styles found')+(h.bad?'; '+h.bad+' stylesheets from other sites unreadable, --os if nothing shows)':')');
         case'type':return edit(a);

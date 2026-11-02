@@ -17,12 +17,12 @@ enum Input {
     }
 
     /// Clicks at `p`, then puts the pointer back where the user had it.
-    static func click(_ p: CGPoint, count: Int = 1) {
+    static func click(_ p: CGPoint, count: Int = 1, right: Bool = false) {
         let home = CGEvent(source: nil)?.location
         move(p)
         for c in 1...count {
-            for type in [CGEventType.leftMouseDown, .leftMouseUp] {
-                let e = CGEvent(mouseEventSource: src, mouseType: type, mouseCursorPosition: p, mouseButton: .left)
+            for type in right ? [CGEventType.rightMouseDown, .rightMouseUp] : [.leftMouseDown, .leftMouseUp] {
+                let e = CGEvent(mouseEventSource: src, mouseType: type, mouseCursorPosition: p, mouseButton: right ? .right : .left)
                 e?.setIntegerValueField(.mouseEventClickState, value: Int64(c))
                 e?.post(tap: tap)
                 usleep(15_000)

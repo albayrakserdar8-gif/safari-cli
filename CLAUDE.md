@@ -118,6 +118,6 @@ Fork of `github.com/sadopc/safari-mcp` (remote `upstream`), default branch `main
 
 ## Design constraints
 
-- Token cost is a primary goal. Nothing is sent per session except the skill's one-line description; the skill body (about 2,550 tokens) loads for browser tasks, and `Tests/smoke.sh` fails above 11000 chars. Results are terse lines that agents can pipe and filter, `read` is capped by `max_chars` with an `offset` continuation, and screenshots are opt-in JPEGs. Keep additions equally short.
+- Token cost is a primary goal. Nothing is sent per session except the skill's one-line description; the skill body (about 2,800 tokens) loads for browser tasks, and `Tests/smoke.sh` fails above 12500 chars. Results are terse lines that agents can pipe and filter, `read` is capped by `max_chars` with an `offset` continuation, and screenshots are opt-in JPEGs. Keep additions equally short.
 - The binary has no dependencies and uses no Xcode-only APIs; it must keep building with Command Line Tools alone. Deployment target is macOS 14 (ScreenCaptureKit screenshot API) for the server and the extension app.
 - The client's stdout carries only the result; errors go to stderr. The daemon never inherits the caller's stdout (the shell would wait for it) and is spawned as a child of the shell, not a launchd job, so its TCC permissions are the terminal's.

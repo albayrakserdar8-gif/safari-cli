@@ -151,7 +151,7 @@ enum PageAgent {
     function state(el){var t=el.tagName,s='';
       if(t==='INPUT'||t==='TEXTAREA'||t==='SELECT'){var y=(el.type||'').toLowerCase();
         if(y==='checkbox'||y==='radio'){if(el.checked)s+=' checked'}
-        else if(!/^(submit|button|reset|image)$/.test(y)){var v;if(secret(el))v=el.value?'\u2022\u2022\u2022':'';else if(t==='SELECT'){var o=el.selectedOptions[0];v=o?o.text:''}else v=el.value;if(v)s+=' ='+JSON.stringify(clip(v,VM))}}
+        else if(!/^(submit|button|reset|image)$/.test(y)){var v;if(secret(el))v=el.value?'\u2022\u2022\u2022':'';else if(t==='SELECT'){var o=el.selectedOptions[0];v=o?o.text:''}else v=el.value;if(v)s+=' ='+JSON.stringify(VM>60?String(v).slice(0,VM):clip(v,VM))}}
       if(ceRoot(el)){var cv=clip(el.innerText,VM);s+=' ='+JSON.stringify(cv)}
       if(el.disabled||el.getAttribute('aria-disabled')==='true')s+=' disabled';
       var x=el.getAttribute('aria-expanded');if(x)s+=x==='true'?' expanded':' collapsed';

@@ -123,6 +123,7 @@ final class Tools {
             }
             throw ToolError(e.msg + " If so, `safari t\(id) dialog accept` (or dismiss) answers it; it needs Accessibility permission and shows the tab.")
         }
+        saveState()
         if !dialogs.isEmpty {
             let note = dialogs.map { "⚠ dialog " + $0 }.joined(separator: "\n")
             if let i = out.lastIndex(where: { if case .text = $0 { return true } else { return false } }), case .text(let t) = out[i] {
@@ -193,7 +194,35 @@ final class Tools {
     /// Re-reads Safari's tabs and carries our ids over to wherever each tab is now.
     /// Tabs keep their order unless moved, so matching the URL sequence per window finds
     /// most of them; what is left is matched by the handle in the page, or dropped.
+    // A restarted daemon (idle exit, rebuild) gives tabs we worked in back the ids they had.
+    // They are matched by the handle stored in the page (Safari's extension tab ids change
+    // between connections), and only on the same site.
+    private var restoreLoaded = false
+    private var restored: [(id: Int, url: String, handle: String)] = []
+    private var savedState = ""
+    private var statePath: String { Paths.dir + "/tabs.json" }
+
+    private func loadRestored() {
+        guard !restoreLoaded else { return }
+        restoreLoaded = true
+        guard let d = FileManager.default.contents(atPath: statePath),
+              let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] else { return }
+        for v in j["h"] as? [[Any]] ?? [] {
+            if v.count == 3, let id = v[0] as? Int, let u = v[1] as? String, let h = v[2] as? String { restored.append((id, u, h)) }
+        }
+        opened.formUnion(j["o"] as? [Int] ?? [])
+    }
+
+    private func saveState() {
+        let h = tabs.values.compactMap { t in t.handle.map { [t.id, t.url, $0] as [Any] } }
+        let s = jsonString(["h": h, "o": opened.filter { tabs[$0] != nil }.sorted()])
+        guard s != savedState else { return }
+        savedState = s
+        try? s.write(toFile: statePath, atomically: true, encoding: .utf8)
+    }
+
     private func sync() throws {
+        loadRestored()
         let list = try safari.listTabs()
         var result: [Int: Tab] = [:]
         var slot = [Int?](repeating: nil, count: list.count)
@@ -247,8 +276,17 @@ final class Tools {
             }
         }
         for li in list.indices where slot[li] == nil {
-            let t = Tab(id: nextTab, pos: list[li].ref, url: list[li].url, title: list[li].title, visible: list[li].current, handle: nil, xid: list[li].xid, priv: list[li].priv)
-            nextTab += 1
+            var id = nextTab, handle: String?
+            let cands = restored.indices.filter { result[restored[$0].id] == nil && sameHost(restored[$0].url, list[li].url) }
+            if !cands.isEmpty, let h = (try? safari.js(list[li].ref, "window.__smcp?__smcp.h||'':''", Expect(count: -1, url: nil)))??.result,
+               !h.isEmpty, let k = cands.first(where: { restored[$0].handle == h }) {
+                id = restored[k].id
+                handle = h
+                restored.remove(at: k)
+            } else {
+                nextTab += 1
+            }
+            let t = Tab(id: id, pos: list[li].ref, url: list[li].url, title: list[li].title, visible: list[li].current, handle: handle, xid: list[li].xid, priv: list[li].priv)
             result[t.id] = t
             slot[li] = t.id
         }
@@ -261,6 +299,7 @@ final class Tools {
         counts = [:]
         for t in list { counts[t.ref.wid, default: 0] += 1 }
         synced = true
+        saveState()
         if let c = current, tabs[c] == nil {
             current = nil
             defaultLost = true
@@ -697,7 +736,11 @@ final class Tools {
             current = id
             defaultLost = false
             opened.insert(id)
-            return "opened t\(id)" + (url.isEmpty ? "" : ": " + waitLoad(id, marked: false, from: "about:blank", timeout: 15, grace: 8).text)
+            saveState()
+            let loaded = url.isEmpty ? "" : ": " + waitLoad(id, marked: false, from: "about:blank", timeout: 15, grace: 8).text
+            // Stamp the page now, so the tab keeps its id even if the daemon restarts next.
+            if !url.isEmpty { _ = try? agentCall(id, ["op": "nop"]) }
+            return "opened t\(id)" + loaded
         case "close":
             guard a["tab"] != nil else { throw ToolError("close needs a tab id: safari t3 close.") }
             let previous = current, wasLost = defaultLost

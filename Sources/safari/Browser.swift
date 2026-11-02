@@ -132,6 +132,15 @@ final class ExtBrowser: Browser {
         return r["ok"] != nil
     }
 
+    /// The extension's `cookies` op on the tab's site; the reply has `ok`, `stale` (tab moved) or `no` (no cookie API).
+    func cookies(_ tab: TabRef, _ e: Expect, _ m: [String: Any]) throws -> [String: Any] {
+        do {
+            return try bridge.call("cookies", at(tab, e).merging(m) { $1 })
+        } catch let e as ToolError where e.msg.hasPrefix("unknown op") {
+            return ["no": 1]
+        }
+    }
+
     func resize(_ wid: Int, width: Int, height: Int) throws -> Bool {
         do {
             _ = try bridge.call("resize", ["w": wid, "width": width, "height": height])

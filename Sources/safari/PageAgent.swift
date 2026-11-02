@@ -706,6 +706,15 @@ enum PageAgent {
         var m=a.max_chars==null?6000:a.max_chars;return m>0&&v.length>m?v.slice(0,m)+'\n\u001e… '+(v.length-m)+' more chars (--max 0 for all)':v}
       if(!keys.length)return'(no '+area+'Storage keys on '+location.host+')';
       return keys.map(function(k){return k+' = '+clip(st.getItem(k),120)}).join('\n')+'\n\u001e'+keys.length+' '+area+'Storage key'+(keys.length===1?'':'s')+' on '+location.host}
+    // Without the extension: the page's own cookies (no HttpOnly, no domain or expiry). Same reply as the extension's op.
+    function cookies(a){var all=document.cookie?document.cookie.split(/;\s*/).map(function(p){var i=p.indexOf('=');return{name:i<0?'':p.slice(0,i),value:i<0?p:p.slice(i+1)}}):[];
+      var gone='=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/',hs=location.hostname.split('.');
+      var kill=function(n){document.cookie=n+gone;for(var i=0;i<hs.length-1;i++)document.cookie=n+gone+'; domain=.'+hs.slice(i).join('.')};
+      if(a.act==='load'){var n=0;(a.list||[]).forEach(function(c){if(c.httpOnly)return;document.cookie=c.name+'='+c.value+'; path='+(c.path||'/')+(c.exp?'; expires='+new Date(c.exp*1000).toUTCString():'')+(c.domain&&c.domain[0]==='.'?'; domain='+c.domain:'')+(c.secure?'; secure':'');n++});return JSON.stringify({ok:n})}
+      if(a.act==='set'){document.cookie=a.name+'='+a.value+'; path=/';all=[{name:a.name,value:a.value}];return JSON.stringify({ok:document.cookie.split(/;\s*/).indexOf(a.name+'='+a.value)>=0?all:[]})}
+      if(a.name)all=all.filter(function(c){return c.name===a.name});
+      if(a.act==='del'||a.act==='clear')all.forEach(function(c){kill(c.name)});
+      return JSON.stringify({ok:all})}
     function record(a){try{return mcall(a.stop?'recStop':'recStart',[])}catch(x){if(x.message==='NOMAIN')throw new Error('recording needs the page to be loaded with the Safari CLI Bridge extension on; reload it');throw x}}
     // A box drawn around the element in the user's view, gone after a few seconds.
     function light(a){var H=S.hls||(S.hls=[]);
@@ -746,7 +755,7 @@ enum PageAgent {
     S.call=function(a){if(a.h!==S.h)return JSON.stringify({m:S.h||''});
       // u0: the address before the call, so a history.pushState route change counts as a change.
       var u0=location.href;
-      try{var v=a.op==='read'?read(a):a.op==='table'?table(a):a.op==='act'?act(a):a.op==='geom'?geom(a):a.op==='mark'?mark(a):a.op==='route'?routes(a):a.op==='locator'?loc(a):a.op==='storage'?storage(a):a.op==='record'?record(a):a.op==='highlight'?light(a):a.op==='logs'?logs(a):a.op==='has'?has(a):a.op==='delta'?delta():a.op==='pend'?pend():null,o={v:v,u:location.href,u0:u0,r:document.readyState},d;try{d=mcall('dlgTake')}catch(e){}if(d&&d.length)o.d=d;return JSON.stringify(o)}
+      try{var v=a.op==='read'?read(a):a.op==='table'?table(a):a.op==='act'?act(a):a.op==='geom'?geom(a):a.op==='mark'?mark(a):a.op==='route'?routes(a):a.op==='locator'?loc(a):a.op==='storage'?storage(a):a.op==='cookies'?cookies(a):a.op==='record'?record(a):a.op==='highlight'?light(a):a.op==='logs'?logs(a):a.op==='has'?has(a):a.op==='delta'?delta():a.op==='pend'?pend():null,o={v:v,u:location.href,u0:u0,r:document.readyState},d;try{d=mcall('dlgTake')}catch(e){}if(d&&d.length)o.d=d;return JSON.stringify(o)}
       catch(e){return JSON.stringify({e:String(e&&e.message||e)})}};
     })()
     """#

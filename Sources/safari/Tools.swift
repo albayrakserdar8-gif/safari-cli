@@ -18,7 +18,7 @@ func jsonString(_ value: Any) -> String {
 }
 
 final class Tools {
-    static let names: Set = ["tabs", "navigate", "read", "table", "act", "js", "screenshot", "logs", "locator", "highlight", "route", "storage", "record"]
+    static let names: Set = ["tabs", "navigate", "read", "table", "act", "js", "screenshot", "logs", "locator", "highlight", "route", "storage", "cookies", "record"]
 
     /// A tab we know about. `id` is ours and stable; `pos` is where Safari has it now.
     private struct Tab {
@@ -156,6 +156,7 @@ final class Tools {
             return [.text(v)]
         case "route": return [.text(try route(a))]
         case "storage": return [.text(try page("storage", a, ["area", "key", "value", "del", "clear", "max_chars"]))]
+        case "cookies": return [.text(try cookies(a))]
         case "record":
             if !safari.isExtension { throw ToolError("record needs the Safari CLI Bridge extension (the recorder must start with each page).") }
             return [.text(try page("record", a, ["stop"]))]
@@ -879,6 +880,74 @@ final class Tools {
             if !safari.isExtension, !list.isEmpty { notes.append("without the extension, routes start once safari touches each new page; earlier requests go out") }
         }
         return head + notes.map { "\n\u{1E}" + $0 }.joined()
+    }
+
+    /// Cookies of the tab's site: through the extension (all, HttpOnly too), else `document.cookie`.
+    /// `act`: list (or get with `name`), set, del, clear; dump and load serve `safari state`.
+    private func cookies(_ a: [String: Any]) throws -> String {
+        let id = try resolve(a)
+        let act = a["act"] as? String ?? "list"
+        var m: [String: Any] = ["act": act]
+        for k in ["name", "value", "domain", "list"] { if let v = a[k] { m[k] = v } }
+        var reply: [String: Any]?
+        if safari.isExtension {
+            var tries = 0
+            while reply == nil {
+                guard let t = tabs[id] else { throw gone(id) }
+                let r = try ext.cookies(t.pos, expect(t), m)
+                if r["no"] != nil { break }
+                if r["stale"] == nil { reply = r; break }
+                tries += 1
+                if tries == 3 { throw ToolError("Tab t\(id) keeps changing; run `safari tabs`.") }
+                try sync()
+            }
+        }
+        let full = reply != nil
+        if reply == nil {
+            if m["domain"] != nil { throw ToolError("--domain needs the Safari CLI Bridge extension; without it only the page's own cookies are visible") }
+            let v = try page("cookies", a.merging(m) { $1 }, ["act", "name", "value", "list"])
+            reply = (try? JSONSerialization.jsonObject(with: Data(v.utf8))) as? [String: Any] ?? [:]
+        }
+        let host = URL(string: tabs[id]?.url ?? "")?.host ?? "this site"
+        let partial = full ? "" : "\n\u{1E}without the Safari CLI Bridge extension HttpOnly cookies are not visible"
+        if act == "load" { return "set \(reply?["ok"] as? Int ?? 0) cookies" + partial }
+        let list = reply?["ok"] as? [[String: Any]] ?? []
+        if act == "dump" {
+            let d = try JSONSerialization.data(withJSONObject: list, options: [.sortedKeys, .withoutEscapingSlashes])
+            return String(decoding: d, as: UTF8.self) + partial
+        }
+        let name = a["name"] as? String
+        func line(_ c: [String: Any]) -> String {
+            var v = c["value"] as? String ?? ""
+            if v.count > 120 { v = v.prefix(119) + "…" }
+            var s = "\(c["name"] as? String ?? "") = \(v)"
+            if let d = c["domain"] as? String { s += "  \(d)\(c["path"] as? String ?? "/")" }
+            if c["httpOnly"] as? Bool == true { s += " httpOnly" }
+            if c["secure"] as? Bool == true { s += " secure" }
+            if let e = c["exp"] as? Double {
+                let f = DateFormatter()
+                f.dateFormat = "yyyy-MM-dd"
+                s += " until " + f.string(from: Date(timeIntervalSince1970: e))
+            } else if c["domain"] != nil { s += " session" }
+            return s
+        }
+        switch act {
+        case "set":
+            guard let c = list.first else { throw ToolError("Safari did not set cookie \(name ?? "")") }
+            return "set " + line(c)
+        case "del", "clear":
+            if list.isEmpty, let name { throw ToolError("no cookie \(name) on \(host)" + partial.replacingOccurrences(of: "\n\u{1E}", with: "; ")) }
+            return (act == "del" ? "deleted \(name ?? "")" : "cleared \(list.count) cookie\(list.count == 1 ? "" : "s") of \(host)") + partial
+        default:
+            if let name {
+                guard let c = list.first else { throw ToolError("no cookie \(name) on \(host)" + partial.replacingOccurrences(of: "\n\u{1E}", with: "; ")) }
+                let v = c["value"] as? String ?? ""
+                let max = a["max_chars"] as? Int ?? 6000
+                return max > 0 && v.count > max ? String(v.prefix(max)) + "\n\u{1E}… \(v.count - max) more chars (--max 0 for all)" : v
+            }
+            if list.isEmpty { return "(no cookies on \(host))" + partial }
+            return list.map(line).joined(separator: "\n") + "\n\u{1E}\(list.count) cookie\(list.count == 1 ? "" : "s") on \(a["domain"] as? String ?? host)" + partial
+        }
     }
 
     /// After a load in tab `id`: routes live in the site's sessionStorage, so a new site needs them again.

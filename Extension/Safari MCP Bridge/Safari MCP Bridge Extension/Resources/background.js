@@ -135,6 +135,43 @@ const ops = {
     if (rules.length) blockRules.set(t.id, rules.map((r) => r.id)); else blockRules.delete(t.id);
     return { ok: rules.length };
   },
+  // Cookies of the tab's site (safari cookies, safari state). Reply items: name, value, domain,
+  // path, secure, httpOnly, sameSite, exp (seconds; absent for session cookies).
+  async cookies(m) {
+    const api = browser.cookies;
+    if (!api || !api.getAll) return { no: 1 };
+    const t = await tabAt(m); if (!t) return { stale: 1 };
+    if (!/^https?:/.test(t.url || '')) return { err: 'cookies need an http(s) page' };
+    const store = t.cookieStoreId ? { storeId: t.cookieStoreId } : {};
+    const all = async () => {
+      const q = m.domain ? { domain: m.domain } : { url: t.url };
+      return (await api.getAll(Object.assign(q, store))).filter((c) => !m.name || c.name === m.name);
+    };
+    const out = (c) => ({ name: c.name, value: c.value, domain: c.domain, path: c.path, secure: c.secure, httpOnly: c.httpOnly, sameSite: c.sameSite, ...(c.session || c.expirationDate == null ? {} : { exp: c.expirationDate }) });
+    const urlOf = (c) => (c.secure ? 'https://' : 'http://') + String(c.domain || new URL(t.url).hostname).replace(/^\./, '') + (c.path || '/');
+    const put = (c) => {
+      const d = { url: c.domain ? urlOf(c) : t.url, name: c.name, value: String(c.value), path: c.path || '/', ...store };
+      if (c.domain && c.domain.startsWith('.')) d.domain = c.domain;
+      for (const k of ['secure', 'httpOnly', 'sameSite']) if (c[k] != null) d[k] = c[k];
+      if (c.exp != null) d.expirationDate = c.exp;
+      return api.set(d);
+    };
+    if (m.act === 'set') {
+      const old = (await all())[0];
+      const c = await put(Object.assign(old ? out(old) : {}, { name: m.name, value: m.value }));
+      return { ok: c ? [out(c)] : [] };
+    }
+    if (m.act === 'load') {
+      let n = 0;
+      for (const c of m.list || []) { try { if (await put(c)) n++; } catch (e) { /* skip */ } }
+      return { ok: n };
+    }
+    const list = await all();
+    if (m.act === 'del' || m.act === 'clear') {
+      for (const c of list) await api.remove({ url: urlOf(c), name: c.name, ...store });
+    }
+    return { ok: list.map(out) };
+  },
   async resize(m) { await browser.windows.update(m.w, { width: m.width, height: m.height }); return { ok: 1 }; },
   async shot(m) { return { ok: await browser.tabs.captureVisibleTab(m.w, { format: 'jpeg', quality: 85 }) }; },
 };

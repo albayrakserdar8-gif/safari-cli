@@ -15,6 +15,7 @@
     "webRequest",
     "nativeMessaging",
     "declarativeNetRequest",
+    "cookies",
     "<all_urls>"
   ],
   "content_scripts": [

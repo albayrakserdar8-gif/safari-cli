@@ -100,6 +100,11 @@ parses '"action":"check","ref":"e6","tab":"t5","text":"true"' t5 check e6
 parses '"action":"check","selector":"#agree","tab":"t5","text":"false"' t5 uncheck --sel '#agree'
 check "check needs an element" test "$(code t3 check)" = 2
 check "check does not take --os" test "$(code t3 check e4 --os)" = 2
+parses '"act":"list","tab":"t5"},"out":null,"tool":"cookies"' t5 cookies
+parses '"act":"set","name":"k","tab":"t5","value":"v"},"out":null,"tool":"cookies"' t5 cookies k v
+parses '"act":"del","name":"k","tab":"t5"},"out":null,"tool":"cookies"' t5 cookies --delete k
+parses '"act":"clear","domain":".x.com","tab":"t5"},"out":null,"tool":"cookies"' t5 cookies --clear --domain .x.com
+check "cookies set with --domain is a usage error" test "$(code t3 cookies k v --domain x.com)" = 2
 
 out=$("$BIN" status 2>&1)
 check "daemon starts and answers status" grep -q "daemon pid" <<<"$out"

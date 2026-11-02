@@ -38,6 +38,7 @@ enum CLI {
         ("route", "[T] route PATTERN [--status N] [--body TEXT|@FILE] [--type CT] [--block] | route --list   mock fetch/XHR"),
         ("unroute", "[T] unroute [PATTERN]         remove one route, or all"),
         ("storage", "[T] storage [local|session] [KEY [VALUE]] [--delete KEY] [--clear]   list, get or set web storage"),
+        ("cookies", "[T] cookies [NAME [VALUE]] [--domain D] [--delete NAME] [--clear] [--max N]   list, get or set the site's cookies"),
         ("drop", "[T] drop R FILE… [--text T]   drop files (or text) onto a drop zone"),
         ("record", "T record | T record --stop     record what the user does in the tab; --stop prints it as commands"),
         ("show", "T show                        make the tab visible"),
@@ -64,7 +65,7 @@ enum CLI {
         "--offset": "offset", "--xy": "xy", "--to": "to", "--answer": "answer", "--text": "text", "--timeout": "timeout",
         "--region": "region", "--width": "max_width", "-p": "pattern", "--pattern": "pattern",
         "--id": "id", "--limit": "limit", "-o": "out", "--rows": "rows", "--next": "next", "--pages": "pages",
-        "--delay": "delay", "--for": "secs", "--status": "status", "--body": "body", "--type": "ctype", "--delete": "del",
+        "--delay": "delay", "--for": "secs", "--status": "status", "--body": "body", "--type": "ctype", "--delete": "del", "--domain": "domain",
     ]
     private static let flags: [String: String] = [
         "--all": "all", "--full": "full", "--diff": "diff", "--os": "os", "--gone": "gone",
@@ -77,7 +78,7 @@ enum CLI {
         let page: Set = ["query", "ref", "selector", "max_chars", "offset", "diff"]
         let el: Set = ["ref", "selector", "xy", "os"]
         return [
-            "tabs": [], "open": ["private", "window", "idonly", "delay"], "downloads": ["wait", "timeout"], "status": [], "stop": [], "show": [], "close": ["agents"], "resize": [], "route": ["status", "body", "ctype", "block", "list"], "unroute": [], "storage": ["del", "clear", "max_chars"], "drop": ["ref", "selector", "xy", "text"], "record": ["stop"], "locator": ["ref", "selector", "xy"], "highlight": ["ref", "selector", "xy", "secs", "hide"], "go": ["delay"],
+            "tabs": [], "open": ["private", "window", "idonly", "delay"], "downloads": ["wait", "timeout"], "status": [], "stop": [], "show": [], "close": ["agents"], "resize": [], "route": ["status", "body", "ctype", "block", "list"], "unroute": [], "storage": ["del", "clear", "max_chars"], "cookies": ["del", "clear", "max_chars", "domain"], "drop": ["ref", "selector", "xy", "text"], "record": ["stop"], "locator": ["ref", "selector", "xy"], "highlight": ["ref", "selector", "xy", "secs", "hide"], "go": ["delay"],
             "read": page.union(["all", "full", "out"]), "text": page.union(["out"]), "links": page.union(["out"]),
             "table": ["ref", "selector", "rows", "json", "max_chars", "offset", "out"],
             "crawl": ["selector", "rows", "json", "next", "pages", "delay", "out"], "rate": [],
@@ -257,6 +258,22 @@ enum CLI {
             if pos.count == 2 { args["value"] = pos[1] }
             try int("max_chars")
             return ("storage", args, nil)
+        case "cookies":
+            if let d = o["domain"] { args["domain"] = d }
+            if f.contains("clear") || o["del"] != nil {
+                try noMore()
+                if f.contains("clear") && o["del"] != nil { throw bad("give --delete NAME or --clear, not both") }
+                args["act"] = f.contains("clear") ? "clear" : "del"
+                if let d = o["del"] { args["name"] = d }
+                return ("cookies", args, nil)
+            }
+            guard pos.count <= 2 else { throw bad("cookies takes a name and a value (quote values with spaces)") }
+            if pos.count == 2, args["domain"] != nil { throw bad("--domain only filters the list; set a cookie from a tab on its site") }
+            if let n = pos.first { args["name"] = n }
+            if pos.count == 2 { args["value"] = pos[1] }
+            args["act"] = pos.count == 2 ? "set" : "list"
+            try int("max_chars")
+            return ("cookies", args, nil)
         case "drop":
             try target(required: true)
             if let t = o["text"] { args["dtext"] = t }

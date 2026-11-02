@@ -2,9 +2,9 @@
 import PackageDescription
 
 let package = Package(
-    name: "safari-mcp",
+    name: "safari-cli",
     platforms: [.macOS(.v14)],
     targets: [
-        .executableTarget(name: "safari-mcp", path: "Sources/safari-mcp")
+        .executableTarget(name: "safari", path: "Sources/safari")
     ]
 )

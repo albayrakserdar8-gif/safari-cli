@@ -1,8 +1,8 @@
-# safari-mcp
+# safari-cli
 
 [English](README.md)
 
-Claude Code'un senin açık Safari'ni, açık oturumlarınla kullanmasını sağlayan yerel bir MCP sunucusu. Tek bir Swift ikili dosyası, bağımlılığı yok.
+Kod ajanlarının (Claude Code, opencode, kabuğu olan herhangi bir ajan) senin açık Safari'ni, açık oturumlarınla kullanmasını sağlayan bir `safari` komutu. Tek bir Swift ikili dosyası, bağımlılığı yok. [safari-mcp](https://github.com/sadopc/safari-mcp)'den çatallandı: aynı motor, MCP sunucusu yerine bir CLI ve bir skill.
 
 Kuruluysa isteğe bağlı **Safari MCP Bridge** eklentisi üzerinden, değilse Apple Events üzerinden çalışır.
 
@@ -12,44 +12,54 @@ Anthropic ile bağlantısı olmayan bağımsız bir projedir. Claude in Chrome y
 
 Giriş yaptığın sitelerde günlük işler için uygundur: okuma, arama, form doldurma, gezinme. Web uygulaması testi, CI ve tekrarlanabilir otomasyon için Playwright (ya da Apple'ın `safaridriver`'ı) daha doğru araçtır. Sayfalarda işlem yapmak yerine kaynak gösteren araştırılmış cevaplar istiyorsan [Vane](https://github.com/ItzCrazyKns/Vane) gibi bir arama motoru daha uygundur.
 
-| | safari-mcp | Playwright | Vane |
+| | safari-cli | Playwright | Vane |
 |---|---|---|---|
-| Ne | Safari'ni süren MCP sunucusu | Tarayıcı otomasyon kütüphanesi | Kendi sunucunda çalışan yapay zekâ cevap motoru |
-| Kim yönetir | Claude Code | Senin betiklerin ya da Playwright MCP üzerinden bir ajan | Kendi LLM akışı; web arayüzünden ya da API'den |
+| Ne | Safari'ni süren komut satırı aracı | Tarayıcı otomasyon kütüphanesi | Kendi sunucunda çalışan yapay zekâ cevap motoru |
+| Kim yönetir | Claude Code, opencode, kabuğu olan her ajan | Senin betiklerin ya da Playwright MCP üzerinden bir ajan | Kendi LLM akışı; web arayüzünden ya da API'den |
 | Tarayıcı | Senin açık Safari'n | Kendi başlattığı ayrı tarayıcı | Başsız Chromium (Playwright ile), yalnızca sayfa okumak için |
 | Açık oturumların | Var | Yalnızca kayıtlı profil ya da oturum durumuyla | Yok |
 | Tıklama, yazma, form | Var | Var | Yok, yalnızca okur |
 | İletişim kutusu, dosya yükleme, iframe | Var (iframe eklentiyle) | Var | — |
 | Ağ müdahalesi | Yok (yalnızca kayıt) | Var | — |
 | Kaynak gösteren web araması | Açtığı siteler üzerinden | Yok | Var (SearxNG) |
-| LLM | Claude Code'unki | Kendi LLM'i yok | Herhangi biri: Ollama, OpenAI, Claude, Gemini, Groq |
+| LLM | Ajanınki | Kendi LLM'i yok | Herhangi biri: Ollama, OpenAI, Claude, Gemini, Groq |
 | Kurulum | Swift derlemesi, isteğe bağlı Safari eklentisi | npm ya da pip paketi | Docker imajı (SearxNG dahil) |
 | Platform | macOS 14+ | macOS, Windows, Linux | Docker çalışan her yer |
 | En uygun iş | Giriş yaptığın sitelerde günlük işler | Test, CI, tekrarlanabilir otomasyon | Kaynak gösteren, gizli araştırma soruları |
+
+## Neden MCP yerine CLI
+
+- Çıktı kabukta süzülüp kaydedilebilir (`| grep`, `| head`, `> sayfa.md`); uzun sayfaların konuşmaya girmesi gerekmez.
+- Bilinen adımlar `&&` ile tek komutta çalışır; döngüler her sonucu modele göstermeden sayfaları tarar.
+- Sunucu kaydı yok: komut çalıştırabilen her ajan kullanabilir, yeniden derleme bir sonraki komutta devreye girer.
+- Kullanım kılavuzu yalnızca tarayıcı işlerinde yüklenen bir skill'dedir.
 
 ## Kurulum
 
 macOS 14 ya da üstü ve Command Line Tools gerekir (Xcode yalnızca eklenti için).
 
 ```bash
-git clone https://github.com/sadopc/safari-mcp.git
-cd safari-mcp && swift build -c release
-claude mcp add --scope user safari -- "$PWD/.build/release/safari-mcp"
+git clone https://github.com/sadopc/safari-cli.git
+cd safari-cli && swift build -c release
+ln -s "$PWD/.build/release/safari" /opt/homebrew/bin/safari     # ya da PATH'teki herhangi bir klasör
 ```
 
-Klasörü taşırsan `claude mcp add` komutunu yeniden çalıştır. Yeniden derledikten sonra yeni sürüm için yeni bir Claude Code oturumu aç.
+Arka plandaki bir süreç (daemon), sekme kimliklerini ve eklenti bağlantısını komutlar arasında tutar. İlk `safari` komutu onu başlatır (yaklaşık 0,2 sn), sonraki komutlar birkaç milisaniye sürer ve 30 dakika boşta kalınca kapanır. Yeniden derledikten sonraki ilk komut onu yeni sürümle yeniden başlatır. `safari status` durumunu gösterir, `safari stop` durdurur.
 
-### Skill (önerilen)
+### Skill
 
-`Skill/safari-browser/SKILL.md`, Claude'a araçları doğru kullanmayı öğretir: kendi sekmesinde çalışmak, ekran görüntüsü yerine `read` kullanmak, gönderme, satın alma ya da silmeden önce sormak.
+`Skill/safari-browser/SKILL.md`, ajana komutları ve kuralları öğretir: kendi sekmesinde çalışmak, ekran görüntüsü yerine `read` kullanmak, gönderme, satın alma ya da silmeden önce sormak.
 
 ```bash
-ln -s "$PWD/Skill/safari-browser" ~/.claude/skills/safari-browser
+ln -s "$PWD/Skill/safari-browser" ~/.claude/skills/safari-browser            # Claude Code
+ln -s "$PWD/Skill/safari-browser" ~/.config/opencode/skills/safari-browser   # opencode
 ```
+
+Claude Code'da `~/.claude/settings.json` içindeki `permissions.allow` listesine `"Bash(safari:*)"` eklersen her komutta izin sorulmaz.
 
 ### Safari eklentisi (önerilen)
 
-Eklentiyle Otomasyon ve "Allow JavaScript from Apple Events" izinleri gerekmez, iframe'ler okunur, HTTP durum kodu (404) bildirilir, ağ kaydı sayfa açıldığı anda başlar ve görünür sekmenin ekran görüntüsü için Ekran Kaydı izni gerekmez. Eklenti yoksa sunucu Apple Events'e döner.
+Eklentiyle Otomasyon ve "Allow JavaScript from Apple Events" izinleri gerekmez, iframe'ler okunur, HTTP durum kodu (404) bildirilir, ağ kaydı sayfa açıldığı anda başlar ve görünür sekmenin ekran görüntüsü için Ekran Kaydı izni gerekmez. Eklenti yoksa safari Apple Events'e döner.
 
 Derlemek için Xcode gerekir:
 
@@ -62,7 +72,7 @@ Derlemek için Xcode gerekir:
    `--schedule`, eklentiyi her hafta yeniden imzalayan bir görev ekler; ücretsiz hesap imzalarının süresi dolar.
 4. Safari > Ayarlar > Uzantılar'da **Safari MCP Bridge**'i aç ve her web sitesinde izin ver. Gizli sekmeler için "Özel Dolaşımda İzin Ver"i de aç.
 
-Sunucu ve eklenti `127.0.0.1` üzerinden (47391–47399 portları) konuşur ve `~/.config/safari-mcp/token` dosyasındaki anahtarla birbirini doğrular; başka sayfalar ya da yerel programlar bağlanamaz.
+Daemon ve eklenti `127.0.0.1` üzerinden (47391–47399 portları) konuşur ve `~/.config/safari-mcp/token` dosyasındaki anahtarla birbirini doğrular; başka sayfalar ya da yerel programlar bağlanamaz. Eklenti safari-mcp'nin kullandığıyla aynıdır; ikisi aynı anda kurulu olabilir.
 
 Safari eklentileri `file://` sayfalarına sokmaz; bu sayfalarda hep Apple Events kullanılır.
 
@@ -72,40 +82,43 @@ Safari eklentileri `file://` sayfalarına sokmaz; bu sayfalarda hep Apple Events
 |---|---|---|---|
 | Safari eklentisi, her web sitesinde | Her şey | Gerekli | — |
 | Otomasyon (Safari'yi denetleme) | Her şey | Gerekmez | Gerekli, ilk kullanımda sorulur |
-| Safari > Ayarlar > Geliştirici > "Allow JavaScript from Apple Events" | `tabs` dışındaki araçlar | Gerekmez | Gerekli |
-| Ekran Kaydı | `screenshot` | Yalnızca sekme ekranda değilken | Gerekli |
-| Erişilebilirlik | `os: true`, yerel iletişim kutuları, tam ekran görüntüsü kırpma | İsteğe bağlı | İsteğe bağlı; gizli pencere için gerekli |
+| Safari > Ayarlar > Geliştirici > "Allow JavaScript from Apple Events" | `tabs` dışındaki her şey | Gerekmez | Gerekli |
+| Ekran Kaydı | `shot` | Yalnızca sekme ekranda değilken | Gerekli |
+| Erişilebilirlik | `--os`, yerel iletişim kutuları, tam ekran görüntüsü kırpma | İsteğe bağlı | İsteğe bağlı; gizli pencere için gerekli |
 
-Geliştirici sekmesi yoksa Ayarlar > Gelişmiş > "Web geliştiricileri için özellikleri göster"i aç. "Allow JavaScript from Apple Events", Safari'yi denetleme izni olan her uygulama için geçerlidir.
+Bu izinler ajanı çalıştıran uygulamaya (terminaline) verilir. Geliştirici sekmesi yoksa Ayarlar > Gelişmiş > "Web geliştiricileri için özellikleri göster"i aç. "Allow JavaScript from Apple Events", Safari'yi denetleme izni olan her uygulama için geçerlidir.
 
 ## Kullanım
 
-Claude Code'a doğrudan söylemen yeterli:
+Ajana doğrudan söylemen yeterli:
 
 - "Safari'de açık sekmelerimi listele."
 - "Wikipedia'da Boğaziçi Köprüsü'nü ara, açılış yılını söyle."
 - "Bu sayfadaki formu şu bilgilerle doldur ama gönderme."
 
-## Araçlar
+## Komutlar
 
-| Araç | İş |
+`safari help` hepsini listeler. `T` bir sekme kimliği (`t3`), `R` `read`'den gelen bir ref'tir (`e12`).
+
+| Komut | İş |
 |---|---|
-| `tabs` | Sekmeleri listeler, açar (gizli de), kapatır, seçer |
-| `navigate` | URL'ye gider ya da `back` / `forward` / `reload`; yüklenmeyi bekler |
-| `read` | Sayfayı okur: etkileşimli öğeler (varsayılan), `all`, `text` (markdown), `links`; `query` ile arama; `diff` ile yalnızca değişen |
-| `act` | `click`, `dblclick`, `hover`, `type`, `fill`, `select`, `key`, `scroll`, `wait`, `upload`, `dialog` |
-| `js` | Sayfada JavaScript çalıştırır (async işlev gövdesi, 15 sn sınırı) |
-| `screenshot` | Görünüm alanının, bir öğenin ya da bölgenin JPEG görüntüsü |
-| `logs` | Konsol ve ağ kayıtları; `id` ile yanıt gövdesi |
-| `batch` | Birden çok çağrıyı tek turda çalıştırır |
+| `tabs`, `open URL [--private]`, `T show`, `T close` | Sekmeleri listeler, (arka planda) açar, gösterir, kapatır |
+| `T go URL\|back\|forward\|reload` | Yükler ve bekler |
+| `T read`, `T text`, `T links` | Ref'li öğeler, markdown olarak sayfa, bağlantılar; `-q` ile arama, `--diff` ile yalnızca değişen |
+| `T click R`, `dblclick`, `hover`, `fill`, `type`, `select`, `key`, `scroll`, `wait`, `upload`, `dialog` | Sayfada işlem yapar |
+| `T js KOD` | Sayfada JavaScript çalıştırır (async işlev gövdesi, 15 sn sınırı; `-` stdin'den okur) |
+| `T shot` | Görünüm alanının, bir öğenin ya da bölgenin JPEG'i; dosya yolunu yazar |
+| `T logs` | Konsol ve ağ kayıtları; `--id` ile yanıt gövdesi |
+
+Sonuçlar stdout'a gider; hatalar stderr'e, çıkış kodu 1 ile (yanlış kullanımda 2).
 
 Nasıl davranır:
 
-- **Ref'ler.** `read` her öğeye `e12` gibi bir ref verir, `act` bunu kullanır. Ref'ler yalnızca o sayfa için geçerlidir.
-- **Sekmeler.** Sekmeler `t3` gibi kalıcı kimlikler alır. Safari her işlemden önce sekmenin hâlâ beklenen sekme olduğunu doğrular; sunucu yanlış sekmede işlem yapmaz. `tab` verilmeyen çağrılar son kullanılan sekmeye gider; yeni sekmeler arka planda açılır. `tabs new private:true` gizli pencere açar (sonraki gizli sekmeler ona eklenir); `tabs` bu sekmeleri `(private)` diye işaretler.
+- **Ref'ler.** `read` her öğeye `e12` gibi bir ref verir, işlemler bunu kullanır. Ref'ler yalnızca o sayfa için geçerlidir.
+- **Sekmeler.** Sekmeler `t3` gibi kalıcı kimlikler alır. Safari her işlemden önce sekmenin hâlâ beklenen sekme olduğunu doğrular; safari yanlış sekmede işlem yapmaz. Sekme kimliği verilmeyen komutlar son kullanılan sekmeye gider; yeni sekmeler arka planda açılır. `open --private` gizli pencere açar (sonraki gizli sekmeler ona eklenir); `tabs` bu sekmeleri `(private)` diye işaretler.
 - **Sonuçlar.** İşlemler sayfa yüklenmesini bekler ve sayfa değişince `→ başlık | adres` bildirir. Yeni beliren metni, başarısız istekleri (4xx/5xx) ve değişen diğer alanları da yazar.
-- **Girdi.** Tıklama ve yazma varsayılan olarak sayfa içi olaylardır: Safari arka planda kalır, imleç sende kalır. `os: true`, sayfa içi olayları yok sayan siteler için gerçek fare/klavye olayı gönderir ve Safari'yi kısa süre öne getirir.
-- **İletişim kutuları.** `alert` onaylanır; `confirm`/`prompt`, önceden `act dialog` ile yanıt verilmediyse reddedilir. Her biri sonuçta bildirilir. Yalnızca sunucunun çalıştığı sekmeler etkilenir; kendi gezinmende kutular normal çıkar.
+- **Girdi.** Tıklama ve yazma varsayılan olarak sayfa içi olaylardır: Safari arka planda kalır, imleç sende kalır. `--os`, sayfa içi olayları yok sayan siteler için gerçek fare/klavye olayı gönderir ve Safari'yi kısa süre öne getirir.
+- **İletişim kutuları.** `alert` onaylanır; `confirm`/`prompt`, önceden `dialog` ya da `click --answer` ile yanıt verilmediyse reddedilir. Her biri sonuçta bildirilir. Yalnızca safari'nin çalıştığı sekmeler etkilenir; kendi gezinmende kutular normal çıkar.
 - **Ekran görüntüsü.** Safari başka bir masaüstündeyse ya da tam ekrandaysa yaklaşık bir saniye öne getirilir, sonra önceki uygulamaya dönülür.
 
 ## Kaynak kullanımı
@@ -114,40 +127,40 @@ Tek bir Mac'te ölçüldü:
 
 | | |
 |---|---|
-| Araç şemaları | yaklaşık 875 token |
+| Skill | yaklaşık 2.100 token, yalnızca tarayıcı işlerinde yüklenir (MCP sürümü her oturumda yaklaşık 875 token araç şeması gönderiyordu, skill'i de ayrıca) |
 | Varsayılan `read` | yaklaşık 500 token (Wikipedia ana sayfa), 1.100 (Hacker News) |
-| Çağrı süresi | `read` 7–60 ms, `act` 170–470 ms, `screenshot` 0,9–2,1 sn |
+| Çağrı süresi | `read` 7–60 ms, işlemler 170–470 ms, `shot` 0,9–2,1 sn; komut başına yaklaşık 10 ms daha, daemon'u başlatan ilk komutta 0,2 sn |
 | Bellek | Boşta 9 MB, kullanımdan sonra yaklaşık 34 MB |
 | Boşta CPU | 0 |
 
-Her Claude Code oturumu kendi `safari-mcp` sürecini çalıştırır; süreç oturumla birlikte kapanır.
+Tek bir daemon bütün ajanlara ve oturumlara hizmet eder; 30 dakika boşta kalınca kapanır.
 
 ## Sınanma durumu
 
-Claude Haiku ajanlarının araçları yalnızca açıklamalarından kullanarak gerçek görevler yaptığı altı turda sınandı: Wikipedia, Hacker News, MDN, GitHub, DuckDuckGo, demo mağazalarda hesap açma, sepet ve ödeme (automationexercise, Toolshop/Angular, saucedemo/React, demowebshop), the-internet ve TodoMVC. Her turda bulunan hatalar düzeltildi; son turlarda bütün görevler, işlemler için `js` ya da `os: true`'ya başvurmadan doğru bitti ve en zor görevlerde çağrı sayısı yaklaşık yarıya indi.
+Sayfa motoru safari-mcp'de, Claude Haiku ajanlarının araçları yalnızca açıklamalarından kullanarak gerçek görevler yaptığı altı turda sınandı: Wikipedia, Hacker News, MDN, GitHub, DuckDuckGo, demo mağazalarda hesap açma, sepet ve ödeme (automationexercise, Toolshop/Angular, saucedemo/React, demowebshop), the-internet ve TodoMVC. Her turda bulunan hatalar düzeltildi; son turlarda bütün görevler, işlemler için `js` ya da `os: true`'ya başvurmadan doğru bitti ve en zor görevlerde çağrı sayısı yaklaşık yarıya indi. CLI katmanı yeni: test sayfasında eklentiyle ve Apple Events ile elle denendi, gerçek sitelerde ajan turlarında henüz denenmedi.
 
 Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenmedi.
 
 ## Sınırlar
 
 - Kapalı shadow DOM okunmaz. En çok 8 iframe okunur; eklentisiz yalnızca aynı kökenli ve CSP'si izin veren çerçeveler.
-- Bazı siteler sayfa içi olayları yok sayar; `hover` yalnızca okunabilen CSS `:hover` kurallarını taklit eder. Bu durumlarda `os: true` kullan.
+- Bazı siteler sayfa içi olayları yok sayar; `hover` yalnızca okunabilen CSS `:hover` kurallarını taklit eder. Bu durumlarda `--os` kullan.
 - Katı CSP'li sitelerde (GitHub, Gmail) eklenti `js`'i ayrı bir ortamda çalıştırır: DOM'u görür, sayfanın JavaScript değişkenlerini görmez.
 - HTTP durum kodu yalnızca eklentiyle bildirilir.
-- Eklentisiz modda kayıtlar sunucunun sayfaya ilk girdiği andan başlar; ondan önce açılan iletişim kutuları çağrıları 20 sn bekletir (Erişilebilirlik ile yanıtlanabilir).
-- Aynı sunucuyu paylaşan ajanlar, birden fazla yeni sekme açıkken `tab`'ı açıkça vermelidir.
-- Eklentisiz modda, bir sekme başka bir siteye giderken aynı anda sekme açılıp kapanırsa sekme kaybolabilir; sunucu tahmin etmek yerine hata döner.
+- Eklentisiz modda kayıtlar safari'nin sayfaya ilk girdiği andan başlar; ondan önce açılan iletişim kutuları çağrıları 20 sn bekletir (Erişilebilirlik ile yanıtlanabilir).
+- Ajanlar tek bir daemon'u paylaşır; birden fazla yeni sekme açıkken sekme kimliğini başa yazmalıdır.
+- Eklentisiz modda, bir sekme başka bir siteye giderken aynı anda sekme açılıp kapanırsa sekme kaybolabilir; safari tahmin etmek yerine hata döner.
 - `text` kipi bağlantı metinlerini ve tablo hücrelerini kırpar; karmaşık tablolarda düzen bozulabilir.
 - Tam tarayıcı denetimi (gerçek girdi, bütün ağ trafiği) Safari'nin Web Inspector protokolünü gerektirir; kendi Safari'nde bunu yalnızca Apple imzalı uygulamalar kullanabilir. Apple'ın `safaridriver --mcp`'si bunu sekmelerini ve çerezlerini görmeyen ayrı, temiz bir oturumda sunar.
 
 ## Geliştirme
 
 ```bash
-Tests/smoke.sh                                             # protokol testi, Safari izni gerekmez
+Tests/smoke.sh                                             # CLI ve daemon testi, Safari izni gerekmez
 (cd Tests && python3 -m http.server 8765 --bind 127.0.0.1)  # test sayfalarını sun
 ```
 
-Elle sınama için `http://127.0.0.1:8765/fixture.html`'i `tabs new` ile aç (form, iletişim kutuları, gecikmeli öğe, tablo, fetch, iframe).
+Elle sınama için `http://127.0.0.1:8765/fixture.html`'i `safari open` ile aç (form, iletişim kutuları, gecikmeli öğe, tablo, fetch, iframe).
 
 ## Lisans
 

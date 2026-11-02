@@ -41,10 +41,10 @@ enum PageAgent {
       // With the extension, wr is every request of the tab since it started loading (from webRequest).
       if(net&&a.wr){var all=a.wr,from0=a.new?Math.min(M.wrc||0,all.length):0,hid=0;M.wrc=all.length;
         var w=all.slice(from0).filter(function(l){var t=l.split(' ')[0];if(/^(xmlhttprequest|fetch|ping|beacon)$/.test(t))return false;if(!a.pattern&&STATIC.test(t)){hid++;return false}return true});
-        arr=w.concat(arr);if(hid)note='('+hid+' images/scripts/styles hidden; pass pattern to include them)\n'}
+        arr=w.concat(arr);if(hid)note='('+hid+' images/scripts/styles hidden; pass -p to include them)\n'}
       else if(net&&!M.nseen){M.nseen=1;var hid=0,res=performance.getEntriesByType('resource').filter(function(e){if(!a.pattern&&STATIC.test(e.initiatorType)){hid++;return false}return true});
         arr=res.map(function(e){return(e.initiatorType||'res')+' '+(e.responseStatus||'-')+' '+e.name+' '+Math.round(e.duration)+'ms'}).concat(arr);
-        note='(lines without an id were loaded before the server first touched this page; no bodies'+(hid?'; '+hid+' images/scripts/styles hidden, pass pattern to include them':'')+')\n'}
+        note='(lines without an id were loaded before safari first touched this page; no bodies'+(hid?'; '+hid+' images/scripts/styles hidden, pass -p to include them':'')+')\n'}
       else if(fresh)note='(capture starts now; earlier console output is not available)\n';
       if(!net&&a.level){var lv=a.level==='error'?/^(error|exception|rejection) /:/^(error|exception|rejection|warn) /;arr=arr.filter(function(l){return lv.test(l)})}
       if(a.pattern){var re;try{re=new RegExp(a.pattern,'i')}catch(e){}var p=a.pattern.toLowerCase();arr=arr.filter(function(l){return re?re.test(l):l.toLowerCase().indexOf(p)>=0})}
@@ -291,17 +291,17 @@ enum PageAgent {
         body=links(root||document.body,a.query);
       }else{
         var so={mode:a.mode,full:a.full,root:root};
-        body=scan(so).map(function(x){return x.s}).join('\n')||(a.full?'(nothing found)':'(nothing in viewport; scroll or pass full:true)');
+        body=scan(so).map(function(x){return x.s}).join('\n')||(a.full?'(nothing found)':'(nothing in viewport; scroll or use --full)');
       }
       if(!qm){
         var k=(a.mode||'interactive')+'|'+(a.ref||a.selector||'')+'|'+(a.full?1:0)+'|'+(a.query||''),old=S.last[k];S.last[k]=body;
         if(a.diff)body=old==null?'(first read of this page in this mode; full result)\n'+body:diff(old,body)}
       var off=a.offset||0,max=a.max_chars||6000,tot=body.length,cut=body.slice(off,off+max);
-      if(off+max<tot){var nl=cut.lastIndexOf('\n');if(nl>max*0.6)cut=cut.slice(0,nl);cut+='\n\u2026 '+(tot-off-cut.length)+' more chars; offset='+(off+cut.length)}
+      if(off+max<tot){var nl=cut.lastIndexOf('\n');if(nl>max*0.6)cut=cut.slice(0,nl);cut+='\n\u2026 '+(tot-off-cut.length)+' more chars; --offset '+(off+cut.length)}
       // Each chunk lists the URLs of the [n] links it contains.
       if(md0){var used=new Set();cut.replace(/\[(\d+)\]/g,function(_,n){used.add(+n)});cut+=foot(md0,used)}
       // Say what this read left out, so the model does not go looking for it with js.
-      if(so&&so.off)cut+='\n(+'+so.off+' controls off-screen: full:true or query)';
+      if(so&&so.off)cut+='\n(+'+so.off+' controls off-screen: --full or -q)';
       var de=document.documentElement;
       return(document.title?clip(document.title,80)+' | ':'')+location.href.slice(0,200)+' | scroll '+Math.round(scrollY)+'/'+Math.max(0,de.scrollHeight-innerHeight)+(document.readyState==='complete'?'':' | still loading')+'\n'+cut}
 
@@ -318,7 +318,7 @@ enum PageAgent {
         return{el:el,to:h&&inside(el,h)?h:el,x:x,y:y,r:r}}
       if(a.x!=null&&a.y!=null){el=deep(a.x,a.y);if(!el)throw new Error('nothing at '+a.x+','+a.y);return{el:el,to:el,x:a.x,y:a.y}}
       return null}
-    function need(a){var t=target(a);if(!t)throw new Error('pass ref, selector or x,y (find the element with read query:"…")'+(a.action==='click'&&a.text!=null?'; text on click only answers a dialog':''));return t}
+    function need(a){var t=target(a);if(!t)throw new Error('pass a ref, --sel or --xy (find the element with read -q "…")'+(a.action==='click'&&a.text!=null?'; --answer on click only answers a dialog':''));return t}
     function mev(el,type,x,y,more){var P=type.indexOf('pointer')===0,C=P&&window.PointerEvent?PointerEvent:MouseEvent;
       var i={bubbles:!/enter|leave/.test(type),cancelable:true,composed:true,view:window,clientX:x,clientY:y,screenX:x+screenX,screenY:y+screenY,button:0,buttons:/down/.test(type)?1:0,detail:1};
       if(P){i.pointerId=1;i.pointerType='mouse';i.isPrimary=true}
@@ -350,7 +350,7 @@ enum PageAgent {
       Object.getOwnPropertyDescriptor(p,'value').set.call(el,v);
       el.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertText',data:v}));el.dispatchEvent(new Event('change',{bubbles:true}))}
     function edit(a){var t=target(a),el=t?t.el:document.activeElement,fill=a.action==='fill',text=a.text==null?'':String(a.text);
-      if(!t&&(!el||el===document.body))throw new Error('nothing is focused; pass ref');
+      if(!t&&(!el||el===document.body))throw new Error('nothing is focused; pass a ref');
       var inp=el.tagName==='INPUT'||el.tagName==='TEXTAREA';
       if(!inp&&!el.isContentEditable)throw new Error(desc(el)+' is not editable');
       foc(el);
@@ -495,7 +495,7 @@ enum PageAgent {
         case'click':t=need(a);if(a.text!=null)try{mcall('policy',[String(a.text)])}catch(e){}if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.to.tagName)||t.to.isContentEditable)S.fx=1;if(S.hv)hov(t.to);press(t);return'clicked '+desc(t.el);
         case'dblclick':t=need(a);if(S.hv)hov(t.to);press(t);press(t,{detail:2});mev(t.to,'dblclick',t.x,t.y,{detail:2});return'double-clicked '+desc(t.el);
         case'hover':t=need(a);['pointerover','mouseover','pointerenter','mouseenter','pointermove','mousemove'].forEach(function(e){mev(t.to,e,t.x,t.y)});
-          var h=hov(t.to);return'hovered '+desc(t.el)+(h.n?' ('+h.n+' :hover rules':' (no :hover styles found')+(h.bad?'; '+h.bad+' stylesheets from other sites unreadable, os:true if nothing shows)':')');
+          var h=hov(t.to);return'hovered '+desc(t.el)+(h.n?' ('+h.n+' :hover rules':' (no :hover styles found')+(h.bad?'; '+h.bad+' stylesheets from other sites unreadable, --os if nothing shows)':')');
         case'type':return edit(a);
         case'fill':return a.fields?form(a.fields):edit(a);
         case'key':return key(a);

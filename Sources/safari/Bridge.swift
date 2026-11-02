@@ -198,5 +198,5 @@ final class Bridge {
 struct BridgeDown: Error {}
 
 func log(_ s: String) {
-    FileHandle.standardError.write(Data(("safari-mcp: " + s + "\n").utf8))
+    FileHandle.standardError.write(Data(("safari: " + s + "\n").utf8))
 }

@@ -2,57 +2,23 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
+struct ToolError: Error {
+    let msg: String
+    init(_ msg: String) { self.msg = msg }
+}
+
+enum Content {
+    case text(String)
+    case image(Data)
+}
+
+func jsonString(_ value: Any) -> String {
+    let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed, .withoutEscapingSlashes])
+    return data.flatMap { String(data: $0, encoding: .utf8) } ?? "null"
+}
+
 final class Tools {
-    // Descriptions are sent to the model every session; keep them terse.
-    static let defs: [[String: Any]] = [
-        tool("tabs", "List, open, close or select Safari tabs. Ids (t3) last while open; * = visible tab.", [
-            "action": ["type": "string", "enum": ["list", "new", "close", "select"]],
-            "url": str, "tab": str,
-            "private": ["type": "boolean"],
-        ]),
-        tool("navigate", "Load a URL, or back / forward / reload, and wait for the page.", ["url": str, "tab": str], ["url"]),
-        tool("read", "Read the page. interactive (default): visible controls with refs. all: adds headings and text. text: main content as markdown. links: link refs and URLs. query: find by words on the whole page, or filter text/links.", [
-            "mode": ["type": "string", "enum": ["interactive", "all", "text", "links"]],
-            "query": str, "ref": str, "selector": str,
-            "full": ["type": "boolean", "description": "include off-screen elements"],
-            "diff": ["type": "boolean", "description": "only changes since the last read"],
-            "max_chars": int, "offset": int, "tab": str,
-        ]),
-        tool("act", "Act on an element by ref (from read), selector or x,y viewport px. text: for type/fill/select, file paths for upload, accept, dismiss or a prompt reply for the next dialog (dialog, or the click that opens it; default dismiss). key: Enter, cmd+a. dy: scroll px. fields {ref: value} fills many. wait: until text/ref/selector appears (gone: disappears).", [
-            "action": ["type": "string", "enum": ["click", "dblclick", "hover", "type", "fill", "select", "key", "scroll", "wait", "upload", "dialog"]],
-            "ref": str, "x": num, "y": num, "text": str, "key": str, "dy": num,
-            "fields": ["type": "object"], "selector": str, "gone": ["type": "boolean"], "timeout": ["type": "number", "description": "seconds"],
-            "os": ["type": "boolean", "description": "real mouse/keyboard; use when the page ignores the default synthetic events"],
-            "tab": str,
-        ], ["action"]),
-        tool("js", "Run JavaScript in the page. Code is an async function body: use return. 15s limit.", [
-            "code": str, "max_chars": int, "tab": str,
-        ], ["code"]),
-        tool("screenshot", "JPEG of the viewport, an element (ref) or a region [x,y,w,h]. Costs far more than read.", [
-            "ref": str, "region": ["type": "array", "items": num], "max_width": int, "tab": str,
-        ]),
-        tool("logs", "Console or network lines since the server first touched the page. id (n4) shows a response body.", [
-            "kind": ["type": "string", "enum": ["console", "network"]],
-            "level": ["type": "string", "enum": ["error", "warn"]],
-            "new": ["type": "boolean", "description": "only lines since the last logs call"],
-            "pattern": str, "id": str, "limit": int, "clear": ["type": "boolean"], "tab": str,
-        ]),
-        tool("batch", "Run tool calls in order in one round trip; stops at the first error. tab is the default for steps.", [
-            "steps": ["type": "array", "items": ["type": "object", "properties": ["tool": str, "args": ["type": "object"]], "required": ["tool"]]],
-            "tab": str,
-        ], ["steps"]),
-    ]
-    static let names = Set(defs.compactMap { $0["name"] as? String })
-
-    private static let str: [String: Any] = ["type": "string"]
-    private static let int: [String: Any] = ["type": "integer"]
-    private static let num: [String: Any] = ["type": "number"]
-
-    private static func tool(_ name: String, _ desc: String, _ props: [String: Any], _ required: [String] = []) -> [String: Any] {
-        var schema: [String: Any] = ["type": "object", "properties": props]
-        if !required.isEmpty { schema["required"] = required }
-        return ["name": name, "description": desc, "inputSchema": schema]
-    }
+    static let names: Set = ["tabs", "navigate", "read", "act", "js", "screenshot", "logs"]
 
     /// A tab we know about. `id` is ours and stable; `pos` is where Safari has it now.
     private struct Tab {
@@ -107,6 +73,14 @@ final class Tools {
         counts = [:]
     }
 
+    /// One line for `safari status`; does not touch Safari.
+    func status() -> String {
+        let ext = bridge.ready() ? "extension connected (port \(bridge.port))"
+            : bridge.port == 0 ? "extension bridge off (ports 47391-47399 busy); Apple Events"
+            : "extension not connected (port \(bridge.port)); Apple Events"
+        return "daemon pid \(getpid()) · \(ext) · \(tabs.count) tabs tracked"
+    }
+
     /// Window server id for a tab's window, for capture, real input and native dialogs.
     private func cg(_ wid: Int) -> Int { safari.cgWindow(wid) ?? -1 }
     private var tabs: [Int: Tab] = [:]
@@ -120,7 +94,7 @@ final class Tools {
     /// Set once the default tab went away; from then on calls must name a tab rather than
     /// fall back to whatever the user happens to be looking at.
     private var defaultLost = false
-    /// Tabs opened with tabs new. Several agents can share this server; once more than one
+    /// Tabs opened with tabs new. Several agents can share this daemon; once more than one
     /// of these is open, "the last tab used" may be another agent's, so calls must name a tab.
     private var opened = Set<Int>()
     private let session = String(UInt32.random(in: 0...UInt32.max), radix: 36)
@@ -138,9 +112,9 @@ final class Tools {
             guard let id = current else { throw e }
             blocked.insert(id)
             if let t = tabs[id], t.visible, let msg = Capture.dialog(wid: cg(t.pos.wid), answer: nil) {
-                throw ToolError("The page shows a dialog: \(jsonString(clip(msg, 200))). Answer it with act dialog, text accept or dismiss.")
+                throw ToolError("The page shows a dialog: \(jsonString(clip(msg, 200))). Answer it with: safari t\(id) dialog accept (or dismiss).")
             }
-            throw ToolError(e.msg + " If so, act dialog (text accept or dismiss) answers it; it needs Accessibility permission and shows the tab.")
+            throw ToolError(e.msg + " If so, `safari t\(id) dialog accept` (or dismiss) answers it; it needs Accessibility permission and shows the tab.")
         }
         if !dialogs.isEmpty {
             let note = dialogs.map { "⚠ dialog " + $0 }.joined(separator: "\n")
@@ -170,7 +144,6 @@ final class Tools {
                 la["wr"] = wr
             }
             return [.text(try page("logs", la, ["kind", "level", "new", "pattern", "id", "limit", "clear", "wr"]))]
-        case "batch": return try batch(a)
         default: throw ToolError("Unknown tool \(name)")
         }
     }
@@ -185,7 +158,7 @@ final class Tools {
     private func clip(_ s: String, _ n: Int) -> String { s.count > n ? String(s.prefix(n - 1)) + "…" : s }
 
     private func gone(_ id: Int) -> ToolError {
-        ToolError("Tab t\(id) is gone (closed, or changed outside this session); run tabs for current ids.")
+        ToolError("Tab t\(id) is gone (closed, or changed outside this session); run `safari tabs` for current ids.")
     }
 
     private func sameHost(_ a: String, _ b: String) -> Bool {
@@ -291,7 +264,7 @@ final class Tools {
         if let raw = a["tab"] {
             let s = "\(raw)"
             guard let id = Int(s.hasPrefix("t") ? String(s.dropFirst()) : s) else {
-                throw ToolError("Bad tab id \(s); use an id from tabs, like t3.")
+                throw ToolError("Bad tab id \(s); use an id from `safari tabs`, like t3.")
             }
             if tabs[id] == nil { try sync() }
             guard tabs[id] != nil else {
@@ -305,15 +278,15 @@ final class Tools {
         }
         opened = opened.filter { tabs[$0] != nil }
         if opened.count > 1 {
-            throw ToolError("Several tabs opened here are open (\(opened.sorted().map { "t\($0)" }.joined(separator: ", "))); pass tab.")
+            throw ToolError("Several tabs opened here are open (\(opened.sorted().map { "t\($0)" }.joined(separator: ", "))); put the tab id first: safari t3 <verb>.")
         }
         if let c = current {
             guard tabs[c] != nil else { throw gone(c) }
             return c
         }
-        if defaultLost { throw ToolError("The default tab was closed; pass tab (ids from tabs).") }
+        if defaultLost { throw ToolError("The default tab was closed; put a tab id first (ids from `safari tabs`).") }
         try sync()
-        guard let front = order.first(where: { tabs[$0]?.visible == true }) else { throw ToolError("Safari has no open tab; use tabs new.") }
+        guard let front = order.first(where: { tabs[$0]?.visible == true }) else { throw ToolError("Safari has no open tab; use `safari open <url>`.") }
         current = front
         return front
     }
@@ -330,7 +303,7 @@ final class Tools {
             if try op(t.pos, expect(t)) { return }
             try sync()
         }
-        throw ToolError("Tab t\(id) keeps changing; run tabs.")
+        throw ToolError("Tab t\(id) keeps changing; run `safari tabs`.")
     }
 
     /// Runs JavaScript in the tab after Safari has verified it is the tab we mean.
@@ -344,7 +317,7 @@ final class Tools {
             }
             try sync()
         }
-        throw ToolError("Tab t\(id) keeps changing; run tabs.")
+        throw ToolError("Tab t\(id) keeps changing; run `safari tabs`.")
     }
 
     /// JavaScript without the URL check, for polling while a navigation is in flight.
@@ -411,7 +384,7 @@ final class Tools {
             if let e = env["e"] as? String { throw ToolError(e) }
             return env
         }
-        throw ToolError("Tab t\(id) keeps changing; run tabs.")
+        throw ToolError("Tab t\(id) keeps changing; run `safari tabs`.")
     }
 
     private func agentCall(_ id: Int, _ op: [String: Any]) throws -> [String: Any] {
@@ -469,7 +442,7 @@ final class Tools {
             o["fields"] = out
         }
         if frame == 0 { return 0 }
-        guard let list = frameIDs[tab], frame >= 1, frame <= list.count else { throw ToolError("frame f\(frame) is unknown; call read again") }
+        guard let list = frameIDs[tab], frame >= 1, frame <= list.count else { throw ToolError("frame f\(frame) is unknown; read again") }
         return list[frame - 1]
     }
 
@@ -607,7 +580,7 @@ final class Tools {
         var settled: String?
         while true {
             let t = Date().timeIntervalSince(start)
-            guard tabs[id] != nil else { return ("lost track of the tab while it was loading; run tabs", false) }
+            guard tabs[id] != nil else { return ("lost track of the tab while it was loading; run `safari tabs`", false) }
             if let s = peek(id) {
                 last = s
                 if s.ready == "old" {
@@ -708,14 +681,14 @@ final class Tools {
                 pos = try safari.newTab(in: nil, url: url)
             }
             try sync()
-            guard let id = (tabs.values.first { pos.xid != nil && $0.xid == pos.xid } ?? tabs.values.first { $0.pos == pos.ref })?.id else { throw ToolError("Opened a tab but lost track of it; run tabs.") }
+            guard let id = (tabs.values.first { pos.xid != nil && $0.xid == pos.xid } ?? tabs.values.first { $0.pos == pos.ref })?.id else { throw ToolError("Opened a tab but lost track of it; run `safari tabs`.") }
             if priv { tabs[id]?.priv = true }
             current = id
             defaultLost = false
             opened.insert(id)
             return "opened t\(id)" + (url.isEmpty ? "" : ": " + waitLoad(id, marked: false, from: "about:blank", timeout: 15, grace: 8).text)
         case "close":
-            guard a["tab"] != nil else { throw ToolError("close needs an explicit tab id.") }
+            guard a["tab"] != nil else { throw ToolError("close needs a tab id: safari t3 close.") }
             let previous = current, wasLost = defaultLost
             let id = try resolve(a)
             try guardedOp(id) { try safari.close($0, $1) }
@@ -740,7 +713,7 @@ final class Tools {
         if let r = safari.newPrivateWindow(url: url) { return r }
         let before = Set(try safari.listTabs().map(\.ref.wid))
         guard Capture.newPrivateWindow() else {
-            throw ToolError("Opening a private window needs Accessibility permission for the app running this server (System Settings > Privacy & Security > Accessibility).")
+            throw ToolError("Opening a private window needs Accessibility permission for the app running safari (your terminal) (System Settings > Privacy & Security > Accessibility).")
         }
         for _ in 0..<30 {
             usleep(100_000)
@@ -893,7 +866,7 @@ final class Tools {
     /// call timed out or the visible tab shows one; otherwise act dialog sets the agent's answer.
     private func nativeDialog(_ id: Int, _ answer: String) throws -> String? {
         guard Input.trusted(prompt: false), let t = tabs[id] else {
-            if blocked.contains(id) { throw ToolError("Answering this dialog needs Accessibility permission for the app running this server (System Settings > Privacy & Security > Accessibility), or answer it in Safari.") }
+            if blocked.contains(id) { throw ToolError("Answering this dialog needs Accessibility permission for the app running safari (your terminal) (System Settings > Privacy & Security > Accessibility), or answer it in Safari.") }
             return nil
         }
         if t.visible {
@@ -946,7 +919,7 @@ final class Tools {
     /// Files for an upload, base64-encoded for the page agent.
     private func files(_ list: String) throws -> [[String: String]] {
         let paths = list.split(separator: ",").map { NSString(string: $0.trimmingCharacters(in: .whitespaces)).expandingTildeInPath }
-        guard !paths.isEmpty else { throw ToolError("upload needs text: the file path(s)") }
+        guard !paths.isEmpty else { throw ToolError("upload needs the file path(s)") }
         var total = 0
         return try paths.map { p in
             guard let data = FileManager.default.contents(atPath: p) else { throw ToolError("cannot read \(p)") }
@@ -960,7 +933,7 @@ final class Tools {
 
     private func osAct(_ id: Int, _ action: String, _ a: [String: Any]) throws -> (String, [String: Any]) {
         guard Input.trusted(prompt: true) else {
-            throw ToolError("Real input needs Accessibility permission for the app running this server (System Settings > Privacy & Security > Accessibility). Grant it and retry, or drop os:true.")
+            throw ToolError("Real input needs Accessibility permission for the app running safari (your terminal) (System Settings > Privacy & Security > Accessibility). Grant it and retry, or drop --os.")
         }
         // Real input goes to whatever is on screen, so the tab is shown first. The user's
         // visible tab and front app are put back afterwards.
@@ -986,7 +959,7 @@ final class Tools {
         let g = env["v"] as? [String: Any] ?? [:]
         let iw = g["iw"] as? Double ?? 0, ih = g["ih"] as? Double ?? 0
         if let cover = g["cover"] as? String, ["click", "dblclick", "type", "fill"].contains(action) {
-            throw ToolError("\(g["d"] as? String ?? "target") is covered by \(cover) at its centre; not clicking. Close what covers it, or use x,y.")
+            throw ToolError("\(g["d"] as? String ?? "target") is covered by \(cover) at its centre; not clicking. Close what covers it, or use --xy.")
         }
         let view = try Capture.viewport(wid: wid, iw: iw, ih: ih).rect
         let z = iw > 0 ? Double(view.width) / iw : 1
@@ -995,7 +968,7 @@ final class Tools {
             point = CGPoint(x: Double(view.minX) + x * z, y: Double(view.minY) + y * z)
         }
         func needPoint() throws -> CGPoint {
-            guard let point else { throw ToolError("pass ref or x,y") }
+            guard let point else { throw ToolError("pass a ref or --xy x,y") }
             return point
         }
         let text = a["text"] as? String ?? ""
@@ -1016,7 +989,7 @@ final class Tools {
             let dy = (a["dy"] as? Double).map { Int($0) } ?? Int(ih * 0.8)
             Input.scroll(at: point ?? CGPoint(x: view.midX, y: view.midY), dy: dy)
         default:
-            throw ToolError("\(action) has no os mode; drop os:true.")
+            throw ToolError("\(action) has no os mode; drop --os.")
         }
         verifiedURL = verified
         usleep(150_000)  // let the event land before the user's tab comes back
@@ -1118,7 +1091,7 @@ final class Tools {
 
         // The extension captures the visible tab itself: no Screen Recording permission needed.
         if let jpeg = safari.capture(w), let shot = Capture.recode(jpeg, viewport: CGSize(width: iw, height: ih), region: region, maxWidth: maxWidth) {
-            return [.image(base64: shot.data.base64EncodedString(), mime: "image/jpeg"), .text(shotNote(shot.width, shot.height, k: shot.k, region: region))]
+            return [.image(shot.data), .text(shotNote(shot.width, shot.height, k: shot.k, region: region))]
         }
 
         let wid = cg(w)
@@ -1157,7 +1130,7 @@ final class Tools {
         let k = Double(crop.width) / z / Double(shot.width)
         var note = shotNote(shot.width, shot.height, k: k, region: origin.x != 0 || origin.y != 0 ? [origin.x, origin.y] : nil)
         if raised { note += "; Safari was brought forward briefly to capture" }
-        return [.image(base64: shot.data.base64EncodedString(), mime: "image/jpeg"), .text(note)]
+        return [.image(shot.data), .text(note)]
     }
 
     /// Tells the model how image pixels map to the viewport px that act expects.
@@ -1169,31 +1142,5 @@ final class Tools {
             if ox != 0 || oy != 0 { note += " + (\(Int(ox)),\(Int(oy)))" }
         }
         return note
-    }
-
-    private func batch(_ a: [String: Any]) throws -> [Content] {
-        guard let steps = a["steps"] as? [[String: Any]], !steps.isEmpty else { throw ToolError("steps required") }
-        var out: [Content] = []
-        func add(_ line: String) {
-            if case .text(let prev)? = out.last { out[out.count - 1] = .text(prev + "\n" + line) } else { out.append(.text(line)) }
-        }
-        for (i, step) in steps.enumerated() {
-            guard let name = step["tool"] as? String, name != "batch", Tools.names.contains(name) else {
-                add("[\(i + 1)] unknown tool; stopped")
-                break
-            }
-            var args = step["args"] as? [String: Any] ?? [:]
-            // A tab given to batch itself must not be dropped: steps would go to the last used tab.
-            if args["tab"] == nil, let t = a["tab"] { args["tab"] = t }
-            do {
-                for c in try call(name, args) {
-                    if case .text(let t) = c { add("[\(i + 1)] \(name): \(t)") } else { out.append(c) }
-                }
-            } catch let e as ToolError {
-                add("[\(i + 1)] \(name) failed: \(e.msg); stopped")
-                break
-            }
-        }
-        return out
     }
 }

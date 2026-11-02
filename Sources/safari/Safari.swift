@@ -179,7 +179,7 @@ final class Safari {
         script = NSAppleScript(source: Safari.source)!
         var err: NSDictionary?
         script.compileAndReturnError(&err)
-        if let err { FileHandle.standardError.write("safari-mcp: script compile failed: \(err)\n".data(using: .utf8)!) }
+        if let err { FileHandle.standardError.write("safari: script compile failed: \(err)\n".data(using: .utf8)!) }
     }
 
     private func fcc(_ s: String) -> UInt32 { s.utf8.reduce(0) { ($0 << 8) | UInt32($1) } }

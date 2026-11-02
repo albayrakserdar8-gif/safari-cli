@@ -93,8 +93,8 @@ for u in https://site/docs/a https://site/docs/b; do
 
 ## Troubleshooting
 
-- `safari status` shows whether the Safari MCP Bridge extension is connected; `safari stop` restarts the daemon on the next command.
-- "Safari blocks scripting… Allow JavaScript from Apple Events": the extension is not connected. Ask the user to enable Safari MCP Bridge in Safari > Settings > Extensions, or that Safari setting.
-- "The Safari MCP extension has no access to this site": the user must allow the extension on every website.
+- `safari status` shows whether the Safari CLI Bridge extension is connected; `safari stop` restarts the daemon on the next command.
+- "Safari blocks scripting… Allow JavaScript from Apple Events": the extension is not connected. Ask the user to enable Safari CLI Bridge in Safari > Settings > Extensions, or that Safari setting.
+- "The Safari CLI Bridge extension has no access to this site": the user must allow the extension on every website.
 - `file://` pages: the extension cannot reach them; serve them over HTTP.
 - Logs or dialog answering missing on a page loaded before the extension was enabled: reload that page.

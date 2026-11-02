@@ -4,7 +4,7 @@
 
 A `safari` command that lets coding agents (Claude Code, opencode, anything with a shell) drive your real Safari, with your logged-in sessions. One Swift binary, no dependencies. Forked from [safari-mcp](https://github.com/sadopc/safari-mcp): same engine, a CLI and a skill instead of an MCP server.
 
-It talks to Safari through the optional **Safari MCP Bridge** extension when it is installed, and through Apple Events otherwise.
+It talks to Safari through the optional **Safari CLI Bridge** extension when it is installed, and through Apple Events otherwise.
 
 Independent project, not affiliated with Anthropic. It was written because Claude in Chrome only works in Chromium browsers.
 
@@ -66,7 +66,7 @@ Building it needs Xcode:
    Extension/build.sh --schedule
    ```
    `--schedule` adds a weekly job that re-signs the extension, because free-account signatures expire.
-4. In Safari > Settings > Extensions, enable **Safari MCP Bridge** and allow it on every website. For private tabs, also turn on "Allow in Private Browsing".
+4. In Safari > Settings > Extensions, enable **Safari CLI Bridge** and allow it on every website. For private tabs, also turn on "Allow in Private Browsing".
 
 The daemon and extension talk over `127.0.0.1` (ports 47391–47399) and authenticate each other with a key in `~/.config/safari-mcp/token`, so other pages or local programs cannot connect. The extension is the same one safari-mcp uses; both can be installed at once.
 

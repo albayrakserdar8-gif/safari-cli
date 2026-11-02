@@ -4,7 +4,7 @@
 
 Kod ajanlarının (Claude Code, opencode, kabuğu olan herhangi bir ajan) senin açık Safari'ni, açık oturumlarınla kullanmasını sağlayan bir `safari` komutu. Tek bir Swift ikili dosyası, bağımlılığı yok. [safari-mcp](https://github.com/sadopc/safari-mcp)'den çatallandı: aynı motor, MCP sunucusu yerine bir CLI ve bir skill.
 
-Kuruluysa isteğe bağlı **Safari MCP Bridge** eklentisi üzerinden, değilse Apple Events üzerinden çalışır.
+Kuruluysa isteğe bağlı **Safari CLI Bridge** eklentisi üzerinden, değilse Apple Events üzerinden çalışır.
 
 Anthropic ile bağlantısı olmayan bağımsız bir projedir. Claude in Chrome yalnızca Chromium tarayıcılarda çalıştığı için yazıldı.
 
@@ -66,7 +66,7 @@ Derlemek için Xcode gerekir:
    Extension/build.sh --schedule
    ```
    `--schedule`, eklentiyi her hafta yeniden imzalayan bir görev ekler; ücretsiz hesap imzalarının süresi dolar.
-4. Safari > Ayarlar > Uzantılar'da **Safari MCP Bridge**'i aç ve her web sitesinde izin ver. Gizli sekmeler için "Özel Dolaşımda İzin Ver"i de aç.
+4. Safari > Ayarlar > Uzantılar'da **Safari CLI Bridge**'i aç ve her web sitesinde izin ver. Gizli sekmeler için "Özel Dolaşımda İzin Ver"i de aç.
 
 Daemon ve eklenti `127.0.0.1` üzerinden (47391–47399 portları) konuşur ve `~/.config/safari-mcp/token` dosyasındaki anahtarla birbirini doğrular; başka sayfalar ya da yerel programlar bağlanamaz. Eklenti safari-mcp'nin kullandığıyla aynıdır; ikisi aynı anda kurulu olabilir.
 

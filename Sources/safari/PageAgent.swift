@@ -570,7 +570,7 @@ enum PageAgent {
       var r=null,h=function(e){r=e.detail};document.addEventListener('__smcp_r',h);
       document.dispatchEvent(new CustomEvent('__smcp_q',{detail:JSON.stringify({op:op,a:args||[]})}));document.removeEventListener('__smcp_r',h);
       if(r==null)throw new Error('NOMAIN');r=JSON.parse(r);if(r.e)throw new Error(r.e);return r.v}
-    function logs(a){try{return mcall('logs',[a])}catch(e){if(e.message==='NOMAIN')return'(this page was loaded before the Safari MCP extension; reload it to capture logs)';throw e}}
+    function logs(a){try{return mcall('logs',[a])}catch(e){if(e.message==='NOMAIN')return'(this page was loaded before the Safari CLI Bridge extension; reload it to capture logs)';throw e}}
     S.mrun=function(id,code){try{return mcall('run',[id,code])}catch(e){return'nomain'}};
     function ser(v){if(v===undefined)return'undefined';if(v instanceof Element)return desc(v);if(typeof v==='function')return String(v).slice(0,200);
       try{var j=JSON.stringify(v,function(k,x){return x instanceof Element?desc(x):typeof x==='bigint'?String(x):x});return j===undefined?String(v):j}catch(e){return String(v)}}

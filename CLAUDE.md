@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`safari-cli`: a `safari` command that lets coding agents (Claude Code, opencode) drive the user's real Safari, used through the `safari-browser` skill. One Swift binary, no dependencies; it runs as a thin client plus an auto-started daemon. Forked from `safari-mcp` (remote `upstream`), whose MCP layer was replaced. It talks to Safari through the optional Safari MCP Bridge extension (`Extension/`) when that is connected, else through Apple Events. It is an independent project; do not copy code from Anthropic's Claude in Chrome extension, do not use its OAuth token or bridge, and keep "Claude" out of the product name.
+`safari-cli`: a `safari` command that lets coding agents (Claude Code, opencode) drive the user's real Safari, used through the `safari-browser` skill. One Swift binary, no dependencies; it runs as a thin client plus an auto-started daemon. Forked from `safari-mcp` (remote `upstream`), whose MCP layer was replaced. It talks to Safari through the optional Safari CLI Bridge extension (`Extension/`) when that is connected, else through Apple Events. It is an independent project; do not copy code from Anthropic's Claude in Chrome extension, do not use its OAuth token or bridge, and keep "Claude" out of the product name.
 
 `README.md` (English) and `README.tr.md` (Turkish) are the user-facing reference for setup, permissions and known limits. Keep them short and in step with each other.
 

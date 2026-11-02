@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds the Safari MCP Bridge app signed with the team chosen in Xcode (Signing & Capabilities)
+# Builds the Safari CLI Bridge app signed with the team chosen in Xcode (Signing & Capabilities)
 # and installs it in ~/Applications. `--schedule` also installs a weekly job that rebuilds and
 # re-signs it, since signatures from a free Apple ID expire.
 set -euo pipefail
@@ -18,9 +18,15 @@ xcodebuild -project "$proj" -scheme "Safari MCP Bridge" -configuration Release -
   -allowProvisioningUpdates DEVELOPMENT_TEAM="$team" CODE_SIGN_STYLE=Automatic -quiet build
 
 app="$dd/Build/Products/Release/Safari MCP Bridge.app"
-dest="$HOME/Applications/Safari MCP Bridge.app"
+dest="$HOME/Applications/Safari CLI Bridge.app"
 mkdir -p "$HOME/Applications"
 rm -rf "$dest.new" && ditto "$app" "$dest.new" && rm -rf "$dest" && mv "$dest.new" "$dest"
+# The same app under its earlier name would register the extension twice.
+old="$HOME/Applications/Safari MCP Bridge.app"
+if [ -d "$old" ]; then
+  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u "$old" || true
+  mv "$old" "$HOME/.Trash/Safari MCP Bridge $(date +%s).app"
+fi
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$dest"
 pluginkit -a "$dest/Contents/PlugIns/Safari MCP Bridge Extension.appex"
 echo "installed $dest (team $team)"

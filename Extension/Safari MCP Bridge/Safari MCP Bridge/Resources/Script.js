@@ -2,7 +2,7 @@ function show(enabled, useSettingsInsteadOfPreferences) {
     if (useSettingsInsteadOfPreferences) {
         document.getElementsByClassName('state-on')[0].innerText = "Safari MCP Bridge’s extension is currently on. You can turn it off in the Extensions section of Safari Settings.";
         document.getElementsByClassName('state-off')[0].innerText = "Safari MCP Bridge’s extension is currently off. You can turn it on in the Extensions section of Safari Settings.";
-        document.getElementsByClassName('state-unknown')[0].innerText = "You can turn on Safari MCP Bridge’s extension in the Extensions section of Safari Settings.";
+        document.getElementsByClassName('state-unknown')[0].innerText = "You can turn on Safari CLI Bridge’s extension in the Extensions section of Safari Settings.";
         document.getElementsByClassName('open-preferences')[0].innerText = "Quit and Open Safari Settings…";
     }
 

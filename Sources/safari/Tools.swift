@@ -414,7 +414,7 @@ final class Tools {
         func run(_ expr: String) throws -> String {
             guard aeFrame != 0 else { return try exec(id, expr) }
             let r = try exec(id, frameJS(aeFrame, "return " + expr))
-            if r == Tools.noFrame { throw ToolError("This frame cannot be reached without the Safari MCP extension (cross-origin, or the page blocks scripts).") }
+            if r == Tools.noFrame { throw ToolError("This frame cannot be reached without the Safari CLI Bridge extension (cross-origin, or the page blocks scripts).") }
             return r
         }
         for _ in 0..<4 {
@@ -601,7 +601,7 @@ final class Tools {
             }
             out += "\n--- frame \(pre) \(clip(f.url, 120))\n" + fixed.joined(separator: "\n")
         }
-        if unread > 0 { out += "\n(\(unread) iframe\(unread > 1 ? "s" : "") not read: \(safari.isExtension ? "the extension could not reach them" : "cross-origin or the page blocks scripts; needs the Safari MCP extension"))" }
+        if unread > 0 { out += "\n(\(unread) iframe\(unread > 1 ? "s" : "") not read: \(safari.isExtension ? "the extension could not reach them" : "cross-origin or the page blocks scripts; needs the Safari CLI Bridge extension"))" }
         return out
     }
 
@@ -807,7 +807,7 @@ final class Tools {
             }
         }
         throw ToolError(safari.isExtension
-            ? "Safari opened a private window, but the extension cannot see it: in Safari > Settings > Extensions, turn on Allow in Private Browsing for Safari MCP Bridge."
+            ? "Safari opened a private window, but the extension cannot see it: in Safari > Settings > Extensions, turn on Allow in Private Browsing for Safari CLI Bridge."
             : "Safari did not open a private window.")
     }
 

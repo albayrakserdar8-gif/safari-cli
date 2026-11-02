@@ -1,4 +1,4 @@
-// Safari MCP Bridge: connects to the local safari-mcp servers (one per Claude Code session)
+// Safari CLI Bridge: connects to the local safari-mcp servers (one per Claude Code session)
 // and carries out their requests. A server and this page each prove they know the token in
 // ~/.config/safari-mcp/token before any request runs.
 'use strict';
@@ -73,7 +73,7 @@ const ops = {
     } catch (e) {
       const msg = String((e && e.message) || e);
       if (/permission|not allowed|access/i.test(msg)) {
-        return { err: 'The Safari MCP extension has no access to this site. In Safari > Settings > Extensions, allow it on every website.' };
+        return { err: 'The Safari CLI Bridge extension has no access to this site. In Safari > Settings > Extensions, allow it on every website.' };
       }
       r = null; // like Apple Events: a script that fails gives no value
     }

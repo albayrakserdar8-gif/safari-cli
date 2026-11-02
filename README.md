@@ -21,6 +21,7 @@ Good for everyday work on sites you are logged into: reading, searching, filling
 | Clicks, typing, forms | Yes | Yes | Yes | No, read-only |
 | Dialogs, file upload, iframes | Yes (iframes with the extension) | Yes | Yes | — |
 | Network interception | fetch/XHR mocking and request blocking (`route`) | Yes | Yes (`route`) | — |
+| Cookies, saved state, PDF | Yes (`cookies`, `state`, `pdf`) | Yes | Yes | — |
 | Web search with cited sources | Through the sites it opens | No | Through the sites it opens | Yes (SearxNG) |
 | LLM | The agent's | None of its own | The agent's | Any: Ollama, OpenAI, Claude, Gemini, Groq |
 | Setup | Swift build, optional Safari extension | npm or pip package | npm package (Node 18+), skill via `install --skills` | Docker image (includes SearxNG) |
@@ -49,7 +50,7 @@ A background daemon keeps tab ids and the extension connection between commands.
 
 ### Skill
 
-`Skill/safari-browser/SKILL.md` teaches the agent the commands and the rules: work in its own tab, prefer `read` over screenshots, and ask before submitting, buying or deleting anything. `make install` links it into `~/.claude/skills` and `~/.config/opencode/skills`.
+`Skill/safari-browser/SKILL.md` teaches the agent the core commands and the rules: work in its own tab, prefer `read` over screenshots, and ask before submitting, buying or deleting anything. Details (forms, scraping, `js`, cookies and storage, mocking, recording) live in `references/` files the agent reads only when a task needs them. `make install` links it into `~/.claude/skills` and `~/.config/opencode/skills`.
 
 In Claude Code, adding `"Bash(safari:*)"` to `permissions.allow` in `~/.claude/settings.json` stops the per-command prompts.
 
@@ -66,7 +67,7 @@ Building it needs Xcode:
    Extension/build.sh --schedule
    ```
    `--schedule` adds a weekly job that re-signs the extension, because free-account signatures expire.
-4. In Safari > Settings > Extensions, enable **Safari CLI Bridge** and allow it on every website. For private tabs, also turn on "Allow in Private Browsing".
+4. In Safari > Settings > Extensions, enable **Safari CLI Bridge** and allow it on every website. For private tabs, also turn on "Allow in Private Browsing". After an update that adds a permission (cookies, in the November 2026 build), Safari may turn the extension off until you enable it again.
 
 The daemon and extension talk over `127.0.0.1` (ports 47391–47399) and authenticate each other with a key in `~/.config/safari-mcp/token`, so other pages or local programs cannot connect. The extension is the same one safari-mcp uses; both can be installed at once.
 
@@ -100,7 +101,7 @@ Just ask the agent:
 |---|---|
 | `tabs`, `open URL [--private\|--window]`, `T show`, `T close`, `close --agents` | List, open (in the background, or in a window of its own), show, close tabs; `--agents` closes every agent tab not on screen |
 | `T go URL\|back\|forward\|reload [--delay S]` | Load and wait |
-| `T read`, `T text`, `T links` | Controls with refs, page as markdown, links; `-q` to search, `--diff` for changes only |
+| `T read`, `T text`, `T links` | Controls with refs, page as markdown, links; `-q` to search (`-q '/regex/i'` too), `--diff` for changes only |
 | `T table [--rows CSS] [--json]` | A table or list of cards as TSV/JSON, with each row's link and `data-id` |
 | `T crawl [--next TEXT] [--pages N]` | `table` on each page of a paged list, following "Next", merged and deduplicated |
 | `rate [SITE [S\|off]]` | Seconds between page loads per site (`rate example.com 8-14`), saved |
@@ -110,7 +111,10 @@ Just ask the agent:
 | `T shot [--full]` | JPEG of the viewport, an element, a region or the whole page; prints its path |
 | `T resize W H` | Viewport size, in a window that holds only agent tabs |
 | `T route PATTERN`, `T unroute` | Mock the page's fetch/XHR answers (`--status`, `--body`), or `--block` requests |
-| `T storage` | List, get, set or delete localStorage/sessionStorage |
+| `T storage`, `T cookies` | List, get, set or delete localStorage/sessionStorage, or the site's cookies (HttpOnly too with the extension) |
+| `T state save\|load FILE` | The site's cookies and web storage to a file (mode 0600) and back |
+| `T check R`, `T uncheck R` | Set a checkbox or radio; safe to repeat |
+| `T pdf` | The page as a paged PDF, rendered from a snapshot of its DOM in the background |
 | `T record`, `T record --stop` | Record what you do in a tab, printed as `safari` commands to replay |
 | `T logs` | Console and network logs, with response bodies by `--id` |
 | `downloads [--wait]` | Recent downloads from Safari's list; `--wait` until they finish, then the saved paths |
@@ -135,7 +139,7 @@ Measured on one Mac:
 
 | | |
 |---|---|
-| Skill | about 3,100 tokens, loaded only for browser tasks (the MCP version sent about 875 tokens of tool schemas every session, plus its skill) |
+| Skill | about 1,450 tokens, loaded only for browser tasks; eight `references/` files (400-850 tokens each) are read only when a task needs them (the MCP version sent about 875 tokens of tool schemas every session, plus its skill) |
 | Default `read` | about 500 tokens (Wikipedia home), 1,100 (Hacker News) |
 | Call time | `read` 7–60 ms, actions 170–470 ms, `shot` 0.9–2.1 s; about 10 ms more per command, 0.2 s for the first one that starts the daemon |
 | Memory | 9 MB idle, about 34 MB after use |
@@ -177,6 +181,8 @@ This was tested on one Mac (macOS 27), not across a wide range of sites.
 - `route` mocks the page's fetch and XHR, not the page's own document, WebSockets or service workers; it starts with each page only with the extension. A click that leaves the site drops the routes until `route` runs again.
 - `record` needs the extension, covers one site in one tab, and does not record rich-text editors or password values.
 - `shot --full` scrolls the page itself; pages that scroll an inner box show only their first screen.
+- `pdf` lays out a snapshot of the page again with JavaScript off: images that need the user's login, content drawn by scripts after load and cross-origin canvases may be missing.
+- Without the extension `cookies` sees only cookies the page can read (no HttpOnly, no domain or expiry), and `state load` cannot restore HttpOnly cookies.
 - Without the extension, a tab can be lost if it navigates elsewhere while tabs open or close at the same time; safari then returns an error instead of guessing.
 - Bot checks are recognised by their titles and markup; others pass unnoticed. Pacing covers `go`, `open` and `crawl`, not clicks that load a page.
 - `text` mode trims link text and data-table cells (200 chars, 60 rows); complex tables may lose layout. Tables used for page layout are read as text.

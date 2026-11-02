@@ -21,6 +21,7 @@ Giriş yaptığın sitelerde günlük işler için uygundur: okuma, arama, form 
 | Tıklama, yazma, form | Var | Var | Var | Yok, yalnızca okur |
 | İletişim kutusu, dosya yükleme, iframe | Var (iframe eklentiyle) | Var | Var | — |
 | Ağ müdahalesi | fetch/XHR taklidi ve istek engelleme (`route`) | Var | Var (`route`) | — |
+| Çerezler, kayıtlı oturum, PDF | Var (`cookies`, `state`, `pdf`) | Var | Var | — |
 | Kaynak gösteren web araması | Açtığı siteler üzerinden | Yok | Açtığı siteler üzerinden | Var (SearxNG) |
 | LLM | Ajanınki | Kendi LLM'i yok | Ajanınki | Herhangi biri: Ollama, OpenAI, Claude, Gemini, Groq |
 | Kurulum | Swift derlemesi, isteğe bağlı Safari eklentisi | npm ya da pip paketi | npm paketi (Node 18+), skill `install --skills` ile | Docker imajı (SearxNG dahil) |
@@ -49,7 +50,7 @@ Arka plandaki bir süreç (daemon), sekme kimliklerini ve eklenti bağlantısın
 
 ### Skill
 
-`Skill/safari-browser/SKILL.md`, ajana komutları ve kuralları öğretir: kendi sekmesinde çalışmak, ekran görüntüsü yerine `read` kullanmak, gönderme, satın alma ya da silmeden önce sormak. `make install` onu `~/.claude/skills` ve `~/.config/opencode/skills` içine bağlar.
+`Skill/safari-browser/SKILL.md`, ajana temel komutları ve kuralları öğretir: kendi sekmesinde çalışmak, ekran görüntüsü yerine `read` kullanmak, gönderme, satın alma ya da silmeden önce sormak. Ayrıntılar (formlar, tarama, `js`, çerez ve depolama, taklit, kayıt) ajanın yalnızca gerektiğinde okuduğu `references/` dosyalarındadır. `make install` onu `~/.claude/skills` ve `~/.config/opencode/skills` içine bağlar.
 
 Claude Code'da `~/.claude/settings.json` içindeki `permissions.allow` listesine `"Bash(safari:*)"` eklersen her komutta izin sorulmaz.
 
@@ -66,7 +67,7 @@ Derlemek için Xcode gerekir:
    Extension/build.sh --schedule
    ```
    `--schedule`, eklentiyi her hafta yeniden imzalayan bir görev ekler; ücretsiz hesap imzalarının süresi dolar.
-4. Safari > Ayarlar > Uzantılar'da **Safari CLI Bridge**'i aç ve her web sitesinde izin ver. Gizli sekmeler için "Özel Dolaşımda İzin Ver"i de aç.
+4. Safari > Ayarlar > Uzantılar'da **Safari CLI Bridge**'i aç ve her web sitesinde izin ver. Gizli sekmeler için "Özel Dolaşımda İzin Ver"i de aç. Yeni bir izin ekleyen güncellemeden sonra (Kasım 2026 sürümünde çerezler) Safari eklentiyi sen yeniden açana kadar kapatabilir.
 
 Daemon ve eklenti `127.0.0.1` üzerinden (47391–47399 portları) konuşur ve `~/.config/safari-mcp/token` dosyasındaki anahtarla birbirini doğrular; başka sayfalar ya da yerel programlar bağlanamaz. Eklenti safari-mcp'nin kullandığıyla aynıdır; ikisi aynı anda kurulu olabilir.
 
@@ -100,7 +101,7 @@ Ajana doğrudan söylemen yeterli:
 |---|---|
 | `tabs`, `open URL [--private\|--window]`, `T show`, `T close`, `close --agents` | Sekmeleri listeler, (arka planda ya da kendi penceresinde) açar, gösterir, kapatır; `--agents` ekranda olmayan bütün ajan sekmelerini kapatır |
 | `T go URL\|back\|forward\|reload [--delay S]` | Yükler ve bekler |
-| `T read`, `T text`, `T links` | Ref'li öğeler, markdown olarak sayfa, bağlantılar; `-q` ile arama, `--diff` ile yalnızca değişen |
+| `T read`, `T text`, `T links` | Ref'li öğeler, markdown olarak sayfa, bağlantılar; `-q` ile arama (`-q '/regex/i'` de olur), `--diff` ile yalnızca değişen |
 | `T table [--rows CSS] [--json]` | Bir tabloyu ya da kart listesini TSV/JSON olarak verir; her satırın bağlantısı ve `data-id`'si de eklenir |
 | `T crawl [--next METİN] [--pages N]` | Sayfalı bir listenin her sayfasında `table` çalıştırır, "Sonraki"yi izler; sonuçları birleştirir, tekrarları atar |
 | `rate [SİTE [S\|off]]` | Site başına sayfa yüklemeleri arası saniye (`rate example.com 8-14`); kalıcıdır |
@@ -110,7 +111,10 @@ Ajana doğrudan söylemen yeterli:
 | `T shot [--full]` | Görünüm alanının, bir öğenin, bir bölgenin ya da bütün sayfanın JPEG'i; dosya yolunu yazar |
 | `T resize G Y` | Görünüm alanı boyutu; yalnızca ajan sekmelerinden oluşan bir pencerede |
 | `T route DESEN`, `T unroute` | Sayfanın fetch/XHR yanıtlarını taklit eder (`--status`, `--body`) ya da istekleri `--block` ile engeller |
-| `T storage` | localStorage/sessionStorage'ı listeler, okur, yazar, siler |
+| `T storage`, `T cookies` | localStorage/sessionStorage'ı ya da sitenin çerezlerini listeler, okur, yazar, siler (eklentiyle HttpOnly çerezler de) |
+| `T state save\|load DOSYA` | Sitenin çerezlerini ve web depolamasını bir dosyaya (izin 0600) yazar ve geri yükler |
+| `T check R`, `T uncheck R` | Onay kutusunu ya da radyo düğmesini ayarlar; tekrar çalıştırmak güvenlidir |
+| `T pdf` | Sayfayı, DOM'unun anlık kopyasından arka planda üretilen sayfalı bir PDF olarak kaydeder |
 | `T record`, `T record --stop` | Bir sekmede yaptıklarını kaydeder, tekrar oynatılacak `safari` komutları olarak yazar |
 | `T logs` | Konsol ve ağ kayıtları; `--id` ile yanıt gövdesi |
 | `downloads [--wait]` | Safari'nin listesinden son indirmeler; `--wait` bitmelerini bekler, sonra kaydedilen yolları yazar |
@@ -135,7 +139,7 @@ Tek bir Mac'te ölçüldü:
 
 | | |
 |---|---|
-| Skill | yaklaşık 3.100 token, yalnızca tarayıcı işlerinde yüklenir (MCP sürümü her oturumda yaklaşık 875 token araç şeması gönderiyordu, skill'i de ayrıca) |
+| Skill | yaklaşık 1.450 token, yalnızca tarayıcı işlerinde yüklenir; sekiz `references/` dosyası (her biri 400-850 token) yalnızca iş gerektirince okunur (MCP sürümü her oturumda yaklaşık 875 token araç şeması gönderiyordu, skill'i de ayrıca) |
 | Varsayılan `read` | yaklaşık 500 token (Wikipedia ana sayfa), 1.100 (Hacker News) |
 | Çağrı süresi | `read` 7–60 ms, işlemler 170–470 ms, `shot` 0,9–2,1 sn; komut başına yaklaşık 10 ms daha, daemon'u başlatan ilk komutta 0,2 sn |
 | Bellek | Boşta 9 MB, kullanımdan sonra yaklaşık 34 MB |
@@ -179,6 +183,8 @@ Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenm
 - `route` sayfanın fetch ve XHR isteklerini taklit eder; sayfanın kendi belgesini, WebSocket'leri ve service worker'ları değil. Her sayfanın başından itibaren yalnızca eklentiyle geçerlidir. Siteden çıkan bir tıklama, `route` yeniden çalışana kadar kuralları düşürür.
 - `record` eklenti gerektirir, tek sekmede tek siteyi kapsar; zengin metin editörlerini ve parola değerlerini kaydetmez.
 - `shot --full` sayfanın kendisini kaydırır; içteki bir kutuyu kaydıran sayfalarda yalnızca ilk ekran çıkar.
+- `pdf`, sayfanın anlık kopyasını JavaScript kapalıyken yeniden dizer: kullanıcının girişini isteyen görseller, yüklemeden sonra betiklerin çizdiği içerik ve başka kaynaklı canvas'lar eksik çıkabilir.
+- Eklenti olmadan `cookies` yalnızca sayfanın okuyabildiği çerezleri görür (HttpOnly yok, alan adı ve bitiş tarihi yok); `state load` de HttpOnly çerezleri geri yükleyemez.
 - Eklentisiz modda, bir sekme başka bir siteye giderken aynı anda sekme açılıp kapanırsa sekme kaybolabilir; safari tahmin etmek yerine hata döner.
 - Bot doğrulamaları başlık ve işaretlemeleriyle tanınır; başkaları fark edilmeden geçer. Hız sınırı `go`, `open` ve `crawl` için geçerlidir; sayfa yükleyen tıklamalar için değil.
 - `text` kipi bağlantı metinlerini ve veri tablosu hücrelerini kırpar (200 karakter, 60 satır); karmaşık tablolarda düzen bozulabilir. Sayfa düzeni için kullanılan tablolar metin olarak okunur.

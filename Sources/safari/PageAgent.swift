@@ -424,7 +424,7 @@ enum PageAgent {
         var wb=ws.map(function(w){return new RegExp('(^|[^a-z0-9])'+w.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'($|[^a-z0-9])')});
         scan({mode:'all',full:true,links:true,root:root}).forEach(function(x){var el=x.el;if(!el&&!x.tel)return;
           var nm=x.s.toLowerCase(),at=!el?'':((el.id||'')+' '+(el.getAttribute('name')||'')+' '+(el.getAttribute('placeholder')||'')+' '+(el.getAttribute('href')||'').replace(/^[a-z]+:\/\/[^\/]+/i,'')+' '+(el.title||'')).toLowerCase();
-          if(re){if(!re.test(x.s)&&!(at&&re.test(at)))return;x.all=true;if(!el){var r0=x.tel.getBoundingClientRect();x.inv=r0.bottom>0&&r0.top<innerHeight}hits.push({sc:-hits.length,x:x});return}
+          if(re){var nq=el&&/"((?:[^"\\]|\\.)*)"/.exec(x.s);if(!(nq&&re.test(nq[1]))&&!re.test(x.s)&&!(at&&re.test(at)))return;x.all=true;if(!el){var r0=x.tel.getBoundingClientRect();x.inv=r0.bottom>0&&r0.top<innerHeight}hits.push({sc:-hits.length,x:x});return}
           var sc=0,hit=0;ws.forEach(function(w,i){if(wb[i].test(nm)){sc+=3;hit++}else if(nm.indexOf(w)>=0){sc+=2;hit++}else if(at.indexOf(w)>=0){sc++;hit++}});
           if(!hit)return;if(nm.indexOf(q)>=0)sc+=2;if(nm.indexOf('"'+q+'"')>=0)sc+=4;x.all=hit===ws.length;
           if(!el){var r=x.tel.getBoundingClientRect();x.inv=r.bottom>0&&r.top<innerHeight;sc-=0.25}

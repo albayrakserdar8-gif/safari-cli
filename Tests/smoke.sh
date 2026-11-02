@@ -107,6 +107,7 @@ parses '"act":"clear","domain":".x.com","tab":"t5"},"out":null,"tool":"cookies"'
 check "cookies set with --domain is a usage error" test "$(code t3 cookies k v --domain x.com)" = 2
 parses '"act":"save","file":"/tmp/s.json","tab":"t5"},"out":null,"tool":"state"' t5 state save /tmp/s.json
 check "state needs a file" test "$(code t3 state save)" = 2
+parses '"tab":"t5"},"out":"p.pdf","tool":"pdf"' t5 pdf -o p.pdf
 check "state needs save or load" test "$(code t3 state keep f.json)" = 2
 
 out=$("$BIN" status 2>&1)

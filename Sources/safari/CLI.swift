@@ -39,6 +39,7 @@ enum CLI {
         ("unroute", "[T] unroute [PATTERN]         remove one route, or all"),
         ("storage", "[T] storage [local|session] [KEY [VALUE]] [--delete KEY] [--clear]   list, get or set web storage"),
         ("cookies", "[T] cookies [NAME [VALUE]] [--domain D] [--delete NAME] [--clear] [--max N]   list, get or set the site's cookies"),
+        ("pdf", "[T] pdf [-o FILE]             the page as a paged PDF → path (a snapshot: images that need a login may be missing)"),
         ("state", "[T] state save|load FILE      the site's cookies and web storage to a file (0600) and back; load reloads"),
         ("drop", "[T] drop R FILE… [--text T]   drop files (or text) onto a drop zone"),
         ("record", "T record | T record --stop     record what the user does in the tab; --stop prints it as commands"),
@@ -79,7 +80,7 @@ enum CLI {
         let page: Set = ["query", "ref", "selector", "max_chars", "offset", "diff"]
         let el: Set = ["ref", "selector", "xy", "os"]
         return [
-            "tabs": [], "open": ["private", "window", "idonly", "delay"], "downloads": ["wait", "timeout"], "status": [], "stop": [], "show": [], "close": ["agents"], "resize": [], "route": ["status", "body", "ctype", "block", "list"], "unroute": [], "storage": ["del", "clear", "max_chars"], "cookies": ["del", "clear", "max_chars", "domain"], "state": [], "drop": ["ref", "selector", "xy", "text"], "record": ["stop"], "locator": ["ref", "selector", "xy"], "highlight": ["ref", "selector", "xy", "secs", "hide"], "go": ["delay"],
+            "tabs": [], "open": ["private", "window", "idonly", "delay"], "downloads": ["wait", "timeout"], "status": [], "stop": [], "show": [], "close": ["agents"], "resize": [], "route": ["status", "body", "ctype", "block", "list"], "unroute": [], "storage": ["del", "clear", "max_chars"], "cookies": ["del", "clear", "max_chars", "domain"], "state": [], "pdf": ["out"], "drop": ["ref", "selector", "xy", "text"], "record": ["stop"], "locator": ["ref", "selector", "xy"], "highlight": ["ref", "selector", "xy", "secs", "hide"], "go": ["delay"],
             "read": page.union(["all", "full", "out"]), "text": page.union(["out"]), "links": page.union(["out"]),
             "table": ["ref", "selector", "rows", "json", "max_chars", "offset", "out"],
             "crawl": ["selector", "rows", "json", "next", "pages", "delay", "out"], "rate": [],
@@ -275,6 +276,9 @@ enum CLI {
             args["act"] = pos.count == 2 ? "set" : "list"
             try int("max_chars")
             return ("cookies", args, nil)
+        case "pdf":
+            try noMore()
+            return ("pdf", args, o["out"])
         case "state":
             guard pos.count == 2, ["save", "load"].contains(pos[0]) else { throw bad("state needs save or load and a file") }
             args["act"] = pos[0]

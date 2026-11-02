@@ -39,7 +39,7 @@ Good for everyday work on sites you are logged into: reading, searching, filling
 Needs macOS 14 or later and the Command Line Tools (Xcode only for the extension).
 
 ```bash
-git clone https://github.com/sadopc/safari-cli.git
+git clone https://github.com/albayrakserdar8-gif/safari-cli.git
 cd safari-cli && swift build -c release
 ln -s "$PWD/.build/release/safari" /opt/homebrew/bin/safari     # or any folder on PATH
 ```

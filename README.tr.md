@@ -39,7 +39,7 @@ Giriş yaptığın sitelerde günlük işler için uygundur: okuma, arama, form 
 macOS 14 ya da üstü ve Command Line Tools gerekir (Xcode yalnızca eklenti için).
 
 ```bash
-git clone https://github.com/sadopc/safari-cli.git
+git clone https://github.com/albayrakserdar8-gif/safari-cli.git
 cd safari-cli && swift build -c release
 ln -s "$PWD/.build/release/safari" /opt/homebrew/bin/safari     # ya da PATH'teki herhangi bir klasör
 ```

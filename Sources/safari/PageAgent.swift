@@ -139,8 +139,8 @@ enum PageAgent {
     function state(el){var t=el.tagName,s='';
       if(t==='INPUT'||t==='TEXTAREA'||t==='SELECT'){var y=(el.type||'').toLowerCase();
         if(y==='checkbox'||y==='radio'){if(el.checked)s+=' checked'}
-        else if(!/^(submit|button|reset|image)$/.test(y)){var v;if(secret(el))v=el.value?'\u2022\u2022\u2022':'';else if(t==='SELECT'){var o=el.selectedOptions[0];v=o?o.text:''}else v=el.value;if(v)s+=' ='+JSON.stringify(clip(v,60))}}
-      if(ceRoot(el)){var cv=clip(el.innerText,60);s+=' ='+JSON.stringify(cv)}
+        else if(!/^(submit|button|reset|image)$/.test(y)){var v;if(secret(el))v=el.value?'\u2022\u2022\u2022':'';else if(t==='SELECT'){var o=el.selectedOptions[0];v=o?o.text:''}else v=el.value;if(v)s+=' ='+JSON.stringify(clip(v,VM))}}
+      if(ceRoot(el)){var cv=clip(el.innerText,VM);s+=' ='+JSON.stringify(cv)}
       if(el.disabled||el.getAttribute('aria-disabled')==='true')s+=' disabled';
       var x=el.getAttribute('aria-expanded');if(x)s+=x==='true'?' expanded':' collapsed';
       if(el.getAttribute('aria-selected')==='true'||el.getAttribute('aria-checked')==='true'||el.getAttribute('aria-current'))s+=' selected';
@@ -232,16 +232,22 @@ enum PageAgent {
           for(var i=0;i<ks.length;i++){var li=ks[i];if(li.nodeType!==1)continue;if(li.tagName!=='LI'){node(li);continue}
             j++;pf=sv+(t==='OL'?j+'. ':'- ');ind=sv+'  ';walk(li);flush();ind=sv;pf=sv}
           return}
-        if(t==='TABLE'&&!n.querySelector('table')){flush();var rows=[].slice.call(n.rows),cols=0;
-          rows.slice(0,60).forEach(function(r,ri){var cs=[].map.call(r.cells,function(x){return clip(inner(x),120).replace(/\|/g,'\\|')});
+        if(t==='TABLE'&&!n.querySelector('table')&&!layout(n)){flush();var rows=[].slice.call(n.rows),cols=0;
+          rows.slice(0,60).forEach(function(r,ri){var cs=[].map.call(r.cells,function(x){return clip(inner(x),200).replace(/\|/g,'\\|')});
             if(!cs.join(''))return;lines.push(ind+'| '+cs.join(' | ')+' |');if(!cols){cols=cs.length;lines.push(ind+'|'+' --- |'.repeat(cols))}});
           if(rows.length>60)lines.push(ind+'(… '+(rows.length-60)+' more rows)');return}
         var blk=BLK[t]||t==='LI'||(t.indexOf('-')>0&&/^(block|flex|grid|list-item|table)/.test(getComputedStyle(n).display));
         if(blk)flush();walk(n);if(blk)flush();else if(t==='TD'||t==='TH')buf+=' '}
       node(root);flush();return{lines:lines,urls:[...U.keys()]}}
+    // A table used for page layout (long cells holding paragraphs, as on Hacker News) is read
+    // as text, so its cells are not cut short like data cells.
+    function layout(n){return [].some.call(n.querySelectorAll('td,th'),function(c){return c.textContent.length>200&&!!c.querySelector('div,p,ul,ol,pre,blockquote')})}
     function text(root){
       if(root)return md(root,false);
-      var m=document.querySelector('article,main,[role=main]'),r=m&&md(m,false);
+      // One article is the content; several (search results, feeds) are items of a list.
+      var m=document.querySelector('main,[role=main]'),as=m?[]:document.querySelectorAll('article');
+      if(!m&&as.length===1)m=as[0];
+      var r=m&&md(m,false);
       if(r&&r.lines.join('').length>=200)return r;
       r=md(document.body,true);return r.lines.join('').length>=200?r:md(document.body,false)}
     function foot(m,used){var f=[];m.urls.forEach(function(u,i){if(!used||used.has(i+1))f.push('['+(i+1)+']: '+u)});return f.length?'\n\n'+f.join('\n'):''}
@@ -269,9 +275,12 @@ enum PageAgent {
         seen.add(u);inn.push(ref(el)+' '+JSON.stringify(nm)+' '+u)});
       return inn.join('\n')||(q?'no link matches '+JSON.stringify(q):'(no links)')}
 
+    var VM=60;
     function read(a){
       var root=a.ref?get(a.ref):a.selector?document.querySelector(a.selector):null;
       if(a.selector&&!root)throw new Error('selector matched nothing');
+      // A read scoped to one field shows its whole value; elsewhere values are cut at 60 chars.
+      VM=root&&(/^(INPUT|TEXTAREA|SELECT)$/.test(root.tagName)||ceRoot(root))?20000:60;
       var body,md0=null,so=null,qm=a.query&&a.mode!=='text'&&a.mode!=='links';
       if(qm){
         var q=a.query.toLowerCase().trim(),ws=q.split(/\s+/).filter(Boolean),hits=[];

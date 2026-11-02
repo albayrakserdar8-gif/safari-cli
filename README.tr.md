@@ -127,7 +127,7 @@ Tek bir Mac'te ölçüldü:
 
 | | |
 |---|---|
-| Skill | yaklaşık 2.100 token, yalnızca tarayıcı işlerinde yüklenir (MCP sürümü her oturumda yaklaşık 875 token araç şeması gönderiyordu, skill'i de ayrıca) |
+| Skill | yaklaşık 2.550 token, yalnızca tarayıcı işlerinde yüklenir (MCP sürümü her oturumda yaklaşık 875 token araç şeması gönderiyordu, skill'i de ayrıca) |
 | Varsayılan `read` | yaklaşık 500 token (Wikipedia ana sayfa), 1.100 (Hacker News) |
 | Çağrı süresi | `read` 7–60 ms, işlemler 170–470 ms, `shot` 0,9–2,1 sn; komut başına yaklaşık 10 ms daha, daemon'u başlatan ilk komutta 0,2 sn |
 | Bellek | Boşta 9 MB, kullanımdan sonra yaklaşık 34 MB |
@@ -137,7 +137,7 @@ Tek bir daemon bütün ajanlara ve oturumlara hizmet eder; 30 dakika boşta kal�
 
 ## Sınanma durumu
 
-Sayfa motoru safari-mcp'de, Claude Haiku ajanlarının araçları yalnızca açıklamalarından kullanarak gerçek görevler yaptığı altı turda sınandı: Wikipedia, Hacker News, MDN, GitHub, DuckDuckGo, demo mağazalarda hesap açma, sepet ve ödeme (automationexercise, Toolshop/Angular, saucedemo/React, demowebshop), the-internet ve TodoMVC. Her turda bulunan hatalar düzeltildi; son turlarda bütün görevler, işlemler için `js` ya da `os: true`'ya başvurmadan doğru bitti ve en zor görevlerde çağrı sayısı yaklaşık yarıya indi. CLI katmanı yeni: test sayfasında eklentiyle ve Apple Events ile elle denendi, gerçek sitelerde ajan turlarında henüz denenmedi.
+Sayfa motoru safari-mcp'de, Claude Haiku ajanlarının araçları yalnızca açıklamalarından kullanarak gerçek görevler yaptığı altı turda sınandı: Wikipedia, Hacker News, MDN, GitHub, DuckDuckGo, demo mağazalarda hesap açma, sepet ve ödeme (automationexercise, Toolshop/Angular, saucedemo/React, demowebshop), the-internet ve TodoMVC. Her turda bulunan hatalar düzeltildi; son turlarda bütün görevler, işlemler için `js` ya da `os: true`'ya başvurmadan doğru bitti ve en zor görevlerde çağrı sayısı yaklaşık yarıya indi. CLI ardından, yalnızca skill'i bilen ve tek bir daemon'u paylaşan sekiz paralel Claude Haiku ajanıyla bir turda sınandı: Wikipedia, Hacker News, MDN site içi arama, GitHub (sürüm, issue arama, dosya ağacı), ekran görüntülü DuckDuckGo, saucedemo ödeme akışı, the-internet bileşenleri ve TodoMVC. Sekizi de `--os` kullanmadan, 7–37 komutta doğru bitti. `js` yalnızca CLI'nin göstermediği metni okumak için gerekti: tam bir Hacker News yorumu, bir öznitelikte duran tarih yılı ve bir GitHub kod görünümü. Bunlardan ilk ikisi ardından düzeltildi: düzen tabloları ve `<article>` sonuç listeleri artık tam okunuyor, tek bir alanda `read --ref` bütün değeri gösteriyor.
 
 Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenmedi.
 
@@ -150,7 +150,7 @@ Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenm
 - Eklentisiz modda kayıtlar safari'nin sayfaya ilk girdiği andan başlar; ondan önce açılan iletişim kutuları çağrıları 20 sn bekletir (Erişilebilirlik ile yanıtlanabilir).
 - Ajanlar tek bir daemon'u paylaşır; birden fazla yeni sekme açıkken sekme kimliğini başa yazmalıdır.
 - Eklentisiz modda, bir sekme başka bir siteye giderken aynı anda sekme açılıp kapanırsa sekme kaybolabilir; safari tahmin etmek yerine hata döner.
-- `text` kipi bağlantı metinlerini ve tablo hücrelerini kırpar; karmaşık tablolarda düzen bozulabilir.
+- `text` kipi bağlantı metinlerini ve veri tablosu hücrelerini kırpar (200 karakter, 60 satır); karmaşık tablolarda düzen bozulabilir. Sayfa düzeni için kullanılan tablolar metin olarak okunur.
 - Tam tarayıcı denetimi (gerçek girdi, bütün ağ trafiği) Safari'nin Web Inspector protokolünü gerektirir; kendi Safari'nde bunu yalnızca Apple imzalı uygulamalar kullanabilir. Apple'ın `safaridriver --mcp`'si bunu sekmelerini ve çerezlerini görmeyen ayrı, temiz bir oturumda sunar.
 
 ## Geliştirme

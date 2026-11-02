@@ -127,7 +127,7 @@ Measured on one Mac:
 
 | | |
 |---|---|
-| Skill | about 2,100 tokens, loaded only for browser tasks (the MCP version sent about 875 tokens of tool schemas every session, plus its skill) |
+| Skill | about 2,550 tokens, loaded only for browser tasks (the MCP version sent about 875 tokens of tool schemas every session, plus its skill) |
 | Default `read` | about 500 tokens (Wikipedia home), 1,100 (Hacker News) |
 | Call time | `read` 7–60 ms, actions 170–470 ms, `shot` 0.9–2.1 s; about 10 ms more per command, 0.2 s for the first one that starts the daemon |
 | Memory | 9 MB idle, about 34 MB after use |
@@ -137,7 +137,7 @@ One daemon serves every agent and session; it exits after 30 idle minutes.
 
 ## Testing status
 
-The page engine was tested in safari-mcp over six rounds in which Claude Haiku agents did real tasks using only the tool descriptions: Wikipedia, Hacker News, MDN, GitHub, DuckDuckGo, sign-up, cart and checkout flows on demo shops (automationexercise, Toolshop/Angular, saucedemo/React, demowebshop), the-internet and TodoMVC. Bugs found in each round were fixed; by the last rounds all tasks finished correctly without falling back to `js` or `os: true` for actions, and call counts on the hardest tasks roughly halved. The CLI layer is new: it was checked by hand on the test page with both the extension and Apple Events, but not yet in agent rounds on real sites.
+The page engine was tested in safari-mcp over six rounds in which Claude Haiku agents did real tasks using only the tool descriptions: Wikipedia, Hacker News, MDN, GitHub, DuckDuckGo, sign-up, cart and checkout flows on demo shops (automationexercise, Toolshop/Angular, saucedemo/React, demowebshop), the-internet and TodoMVC. Bugs found in each round were fixed; by the last rounds all tasks finished correctly without falling back to `js` or `os: true` for actions, and call counts on the hardest tasks roughly halved. The CLI was then tested in one round of eight parallel Claude Haiku agents that had only the skill, sharing one daemon: Wikipedia, Hacker News, MDN site search, GitHub (release, issue search, file tree), DuckDuckGo with a screenshot, saucedemo checkout, the-internet widgets and TodoMVC. All eight finished correctly without `--os`, in 7–37 commands. `js` was needed only to read text the CLI did not show: a full Hacker News comment, a date year held in an attribute and a GitHub code view. The first two of these were fixed afterwards: layout tables and lists of `<article>` results now read in full, and `read --ref` on one field shows its whole value.
 
 This was tested on one Mac (macOS 27), not across a wide range of sites.
 
@@ -150,7 +150,7 @@ This was tested on one Mac (macOS 27), not across a wide range of sites.
 - Without the extension, logs start when safari first touches the page, and dialogs that open before that block calls for 20 s (answerable via Accessibility).
 - Agents share one daemon, so they must put the tab id first once more than one new tab is open.
 - Without the extension, a tab can be lost if it navigates elsewhere while tabs open or close at the same time; safari then returns an error instead of guessing.
-- `text` mode trims link text and table cells; complex tables may lose layout.
+- `text` mode trims link text and data-table cells (200 chars, 60 rows); complex tables may lose layout. Tables used for page layout are read as text.
 - Full browser control (real input, all network traffic) would need Safari's Web Inspector protocol, which only Apple-signed apps may use with your own Safari. Apple's `safaridriver --mcp` offers it in a separate, clean session without your tabs or cookies.
 
 ## Development

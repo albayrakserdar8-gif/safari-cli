@@ -33,6 +33,11 @@ parses '"x":120' t5 click --xy 120,300
 parses '"dy":-400' t5 scroll -400
 parses '"dy":400' t5 scroll e30 400
 parses '"text":"accept"' t5 click e12 --answer accept
+parses '"action":"rclick"' t5 click e12 --right
+parses '"to":"e6"' t5 drag e4 --to e6
+parses '"selector":"canvas"' t5 shot --sel canvas
+check "ref and --sel together is a usage error" test "$(code t3 click e1 --sel a)" = 2
+check "drag needs --to" test "$(code t3 drag e1)" = 2
 parses '"kind":"network"' t5 logs --id n4
 parses '"region":[0,0,100,50]' t5 shot --region 0,0,100,50
 parses '"max_chars":300' t5 read --max=300

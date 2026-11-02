@@ -105,7 +105,7 @@ enum PageAgent {
     var S=window.__smcp={h:'',slots:{},con:null,net:null,last:{}};
     var R=new Map(),W=new WeakMap(),n=0;
     function ref(el){var id=W.get(el);if(!id){id='e'+(++n);W.set(el,id);R.set(id,new WeakRef(el))}return id}
-    function get(id){var w=R.get(id),el=w&&w.deref();if(!w&&!(+String(id).slice(1)<=n))throw new Error('ref '+id+' was never given on this page; take refs from read');if(!el||!el.isConnected)throw new Error('ref '+id+' is stale (page changed or element removed); call read again');return el}
+    function get(id){var w=R.get(id),el=w&&w.deref();if(!w&&!(+String(id).slice(1)<=n))throw new Error('ref '+id+' is not from this page (refs die when the page changes); read again');if(!el||!el.isConnected)throw new Error('ref '+id+' is stale (page changed or element removed); call read again');return el}
     function clip(s,k){s=String(s==null?'':s).replace(/\s+/g,' ').trim();return s.length>k?s.slice(0,k-1)+'\u2026':s}
     var IR=/^(button|link|checkbox|radio|tab|menuitem|menuitemcheckbox|menuitemradio|option|switch|combobox|textbox|searchbox|slider|spinbutton|treeitem)$/;
     var SKIP={SCRIPT:1,STYLE:1,NOSCRIPT:1,TEMPLATE:1,HEAD:1,LINK:1,META:1,svg:1,SVG:1};
@@ -307,7 +307,7 @@ enum PageAgent {
         hits.sort(function(p,r){return r.sc-p.sc});
         body=hits.slice(0,10).map(function(h){var x=h.x;return(x.el?x.s:ref(x.tel)+' text '+JSON.stringify(clip(x.s,100)))+(x.inv?'':' (offscreen)')}).join('\n')||'no match for '+JSON.stringify(a.query);
       }else if(a.mode==='text'){
-        md0=text(root);body=a.query?rank(md0,a.query,a.max_chars||6000):md0.lines.join('\n');
+        md0=text(root);body=a.query?rank(md0,a.query,a.max_chars||6000):md0.lines.join('\n')||(root?'(no text there: try read --all, or shot for images and canvas)':'(no text on the page)');
       }else if(a.mode==='links'){
         body=links(root||document.body,a.query);
       }else{
@@ -511,10 +511,19 @@ enum PageAgent {
     function act(a){S.note='';if(a.text!=null&&(a.action==='dialog'||a.action==='click'))a.text=String(a.text).replace(/^answer\s*[:=]?\s*/i,'');var r=act1(a);return r+S.note}
     function act1(a){var t;S.fx=1;S.f0=null;S.slider=false;
       if(a.action==='click'||a.action==='dblclick'||a.action==='key'||a.action==='hover'){watch();S.t0=new Set(lines());S.n0=null;try{S.n0=mcall('ncount')}catch(e){}}
-      if(/^(click|dblclick|rclick|key|hover|fill|select|type)$/.test(a.action)){fsnap(a);S.q0=null;try{S.q0=mcall('nn0')}catch(e){}}
+      if(/^(click|dblclick|rclick|drag|key|hover|fill|select|type)$/.test(a.action)){fsnap(a);S.q0=null;try{S.q0=mcall('nn0')}catch(e){}}
       switch(a.action){
         case'click':t=need(a);if(a.text!=null)try{mcall('policy',[String(a.text)])}catch(e){}if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.to.tagName)||t.to.isContentEditable)S.fx=1;if(S.hv)hov(t.to);press(t);return'clicked '+desc(t.el);
         case'dblclick':t=need(a);if(S.hv)hov(t.to);press(t);press(t,{detail:2});mev(t.to,'dblclick',t.x,t.y,{detail:2});return'double-clicked '+desc(t.el);
+        case'drag':t=need(a);var dst=get(a.to),dr=dst.getBoundingClientRect(),dx=dr.left+dr.width/2,dy=dr.top+dr.height/2,dh=deep(dx,dy),dto=dh&&inside(dst,dh)?dh:dst;
+          // Pointer libraries (sortable lists, sliders) follow the mouse; HTML5 drag and drop needs drag events.
+          mev(t.to,'pointerdown',t.x,t.y);mev(t.to,'mousedown',t.x,t.y);
+          for(var st=1;st<=5;st++){var mx=t.x+(dx-t.x)*st/5,my=t.y+(dy-t.y)*st/5,mo=deep(mx,my)||dto;mev(mo,'pointermove',mx,my,{buttons:1});mev(mo,'mousemove',mx,my,{buttons:1})}
+          var src=t.el.closest('[draggable=true]')||(t.to.closest&&t.to.closest('[draggable=true]'));
+          if(src){var dt=new DataTransfer(),de=function(el,ty,x,y){var ev=new DragEvent(ty,{bubbles:true,cancelable:true,composed:true,clientX:x,clientY:y,dataTransfer:dt});return el.dispatchEvent(ev)};
+            de(src,'dragstart',t.x,t.y);de(dto,'dragenter',dx,dy);de(dto,'dragover',dx,dy);de(dto,'drop',dx,dy);de(src,'dragend',dx,dy)}
+          mev(dto,'pointerup',dx,dy);mev(dto,'mouseup',dx,dy);
+          return'dragged '+desc(t.el)+' to '+desc(dst)+(src?'':' (pointer events only: no draggable element)');
         case'rclick':t=need(a);['pointerdown','mousedown','pointerup','mouseup','contextmenu'].forEach(function(e){mev(t.to,e,t.x,t.y,{button:2,buttons:/down/.test(e)?2:0})});return'right-clicked '+desc(t.el);
         case'hover':t=need(a);['pointerover','mouseover','pointerenter','mouseenter','pointermove','mousemove'].forEach(function(e){mev(t.to,e,t.x,t.y)});
           var h=hov(t.to);return'hovered '+desc(t.el)+(h.n?' ('+h.n+' :hover rules':' (no :hover styles found')+(h.bad?'; '+h.bad+' stylesheets from other sites unreadable, --os if nothing shows)':')');

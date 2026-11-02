@@ -17,6 +17,7 @@ enum CLI {
         ("click", "[T] click R [--right] [--answer accept|dismiss|TEXT] [--os]   (dblclick, hover alike)"),
         ("dblclick", "[T] dblclick R [--os]"),
         ("hover", "[T] hover R [--os]"),
+        ("drag", "[T] drag R --to R2           drag and drop"),
         ("fill", "[T] fill R TEXT | fill R=V R2=V2 …  (true/false for checkboxes) [--os]"),
         ("type", "[T] type R TEXT [--os]       append"),
         ("select", "[T] select R OPTION"),
@@ -26,7 +27,7 @@ enum CLI {
         ("upload", "[T] upload R FILE…"),
         ("dialog", "[T] dialog accept|dismiss|TEXT"),
         ("js", "[T] js CODE|- [--max N]     async function body; bare expression ok"),
-        ("shot", "[T] shot [R] [--region x,y,w,h] [--width N] [-o FILE]   JPEG → path"),
+        ("shot", "[T] shot [R|--sel CSS] [--region x,y,w,h] [--width N] [-o FILE]   JPEG → path"),
         ("logs", "[T] logs [--net] [--errors|--warn] [--new] [-p PAT] [--id nN] [--limit N] [--clear]"),
         ("show", "T show                        make the tab visible"),
         ("close", "T close"),
@@ -44,7 +45,7 @@ enum CLI {
 
     private static let valued: [String: String] = [
         "-q": "query", "--query": "query", "--ref": "ref", "--sel": "selector", "--max": "max_chars",
-        "--offset": "offset", "--xy": "xy", "--answer": "answer", "--timeout": "timeout",
+        "--offset": "offset", "--xy": "xy", "--to": "to", "--answer": "answer", "--timeout": "timeout",
         "--region": "region", "--width": "max_width", "-p": "pattern", "--pattern": "pattern",
         "--id": "id", "--limit": "limit", "-o": "out",
     ]
@@ -60,10 +61,10 @@ enum CLI {
         return [
             "tabs": [], "open": ["private", "idonly"], "status": [], "stop": [], "show": [], "close": [], "go": [],
             "read": page.union(["all", "full"]), "text": page, "links": page,
-            "click": el.union(["answer", "right"]), "dblclick": el.union(["answer"]), "hover": el,
+            "click": el.union(["answer", "right"]), "drag": ["ref", "selector", "xy", "to"], "dblclick": el.union(["answer"]), "hover": el,
             "fill": el, "type": el, "select": el, "key": el, "scroll": el,
             "wait": ["ref", "selector", "gone", "timeout"], "upload": el.subtracting(["os"]), "dialog": [],
-            "js": ["max_chars"], "shot": ["ref", "region", "max_width", "out"],
+            "js": ["max_chars"], "shot": ["ref", "selector", "region", "max_width", "out"],
             "logs": ["net", "errors", "warn", "new", "pattern", "id", "limit", "clear"],
         ]
     }()
@@ -84,7 +85,7 @@ enum CLI {
             if let v = rest.first, let u = verbs.first(where: { $0.name == v }) { return ("help", ["text": "safari " + u.usage], nil) }
             return ("help", ["text": help], nil)
         }
-        guard let keys = allowed[verb] else { throw Usage(msg: "unknown verb \(verb)\n\n" + help) }
+        guard let keys = allowed[verb] else { throw Usage(msg: "unknown verb \(verb); `safari help` lists them") }
         let usage = "usage: safari " + (verbs.first { $0.name == verb }?.usage ?? verb)
         func bad(_ m: String) -> Usage { Usage(msg: m + "\n" + usage) }
         if tab != nil, global.contains(verb) { throw bad("\(verb) takes no tab id") }
@@ -137,6 +138,7 @@ enum CLI {
             if let p = pos.first, isRef(p) { args["ref"] = p; pos.removeFirst() }
             if let r = o["ref"] { args["ref"] = r }
             if let s = o["selector"] { args["selector"] = s }
+            if [args["ref"], args["selector"], o["xy"]].compactMap({ $0 }).count > 1 { throw bad("give one element: a ref, --sel or --xy") }
             if let xy = o["xy"] {
                 let v = try nums(xy, 2, "--xy")
                 args["x"] = v[0]
@@ -184,6 +186,13 @@ enum CLI {
             try noMore()
             args["action"] = f.contains("right") ? "rclick" : verb
             if let a = o["answer"] { args["text"] = a }
+            return ("act", args, nil)
+        case "drag":
+            try target(required: true)
+            try noMore()
+            guard let to = o["to"], isRef(to) else { throw bad("drag needs --to and a ref (e12) to drop on") }
+            args["to"] = to
+            args["action"] = "drag"
             return ("act", args, nil)
         case "fill" where !pos.isEmpty && pos.allSatisfy({ s in s.firstIndex(of: "=").map { isRef(String(s[..<$0])) } ?? false }):
             var fields: [String: String] = [:]
@@ -248,6 +257,7 @@ enum CLI {
         case "shot":
             if let p = pos.first, isRef(p) { args["ref"] = p; pos.removeFirst() }
             if let r = o["ref"] { args["ref"] = r }
+            if let s = o["selector"] { args["selector"] = s }
             try noMore()
             if let r = o["region"] { args["region"] = try nums(r, 4, "--region") }
             try int("max_width")

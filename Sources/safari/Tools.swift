@@ -438,6 +438,10 @@ final class Tools {
         }
         var frame = 0
         if let r = o["ref"] as? String, let (f, rr) = split(r) { frame = f; o["ref"] = rr }
+        if let r = o["to"] as? String, let (f, rr) = split(r) {
+            guard f == frame else { throw ToolError("drag works within one frame") }
+            o["to"] = rr
+        }
         if let fields = o["fields"] as? [String: Any] {
             var out: [String: Any] = [:]
             var seen = Set<Int>()
@@ -756,6 +760,12 @@ final class Tools {
         if !["back", "forward", "reload"].contains(url), let s = peek(id), s.url.hasPrefix("safari-resource:") {
             throw ToolError("Safari could not open \(clip(url, 120)) (\(clip(s.title, 60))); the tab now shows Safari's error page.")
         }
+        // Nothing answered: usually Safari's error page (unreachable host), which no script can enter.
+        if text.hasPrefix("(page did not respond)") {
+            try? sync()
+            let t = tabs[id]
+            throw ToolError("Safari could not load \(clip(url, 120)): the page did not respond" + (t.map { "; the tab shows \(jsonString(clip($0.title, 60))) | \(clip($0.url, 120))" } ?? ""))
+        }
         return text
     }
 
@@ -799,7 +809,7 @@ final class Tools {
         } else if a["os"] as? Bool == true {
             (result, env) = try osAct(id, action, a)
         } else {
-            var o = pick(a, ["action", "ref", "x", "y", "text", "key", "dy", "fields", "selector"])
+            var o = pick(a, ["action", "ref", "x", "y", "text", "key", "dy", "fields", "selector", "to"])
             o["op"] = "act"
             frame = try frameOf(&o, id)
             let targeted = o["ref"] != nil || o["selector"] != nil || o["x"] != nil || o["fields"] != nil
@@ -821,7 +831,7 @@ final class Tools {
             }
         }
         if ["scroll", "dialog"].contains(action) { return result }
-        let twice = ["click", "dblclick", "rclick", "key", "hover"].contains(action)
+        let twice = ["click", "dblclick", "rclick", "drag", "key", "hover"].contains(action)
         // The address from before the action, so a pushState route change shows up as one.
         var out = settle(id, result, href: env["u0"] as? String ?? env["u"] as? String ?? "", tabURL: verifiedURL,
                          wasReady: env["r"] as? String == "complete", twice: twice)
@@ -1074,7 +1084,7 @@ final class Tools {
             if navigated { out += " → " + waitLoad(id, marked: false, from: href, timeout: 10, grace: 6).text }
             return out
         }
-        return "(still running after 15s; result discarded)"
+        throw ToolError("js still running after 15 s; result discarded (the code may keep running in the page)")
     }
 
     private func screenshot(_ a: [String: Any]) throws -> [Content] {
@@ -1090,7 +1100,7 @@ final class Tools {
         }
         // Put the user's visible tab back once the capture is done.
         defer { if let back { try? guardedOp(back.id) { try safari.select($0, $1) } } }
-        var o = pick(a, ["ref"])
+        var o = pick(a, ["ref", "selector"])
         o["op"] = "geom"
         let g = try agentCall(id, o)["v"] as? [String: Any] ?? [:]
         guard let w = tabs[id]?.pos.wid else { throw gone(id) }

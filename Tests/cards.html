@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><title>Cards</title>
+<!-- Card grid without a <table>, like books.toscrape: table should find the 20 products
+     (title, price, link), not the 50-link category menu, the breadcrumb or the pager. -->
+<style>.side{float:left;width:180px}.grid{margin-left:200px;list-style:none;display:grid;grid-template-columns:repeat(4,1fr)}</style>
+<header><nav><a href="/">Home</a> <a href="/about">About</a> <a href="/cart">Cart</a></nav></header>
+<ul class="breadcrumb"><li><a href="/">Home</a></li><li><a href="/books">Books</a></li><li class="active">Mystery</li></ul>
+<aside class="side"><ul class="cats"></ul></aside>
+<section><ol class="row grid"></ol>
+<ul class="pager"><li class="current">Page 1 of 2</li><li class="next"><a href="cards.html?p=2">next</a></li><li><a href="#top">top</a></li></ul></section>
+<script>
+var cats=document.querySelector('.cats');
+for(var i=1;i<=50;i++){var li=document.createElement('li');li.innerHTML='<a href="cat'+i+'.html">Category '+i+'</a>';cats.appendChild(li)}
+var g=document.querySelector('.grid');
+for(var i=1;i<=20;i++){var t='The Long Title of Mystery Book Number '+i,li=document.createElement('li');li.className='col-xs-6 col-sm-4';
+  li.innerHTML='<article class="product_pod"><div class="image_container"><a href="book'+i+'.html"><img alt="" src="data:,"></a></div>'+
+    '<p class="star-rating Three"></p><h3><a href="book'+i+'.html" title="'+t+'">'+t.slice(0,20)+'...</a></h3>'+
+    '<div class="product_price"><p class="price_color">£'+(10+i*1.37).toFixed(2)+'</p><p class="instock">In stock</p><button>Add to basket</button></div></article>';
+  g.appendChild(li)}
+</script>

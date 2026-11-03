@@ -100,7 +100,7 @@ Ajana doğrudan söylemen yeterli:
 | `tabs`, `open URL [--private\|--window]`, `T show`, `T close`, `close --agents` | Sekmeleri listeler, (arka planda ya da kendi penceresinde) açar, gösterir, kapatır; `--agents` ekranda olmayan bütün ajan sekmelerini kapatır |
 | `T go URL\|back\|forward\|reload [--delay S]` | Yükler ve bekler |
 | `T read`, `T text`, `T links` | Ref'li öğeler, markdown olarak sayfa, bağlantılar; `-q` ile arama (`-q '/regex/i'` de olur), `--diff` ile yalnızca değişen |
-| `T table [--rows CSS] [--json]` | Bir tabloyu ya da kart listesini TSV/JSON olarak verir; her satırın bağlantısı ve `data-id`'si de eklenir |
+| `T table [--rows CSS] [--json]` | Bir tabloyu ya da kart listesini TSV/JSON olarak verir; her satırın bağlantısı ve `data-id`'si de eklenir; `--rows` verilmezse tekrar eden kartları kendisi bulur |
 | `T crawl [--next METİN] [--pages N]` | Sayfalı bir listenin her sayfasında `table` çalıştırır, "Sonraki"yi izler; sonuçları birleştirir, tekrarları atar |
 | `rate [SİTE [S\|off]]` | Site başına sayfa yüklemeleri arası saniye (`rate example.com 8-14`); kalıcıdır |
 | `T click R`, `dblclick`, `hover`, `fill`, `type`, `select`, `key`, `scroll`, `wait`, `upload`, `drop`, `dialog` | Sayfada işlem yapar (`drop` dosyaları bir bırakma alanına bırakır) |
@@ -187,6 +187,8 @@ Bu turlardan sonra düzeltilenler:
 - Boş desen her isteğe uyuyordu, satır sonu içeren bir başlık değeri iki başlık oluyordu; ikisi de, her şeye uyan bir `--global` desen de reddedilir.
 - Başka bir porta geçişte ya da betikle yapılan gezinmede kurallar yeniden uygulanmıyordu; `#parça` içeren adresler ve kuraldan önce yüklenen iframe'ler kaçıyordu; yeniden kullanılan bir XHR başarısız diye kaydediliyordu.
 - Kapanan bir daemon'un genel kuralları 5 sn sonra kaldırılır; böylece ölü bir taklit sunucusu kullanıcının sekmelerini bozamaz.
+
+Dokuzuncu tur (Kasım 2026) safari'yi dört görevde playwright-cli ile karşılaştırdı; her araç ve görev için bir Claude Haiku ajanı çalıştı. İkisi de her soruyu doğru yanıtladı; safari TodoMVC'de (`type` bir öğe istiyordu) ve books.toscrape'te (`table` kart ızgarasını görmüyordu) daha çok komut harcadı. Bunun sonucunda `type` odaktaki alana yazar oldu, `fill` ve `type`'a `--submit` eklendi, `table` tekrar eden kartları kendisi bulur (sabitlemek için seçiciyi de verir) ve hücrelerden buton yazılarını atar. İki kez yeniden koşulduğunda TodoMVC 16 yerine 10–13, books.toscrape 10 yerine 5–9 komut sürdü.
 
 Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenmedi.
 

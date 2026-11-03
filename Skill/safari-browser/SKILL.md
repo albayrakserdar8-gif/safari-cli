@@ -35,7 +35,7 @@ safari t5 close
 | Buttons, links, fields to act on | `read` (visible controls only; prices and messages need `text`) |
 | One control or text anywhere | `read -q "sign in"` (top 10 hits) |
 | Page text | `text` (markdown; `text -q "refund policy"` for the relevant blocks) |
-| Lists and tables as data | `table` (TSV with `link`, `id`; `--json`, `--rows ".card"`) |
+| Lists and tables as data | `table` (TSV with `link`, `id`; finds card lists too; `--json`, `--rows ".card"`) |
 | Links | `links` (`-q` filters) |
 | What an action changed | its result line first; then `read --diff` |
 | Below the fold | `read --full`, or `scroll` then `read --diff` |
@@ -48,7 +48,7 @@ safari t5 close
 - `go URL`, `go back`, `go forward`, `go reload` load and wait. Reuse your tab rather than opening many.
 - Every element argument is a ref (`e12`), `--sel CSS` or `--xy X,Y`: `fill --sel '#q' "text"`, `check --sel '#agree'`.
 - `click e12` (or `--sel CSS`, `--xy X,Y`). The result ends with `→ title | url` when the page changed (already waited), `· new text: …`, `· failed: n7 POST 400 …`, or `(no change on the page yet)`; then `wait` for what you expect and `read --diff`.
-- `fill e4=Ada e5=Large e6=true` fills a form; `check e6`/`uncheck e6` set a box; `type` appends; `select e5 "Large"`; `key Enter e4`. Dates: type them into the field. Dropdowns that filter as you type: `fill e18 Maths && key Enter e18`.
+- `fill e4=Ada e5=Large e6=true` fills a form; `check e6`/`uncheck e6` set a box; `type` appends (`type "text"` into the focused field); `--submit` on `fill`/`type` presses Enter after (`fill e2="buy milk" --submit && type "walk dog" --submit`); `select e5 "Large"`; `key Enter e4`. Dates: type them into the field. Dropdowns that filter as you type: `fill e18 Maths && key Enter e18`.
 - `wait "Order placed"` (or `--sel`, `--gone`, `--load`); prefer it to sleeping. Do not `wait` right after a click that navigated.
 - Pages that ignore you: repeat with `--os` (real input; brings Safari forward).
 - Bot checks are waited out by `open`/`go`. One that stays (a captcha) exits 1: `show` the tab, ask the user to solve it, then `wait --load`.

@@ -31,6 +31,12 @@ parses '"mode":"text"' t5 text -q pricing
 parses '"query":"pricing"' t5 text -q pricing
 parses '"fields":{' t5 fill e4=Ada e6=true
 parses '"text":"a=b"' t5 fill e4 a=b
+parses '"args":{"action":"type","tab":"t5","text":"walk dog"}' t5 type "walk dog"
+parses '"submit":true' t5 type "walk dog" --submit
+parses '"submit":true' t5 fill e2 "buy milk" --submit
+parses '"submit":"e6"' t5 fill e4=Ada e6=Bo --submit
+check "fill without an element is a usage error" test "$(code t5 fill x)" = 2
+check "select does not take --submit" test "$(code t5 select e3 x --submit)" = 2
 parses '"x":120' t5 click --xy 120,300
 parses '"dy":-400' t5 scroll -400
 parses '"dy":400' t5 scroll e30 400

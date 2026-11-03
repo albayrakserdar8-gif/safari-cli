@@ -98,7 +98,7 @@ Just ask the agent:
 | `tabs`, `open URL [--private\|--window]`, `T show`, `T close`, `close --agents` | List, open (in the background, or in a window of its own), show, close tabs; `--agents` closes every agent tab not on screen |
 | `T go URL\|back\|forward\|reload [--delay S]` | Load and wait |
 | `T read`, `T text`, `T links` | Controls with refs, page as markdown, links; `-q` to search (`-q '/regex/i'` too), `--diff` for changes only |
-| `T table [--rows CSS] [--json]` | A table or list of cards as TSV/JSON, with each row's link and `data-id` |
+| `T table [--rows CSS] [--json]` | A table or list of cards as TSV/JSON, with each row's link and `data-id`; without `--rows` it finds repeated cards itself |
 | `T crawl [--next TEXT] [--pages N]` | `table` on each page of a paged list, following "Next", merged and deduplicated |
 | `rate [SITE [S\|off]]` | Seconds between page loads per site (`rate example.com 8-14`), saved |
 | `T click R`, `dblclick`, `hover`, `fill`, `type`, `select`, `key`, `scroll`, `wait`, `upload`, `drop`, `dialog` | Act on the page (`drop` drops files on a drop zone) |
@@ -183,6 +183,8 @@ Fixed after these rounds:
 - An empty pattern matched every request, and a header value with a line break became two headers; both are refused, as is a `--global` pattern that matches everything.
 - Routes were not re-applied after a move to another port or a script navigation, missed URLs with a `#fragment` and iframes loaded before the route, and a reused XHR was logged as failed.
 - Global rules of a daemon that exits are removed after 5 s, so a dead mock server cannot break the user's tabs.
+
+A ninth round (November 2026) compared safari with playwright-cli on four tasks, one Claude Haiku agent per tool and task. Both answered everything correctly; safari needed more commands on TodoMVC (`type` required an element) and on books.toscrape (`table` did not see the card grid). This led to `type` into the focused field, `--submit` on `fill` and `type`, and `table` guessing repeated cards (with the selector to pin them) and leaving button text out of cells. Rerun twice, TodoMVC took 10–13 commands instead of 16 and books.toscrape 5–9 instead of 10.
 
 This was tested on one Mac (macOS 27), not across a wide range of sites.
 

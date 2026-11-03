@@ -20,10 +20,10 @@ enum CLI {
         ("dblclick", "[T] dblclick R [--os]"),
         ("hover", "[T] hover R [--os]"),
         ("drag", "[T] drag R --to R2|CSS        drag and drop"),
-        ("fill", "[T] fill R TEXT | fill R=V R2=V2 …  (true/false for checkboxes) [--os]"),
+        ("fill", "[T] fill R TEXT | fill R=V R2=V2 …  (true/false for checkboxes) [--submit] [--os]   --submit: then Enter"),
         ("check", "[T] check R | uncheck R      set a checkbox or radio (safe to repeat)"),
         ("uncheck", "[T] uncheck R"),
-        ("type", "[T] type R TEXT [--os]       append"),
+        ("type", "[T] type [R] TEXT [--submit] [--os]   append; without R into the focused field"),
         ("select", "[T] select R OPTION | select R TEXT   (option of a <select>; text in a field or editor)"),
         ("key", "[T] key KEY [R] [--os]        Enter, Escape, cmd+a, shift+Tab…"),
         ("scroll", "[T] scroll [DY] [R] [--os]"),
@@ -73,7 +73,7 @@ enum CLI {
         "--all": "all", "--full": "full", "--diff": "diff", "--os": "os", "--gone": "gone",
         "--private": "private", "--net": "net", "--errors": "errors", "--warn": "warn",
         "--new": "new", "--clear": "clear", "--right": "right", "--id-only": "idonly", "--wait": "wait",
-        "--json": "json", "--load": "load", "--window": "window", "--agents": "agents", "--hide": "hide", "--block": "block", "--doc": "doc", "--global": "global", "--list": "list", "--stop": "stop",
+        "--json": "json", "--load": "load", "--window": "window", "--agents": "agents", "--hide": "hide", "--submit": "submit", "--block": "block", "--doc": "doc", "--global": "global", "--list": "list", "--stop": "stop",
     ]
     /// Options each verb takes.
     private static let allowed: [String: Set<String>] = {
@@ -85,7 +85,7 @@ enum CLI {
             "table": ["ref", "selector", "rows", "json", "max_chars", "offset", "out"],
             "crawl": ["selector", "rows", "json", "next", "pages", "delay", "out"], "rate": [],
             "click": el.union(["answer", "right"]), "drag": ["ref", "selector", "xy", "to"], "dblclick": el.union(["answer"]), "hover": el,
-            "fill": el, "check": ["ref", "selector", "xy"], "uncheck": ["ref", "selector", "xy"], "type": el, "select": el, "key": el, "scroll": el,
+            "fill": el.union(["submit"]), "check": ["ref", "selector", "xy"], "uncheck": ["ref", "selector", "xy"], "type": el.union(["submit"]), "select": el, "key": el, "scroll": el,
             "wait": ["ref", "selector", "gone", "timeout", "load"], "upload": el.subtracting(["os"]), "dialog": [],
             "js": ["ref", "selector", "xy", "max_chars", "out"], "shot": ["ref", "selector", "region", "max_width", "out", "full"],
             "logs": ["net", "errors", "warn", "new", "pattern", "id", "limit", "clear"],
@@ -428,6 +428,8 @@ enum CLI {
             }
             args["action"] = "fill"
             args["fields"] = fields
+            // Enter goes to the last field given (the dictionary loses the order).
+            if f.contains("submit"), let l = pos.last, let eq = l.firstIndex(of: "=") { args["submit"] = String(l[..<eq]) }
             return ("act", args, nil)
         case "check", "uncheck":
             try target(required: true)
@@ -436,7 +438,9 @@ enum CLI {
             args["text"] = verb == "check" ? "true" : "false"
             return ("act", args, nil)
         case "fill", "type", "select":
-            try target(required: true)
+            // type without an element appends to the focused field (after fill or click).
+            try target(required: verb != "type")
+            if f.contains("submit") { args["submit"] = true }
             args["text"] = try one(verb == "select" ? "an option or text" : "the text")
             args["action"] = verb
             return ("act", args, nil)

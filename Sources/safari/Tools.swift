@@ -542,6 +542,7 @@ final class Tools {
             guard seen.count <= 1 else { throw ToolError("fields must all be in the same frame") }
             frame = seen.first ?? 0
             o["fields"] = out
+            if let s = o["submit"] as? String, let (_, rr) = split(s) { o["submit"] = rr }
         }
         if frame == 0 { return 0 }
         guard let list = frameIDs[tab], frame >= 1, frame <= list.count else { throw ToolError("frame f\(frame) is unknown; read again") }
@@ -1298,7 +1299,7 @@ final class Tools {
         } else if a["os"] as? Bool == true {
             (result, env) = try osAct(id, action, a)
         } else {
-            var o = pick(a, ["action", "ref", "x", "y", "text", "key", "dy", "fields", "selector", "to", "to_sel"])
+            var o = pick(a, ["action", "ref", "x", "y", "text", "key", "dy", "fields", "selector", "to", "to_sel", "submit"])
             o["op"] = "act"
             frame = try frameOf(&o, id)
             let targeted = o["ref"] != nil || o["selector"] != nil || o["x"] != nil || o["fields"] != nil
@@ -1320,7 +1321,7 @@ final class Tools {
             }
         }
         if ["scroll", "dialog"].contains(action) { return result }
-        let twice = ["click", "dblclick", "rclick", "drag", "key", "hover"].contains(action)
+        let twice = ["click", "dblclick", "rclick", "drag", "key", "hover"].contains(action) || a["submit"] != nil
         // The address from before the action, so a pushState route change shows up as one.
         var out = settle(id, result, href: env["u0"] as? String ?? env["u"] as? String ?? "", tabURL: verifiedURL,
                          wasReady: env["r"] as? String == "complete", twice: twice)
@@ -1491,10 +1492,12 @@ final class Tools {
         case "dblclick": Input.click(try needPoint(), count: 2)
         case "hover": Input.move(try needPoint())
         case "type", "fill":
+            if point == nil, g["ed"] == nil { throw ToolError("nothing is focused; pass a ref") }
             // A click would drop the caret or selection already in the focused field.
             if let point, action == "fill" || g["fo"] == nil { Input.click(point); usleep(200_000) }
             if action == "fill" { try Input.key("cmd+a") }
             Input.type(text)
+            if a["submit"] != nil { usleep(50_000); try Input.key("return") }
         case "key":
             guard let k = a["key"] as? String else { throw ToolError("key required") }
             if let point, g["fo"] == nil { Input.click(point); usleep(200_000) }

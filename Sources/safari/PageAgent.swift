@@ -372,19 +372,52 @@ enum PageAgent {
       if(a.selector&&!root)throw new Error('selector matched nothing');
       function vis(e){return e.getClientRects().length>0}
       // Cell text; a cut-off link text ("A Light in the ...") is completed from its title attribute.
-      function ct(e){var t=(e.innerText||e.textContent||'').replace(/\s+/g,' ').trim();
+      // Buttons inside a cell (Add to basket, Star) are left out; noscript markup never counts.
+      function ct(e){var t=(e.innerText!=null?e.innerText:e.textContent||'').replace(/\s+/g,' ').trim();
+        if(t&&!/^(BUTTON|SELECT)$/.test(e.tagName))e.querySelectorAll('button,[role=button],input[type=submit],input[type=button]').forEach(function(b){
+          var v=(b.innerText||b.value||'').replace(/\s+/g,' ').trim();if(v)t=t.replace(v,'').replace(/\s+/g,' ').trim()});
         if(/(\.\.\.|…)/.test(t))e.querySelectorAll('[title]').forEach(function(x){var v=(x.innerText||'').replace(/\s+/g,' ').trim(),b=v.replace(/\s*(\.\.\.|…)$/,''),ti=x.getAttribute('title').replace(/\s+/g,' ').trim();
           if(b&&b!==v&&ti.indexOf(b)===0&&t.indexOf(v)>=0)t=t.replace(v,ti)});
         return t}
+      function cells(el){var c=[].filter.call(el.children,vis);return(c.length?c:[el]).map(ct)}
+      // Siblings sharing tag and first class (a product grid, search results), each followed down
+      // through single-child wrappers (li > article). Menus fall out: one cell, short text, or nav.
+      function cards(){var skip='nav,header,footer,select,[role=navigation],[role=menu],[role=menubar],[role=tablist]',top=null;
+        function sig(e){var c=e.classList&&e.classList[0];return e.tagName.toLowerCase()+(c?'.'+CSS.escape(c):'')}
+        function down(e){for(var c;(c=[].filter.call(e.children,vis)).length===1&&c[0].children.length;)e=c[0];return e}
+        [root||document.body].concat([].slice.call((root||document.body).querySelectorAll('*'))).forEach(function(p){
+          if(p.children.length<3)return;var g={},big=null;
+          [].forEach.call(p.children,function(c){var k=sig(c);(g[k]=g[k]||[]).push(c);if(!big||g[k].length>g[big].length)big=k});
+          var its=g[big].filter(vis);if(its.length<3||p.closest(skip))return;
+          var rs=its.map(function(it){var el=down(it);return{el:el,it:it,c:cells(el)}}),full=0,ln=0,lk=0;
+          rs.forEach(function(r){var n=r.c.filter(Boolean).length;if(n>=2)full++;ln+=r.c.join(' ').length;if(r.el.querySelector('a[href]')||r.el.closest('a[href]'))lk++});
+          if(full*2<=rs.length||ln/rs.length<8)return;
+          var sc=rs.length*Math.min(6,rs.reduce(function(s,r){return s+r.c.filter(Boolean).length},0)/rs.length)*(lk*2>rs.length?1.5:1);
+          if(!top||sc>top.sc)top={sc:sc,rows:rs,p:p}});
+        if(!top)return null;
+        // A selector for --rows / crawl that matches these cards and nothing else.
+        var e0=top.rows[0].el,it=top.rows[0].it,n=top.rows.length,pin=false,sel=sig(e0);
+        function cnt(q){try{return[].filter.call(document.querySelectorAll(q),vis).length}catch(x){return-1}}
+        if(cnt(sel)!==n){var q=sig(top.p)+' > '+sig(it)+(it!==e0?' > '+sig(e0):'');if(cnt(q)===n)sel=q;else sel=null}
+        if(sel)pin=true;else sel=sig(e0);
+        return{rows:top.rows,sel:sel,pin:pin}}
       var head=null,rows=[],src;
       if(a.rows){
         var els=[].filter.call((root||document).querySelectorAll(a.rows),vis);
         if(!els.length)throw new Error('no visible element matches '+a.rows);
-        rows=els.map(function(el){var c=[].filter.call(el.children,vis);return{el:el,c:(c.length?c:[el]).map(ct)}});src=a.rows;
+        rows=els.map(function(el){return{el:el,c:cells(el)}});src=a.rows;
       }else{
-        var t=root&&root.tagName==='TABLE'?root:null,best=0;
+        var t=root&&root.tagName==='TABLE'?root:null,best=0,cs;
         if(!t)(root||document).querySelectorAll('table').forEach(function(x){var n=[].filter.call(x.rows,vis).length;if(n>best){best=n;t=x}});
-        if(!t)throw new Error('no table here; for a list of cards give --rows CSS (one match per row)');
+        // A real table wins; without one (or with only a tiny one), repeated cards.
+        if(!t||best<3&&!(root&&root.tagName==='TABLE'))cs=cards();
+        if(cs){rows=cs.rows;src='cards '+cs.sel+(cs.pin?' (guessed; pin with --rows \''+cs.sel+'\')':' (guessed)')}
+        else if(!t)throw new Error('no table or repeated cards here; give --rows CSS (one match per row)');
+      }
+      // Card columns are named after the first card's cells (h3, price_color), when those differ.
+      if(src&&rows.length){var hn=[].filter.call(rows[0].el.children,vis).map(function(e){return(e.classList[0]||e.tagName.toLowerCase()).replace(/[\t\n]/g,'')});
+        if(hn.length>1&&new Set(hn).size===hn.length)head=hn}
+      if(!src){
         // Expand colspan and rowspan into a plain grid, so columns line up. Leading header rows
         // (in thead, or all th) are merged into one name per column ("Height m").
         var hold=[],heads=[];
@@ -665,7 +698,7 @@ enum PageAgent {
       if(h.n)l.forEach(function(e){e.classList.add('__smcp_hover')});S.hv=l;return h}
     function act(a){S.note='';if(a.text!=null&&(a.action==='dialog'||a.action==='click'))a.text=String(a.text).replace(/^answer\s*[:=]?\s*/i,'');var r=act1(a);return r+S.note}
     function act1(a){var t;S.fx=1;S.f0=null;S.slider=false;
-      if(a.action==='click'||a.action==='dblclick'||a.action==='key'||a.action==='hover'){watch();S.t0=new Set(lines());S.n0=null;try{S.n0=mcall('ncount')}catch(e){}}
+      if(a.action==='click'||a.action==='dblclick'||a.action==='key'||a.action==='hover'||a.submit){watch();S.t0=new Set(lines());S.n0=null;try{S.n0=mcall('ncount')}catch(e){}}
       if(/^(click|dblclick|rclick|drag|key|hover|fill|check|select|type)$/.test(a.action)){fsnap(a);S.q0=null;try{S.q0=mcall('nn0')}catch(e){}}
       switch(a.action){
         case'click':t=need(a);if(a.text!=null)try{mcall('policy',[String(a.text)])}catch(e){}if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.to.tagName)||t.to.isContentEditable)S.fx=1;if(S.hv)hov(t.to);press(t);return'clicked '+desc(t.el);
@@ -682,8 +715,8 @@ enum PageAgent {
         case'rclick':t=need(a);['pointerdown','mousedown','pointerup','mouseup','contextmenu'].forEach(function(e){mev(t.to,e,t.x,t.y,{button:2,buttons:/down/.test(e)?2:0})});return'right-clicked '+desc(t.el);
         case'hover':t=need(a);['pointerover','mouseover','pointerenter','mouseenter','pointermove','mousemove'].forEach(function(e){mev(t.to,e,t.x,t.y)});
           var h=hov(t.to);return'hovered '+desc(t.el)+(h.n?' ('+h.n+' :hover rules':' (no :hover styles found')+(h.bad?'; '+h.bad+' stylesheets from other sites unreadable, --os if nothing shows)':')');
-        case'type':return edit(a);
-        case'fill':return a.fields?form(a.fields):edit(a);
+        case'type':return sub(a,edit(a));
+        case'fill':return sub(a,a.fields?form(a.fields):edit(a));
         case'check':return tick(need(a),a.text!=='false');
         case'key':return key(a);
         case'select':return pick(a);
@@ -692,6 +725,9 @@ enum PageAgent {
         case'drop':return dropOn(a);
         case'dialog':var dp=a.text==null?'accept':String(a.text);try{mcall('policy',[dp])}catch(e){throw new Error('dialogs cannot be answered on this page until it is reloaded')}return'next dialog: '+(dp==='accept'||dp==='dismiss'?dp:'answer '+JSON.stringify(dp));
         default:throw new Error('unknown action '+a.action)}}
+    // --submit: Enter in the field just edited (the last of a form; the focused one without a target).
+    function sub(a,r){if(!a.submit)return r;var s=typeof a.submit==='string';
+      return r+'; '+key({key:'Enter',ref:s?a.submit:a.ref,x:s?null:a.x,y:s?null:a.y})}
     function pickEl(a){var e=a.ref?get(a.ref):a.selector?document.querySelector(a.selector):deep(a.x,a.y);
       if(!e)throw new Error(a.selector?'no element matches '+a.selector:'no element at '+a.x+','+a.y);return e}
     // The selector is built in the page's world (main.js), which the recorder shares.
@@ -737,7 +773,9 @@ enum PageAgent {
     function geom(a){var t=target(a),g={iw:innerWidth,ih:innerHeight};
       if(t){g.x=t.x;g.y=t.y;g.d=desc(t.el);var ae=document.activeElement;if(ae&&ae!==document.body&&inside(t.el,ae))g.fo=1;if(t.r)g.r=[t.r.left,t.r.top,t.r.width,t.r.height];
         // For real input: what a click at the centre would hit, when that is not the target.
-        if(a.ref){var h=deep(t.x,t.y);if(h&&!inside(t.el,h)&&!inside(h,t.el))g.cover=desc(h)}}return g}
+        if(a.ref){var h=deep(t.x,t.y);if(h&&!inside(t.el,h)&&!inside(h,t.el))g.cover=desc(h)}}
+      // Without a target: is there a field (or a frame, which may hold one) to type into?
+      else{var f=document.activeElement;if(f&&(/^(INPUT|TEXTAREA|IFRAME)$/.test(f.tagName)||f.isContentEditable))g.ed=1}return g}
 
     function routes(a){try{return mcall('setRoutes',[a.list==null?null:a.list])}
       catch(e){if(e.message==='NOMAIN')throw new Error('this page was loaded before the Safari CLI Bridge extension; reload it, then route again');throw e}}

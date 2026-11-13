@@ -1,5 +1,5 @@
-// Safari CLI Bridge: connects to the local safari-mcp servers (one per Claude Code session)
-// and carries out their requests. A server and this page each prove they know the token in
+// Safari CLI Bridge: connects to the local safari daemon (safari-cli) and carries out its
+// requests. The daemon and this page each prove they know the token in
 // ~/.config/safari-mcp/token before any request runs.
 'use strict';
 const PORTS = [47391, 47392, 47393, 47394, 47395, 47396, 47397, 47398, 47399];
@@ -21,6 +21,11 @@ async function hmac(msg) {
   return hex(await crypto.subtle.sign('HMAC', k, enc.encode(msg)));
 }
 
+// The page outlives every tab: a map keyed by request id must not grow without end.
+function cap(map, max) {
+  while (map.size > max) map.delete(map.keys().next().value);
+}
+
 // Per-tab facts the page cannot report itself.
 const status = new Map();   // tab id -> HTTP status of the last top-level load
 const reqs = new Map();     // tab id -> recent requests, as log lines
@@ -30,12 +35,16 @@ browser.webRequest.onBeforeRequest.addListener((d) => {
   // Safari can label iframe loads main_frame too; only frame 0 is the tab's document.
   if (d.type === 'main_frame' && d.frameId === 0) reqs.set(d.tabId, []);
   started.set(d.requestId, d.timeStamp);
+  cap(started, 2000);
 }, { urls: ['<all_urls>'] });
 // Requests that safari route sent to its mock server, by request id: the URL the page asked for.
 const MOCK = /^http:\/\/127\.0\.0\.1:474\d\d\/m\//;
 const mocked = new Map();
 browser.webRequest.onBeforeRedirect.addListener((d) => {
-  if (d.tabId >= 0 && MOCK.test(d.redirectUrl || '') && !mocked.has(d.requestId)) mocked.set(d.requestId, d.url);
+  if (d.tabId >= 0 && MOCK.test(d.redirectUrl || '') && !mocked.has(d.requestId)) {
+    mocked.set(d.requestId, d.url);
+    cap(mocked, 500);
+  }
 }, { urls: ['<all_urls>'] });
 const authed = new Set();
 function done(d, st) {
@@ -56,8 +65,8 @@ browser.tabs.onRemoved.addListener((id) => {
   status.delete(id); reqs.delete(id);
 });
 
-// Tabs are addressed like Apple Events does: window id + 1-based index, plus what the server
-// expects there (tab count of the window, URL). A mismatch answers "stale" and nothing runs.
+// Tabs are addressed by window id + 1-based index, plus what the daemon expects there (tab
+// count of the window, URL). A mismatch answers "stale" and nothing runs.
 async function tabAt(m) {
   const ts = (await browser.tabs.query({ windowId: m.w })).sort((a, b) => a.index - b.index);
   if (m.n >= 0 && ts.length !== m.n) return null;
@@ -88,7 +97,7 @@ const ops = {
       if (/permission|not allowed|access/i.test(msg)) {
         return { err: 'The Safari CLI Bridge extension has no access to this site. In Safari > Settings > Extensions, allow it on every website.' };
       }
-      r = null; // like Apple Events: a script that fails gives no value
+      r = null; // a script that fails gives no value
     }
     const v = r && r[0];
     const after = await browser.tabs.get(t.id).catch(() => t);
@@ -202,7 +211,10 @@ function connect(port) {
   try { ws = new WebSocket(`ws://127.0.0.1:${port}`); } catch (e) { return; }
   const st = { ok: false, expect: null };
   socks.set(port, ws);
+  let dropped = false;
   const drop = () => {
+    if (dropped) return;
+    dropped = true;
     authed.delete(ws);
     if (socks.get(port) === ws) socks.delete(port);
     // A daemon that went away leaves rules pointing at its dead mock server, which would break

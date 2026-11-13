@@ -38,7 +38,10 @@ final class Rate {
 
     private func save() {
         let o = rules.mapValues { $0.lo == $0.hi ? String(format: "%g", $0.lo) : String(format: "%g-%g", $0.lo, $0.hi) }
-        if let d = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]) { try? d.write(to: URL(fileURLWithPath: file)) }
+        if let d = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]) {
+            try? d.write(to: URL(fileURLWithPath: file), options: [.atomic])
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file)
+        }
     }
 
     /// "WWW.Example.com" → "example.com".

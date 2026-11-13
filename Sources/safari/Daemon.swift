@@ -133,6 +133,8 @@ final class Daemon {
             guard getpeereid(c, &uid, &gid) == 0, uid == getuid() else { close(c); continue }
             var one: Int32 = 1
             setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+            var tv = timeval(tv_sec: 30, tv_usec: 0)
+            setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
             Thread.detachNewThread { self.serve(c) }
         }
     }
@@ -143,14 +145,21 @@ final class Daemon {
             close(c)
             return
         }
+        // The request is handled on the main queue, in arrival order. The reply is written back
+        // on this thread: a client that stops reading (Ctrl-Z) then blocks only its own thread,
+        // not the main queue that every other client waits on.
+        let done = DispatchSemaphore(value: 0)
+        var reply = Data()
         DispatchQueue.main.async {
             autoreleasepool {
-                var data = (try? JSONSerialization.data(withJSONObject: self.handle(msg), options: [.withoutEscapingSlashes])) ?? Data()
-                data.append(0x0A)
-                writeAll(fd: c, data)
-                close(c)
+                reply = (try? JSONSerialization.data(withJSONObject: self.handle(msg), options: [.withoutEscapingSlashes])) ?? Data()
+                reply.append(0x0A)
+                done.signal()
             }
         }
+        done.wait()
+        writeAll(fd: c, reply)
+        close(c)
     }
 
     private func handle(_ m: [String: Any]) -> [String: Any] {

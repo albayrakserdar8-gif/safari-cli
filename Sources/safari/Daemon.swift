@@ -202,13 +202,18 @@ final class Daemon {
         }
     }
 
-    /// Stops taking new connections at once and exits after the replies already queued.
+    /// Stops taking new connections at once and exits after the replies already queued. Routes
+    /// end with the daemon: once this reply is out, their copies in pages and the network rules
+    /// are cleared (at most 1.5 s, which a restart for a new build waits for).
     private func quit() {
         guard !exiting else { return }
         exiting = true
         unlink(Paths.sock)
         log("daemon \(getpid()) exiting")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { exit(0) }
+        DispatchQueue.main.async {
+            self.tools.shutdown(budget: 1.5)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { exit(0) }
+        }
     }
 
     private func touch() {

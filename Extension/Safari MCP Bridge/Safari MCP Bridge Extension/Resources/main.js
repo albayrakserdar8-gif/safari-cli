@@ -7,16 +7,35 @@ var M=window.__smcpM={con:null,net:null,slots:{}};
 // Safari, so the tab's fetch/XHR are routed here. A mocked request keeps its URL plus a
 // secret marker (mk); a network rule for that marker alone sends it to the daemon's mock
 // server. Fetching the http mock server directly would be blocked on https pages.
-M.routes=[];try{M.routes=JSON.parse(sessionStorage.getItem('__smcp_routes')||'[]')}catch(e){}
+// The copy (M.R) is {o: tag, t: lease in ms, x: lease end, l: routes}. Routes apply only until
+// x, which the daemon renews while it runs, so a copy no daemon clears (it crashed, the tab left
+// the site, the tab was lost) stops altering requests, and sending the mock marker to the real
+// server, within one lease. The tag names the daemon and the list's version: every agent call
+// says which tag its daemon stands behind (rchk), and any other copy is dropped.
+var RK='__smcp_routes',DN=Date.now,RX=[],LEASE=2220000;M.R=null;
+function rset(s){var c=null;try{c=JSON.parse(s||'null')}catch(e){}RX=[];M.R=c&&typeof c.o==='string'&&c.t>0&&c.x>0&&c.l&&c.l.length?c:null}
+function rput(c){RX=[];M.R=c;try{c?sessionStorage.setItem(RK,JSON.stringify(c)):sessionStorage.removeItem(RK)}catch(e){}}
+// At load, a copy out of its lease, or a bare list from a main.js before leases, is removed.
+try{var s0=sessionStorage.getItem(RK);if(s0){rset(s0);if(!M.R||DN()>=M.R.x)rput(null)}}catch(e){}
 function rx(p){if(p.slice(0,3)==='re:')return new RegExp(p.slice(3),'i');var l=p.toLowerCase();if(p.indexOf('*')<0)return{test:function(u){return u.toLowerCase().indexOf(l)>=0}};
   return new RegExp('^'+p.replace(/[.+?^${}()|[\]\\]/g,'\\$&').replace(/\*/g,'.*')+'$','i')}
-function route(u){if(!M.routes.length)return null;var abs;try{abs=new URL(u,location.href).href}catch(e){abs=String(u)}abs=abs.split('#')[0];
-  for(var i=M.routes.length-1;i>=0;i--){var r=M.routes[i];try{if(!r.rx)r.rx=rx(r.p);if(r.rx.test(abs))return{r:r,abs:abs}}catch(e){}}return null}
+function route(u){var c=M.R,l=c&&DN()<c.x&&c.l;if(!l)return null;var abs;try{abs=new URL(u,location.href).href}catch(e){abs=String(u)}abs=abs.split('#')[0];
+  for(var i=l.length-1;i>=0;i--){var r=l[i];try{var x=RX[i]||(RX[i]=rx(r.p));if(x.test(abs))return{r:r,abs:abs}}catch(e){}}return null}
 // Where a routed request goes instead: the mock server, the --redirect target, or null (unchanged).
 function dest(t){if(t.r.k==='redirect')return t.r.to;if(t.r.k!=='mock')return null;var u=t.abs.split('#')[0];return u+(u.indexOf('?')<0?'?':'&')+t.r.mk}
-// Same-origin frames share the tab's sessionStorage: pick up routes set after they loaded.
-addEventListener('storage',function(e){if(e.key==='__smcp_routes'){try{M.routes=JSON.parse(e.newValue||'[]')}catch(x){M.routes=[]}}});
-M.setRoutes=function(l){if(l!=null){M.routes=l;try{l.length?sessionStorage.setItem('__smcp_routes',JSON.stringify(l)):sessionStorage.removeItem('__smcp_routes')}catch(e){}}return M.routes.length};
+// Same-origin frames share the tab's sessionStorage: pick up routes set or cleared after they
+// loaded. A page back from the back-forward cache missed those events and reads them again.
+addEventListener('storage',function(e){if(e.key===RK||e.key===null)try{if(e.storageArea===sessionStorage)rset(e.newValue)}catch(x){}});
+addEventListener('pageshow',function(e){if(e.persisted)try{rset(sessionStorage.getItem(RK))}catch(x){}});
+// d: {o, t, l} from the daemon; an empty l clears. A bare list comes from a daemon older than
+// leases: it is tagged '?', which no newer daemon names, and gets the default lease.
+M.setRoutes=function(d){var a=Array.isArray(d);if(d!=null){var l=a?d:d.l,t=a?LEASE:+d.t||LEASE;
+  rput(l&&l.length?{o:a?'?':String(d.o||'?'),t:t,x:DN()+t,l:l}:null)}var c=M.R;return a?(c?c.l.length:0):{n:c?c.l.length:0,o:c?c.o:''}};
+// An agent call names the copy its daemon stands behind for this tab (t, '' for none): any
+// other is dropped before the call runs, the named one gets a fresh lease (stored at most once
+// a minute). With mine (a daemon that is exiting), only copies whose tag starts with it go.
+M.rchk=function(t,mine){var c=M.R;if(c&&c.o!==t){if(!mine||c.o.indexOf(mine)===0)rput(c=null)}
+  else if(c&&c.x-DN()<c.t-60000){c.x=DN()+c.t;rput(c)}return c?c.o:''};
 function hdrs(h,list){list.forEach(function(x){x[1]===''?h.delete(x[0]):h.set(x[0],x[1])});return h}
 // A CSS selector that finds e alone: test hooks and stable ids first, then a short path.
 function selOf(e){var root=e.getRootNode(),one=function(s){try{var m=root.querySelectorAll(s);return m.length===1&&m[0]===e}catch(x){return false}};

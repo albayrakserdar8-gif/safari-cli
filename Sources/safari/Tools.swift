@@ -46,7 +46,11 @@ final class Tools {
         if bridge.generation != extGeneration {
             let first = extGeneration == 0
             extGeneration = bridge.generation  // before reconnected(): its sync comes back through here
-            if !first { reconnected() } else { _ = try? bridge.call("rules", ["rules": []], timeout: 3) }
+            if !first { reconnected() }
+            // A new daemon clears what an earlier one on this port left; after a reconnect the new
+            // copy of the extension (or the same one, back within 5 s with our old rules) gets the
+            // rules of the routes that kept their tabs. Retried after the next call if this fails.
+            rulesStale = (try? bridge.call("rules", ["rules": networkRules()], timeout: 3)) == nil
         }
         return ext
     }
@@ -56,9 +60,10 @@ final class Tools {
     /// kept unconfirmed (`xid` nil) for `sync` to find by the handle in its page; the rest are
     /// dropped. Old positions are never acted on: the sync here (or, if it fails, the one
     /// `resolve`/`live` force) re-matches or drops every unconfirmed tab first.
+    /// Routes stay with the tabs that keep their ids (their pages still hold them; the caller
+    /// sends the network rules to the new copy); those of dropped tabs go, mocks included.
     private func reconnected() {
         log("extension reconnected")
-        routes = [:]  // the new copy of the extension holds no rules
         frameIDs = [:]
         focusFrame = [:]
         let list = (try? ext.listTabs()) ?? []
@@ -84,6 +89,7 @@ final class Tools {
         blocked = blocked.filter { tabs[$0] != nil }
         lastUse = lastUse.filter { tabs[$0.key] != nil }
         if let c = current, tabs[c] == nil { current = nil; defaultLost = true }
+        pruneRoutes(send: false)
     }
 
     /// `safari --ext OP JSON`: one raw extension op, for debugging. `"tab": "t3"` fills in its address.
@@ -475,12 +481,18 @@ final class Tools {
     }
 
     private func agentCall(_ id: Int, _ op: [String: Any]) throws -> [String: Any] {
+        // In the top document the call also names the route copy we stand behind for this tab
+        // (`rt`): main.js drops any other before the op runs and says what it holds (`routeReport`).
+        let top = ext.frame == 0 && aeFrame == 0
         do {
-            return try agent(id) { h in
+            let env = try agent(id) { h in
                 var o = op
                 o["h"] = h
+                if top { o["rt"] = routeTag[id] ?? "" }
                 return "return __smcp.call(\(jsonString(o)))"
             }
+            if top, op["list"] == nil, let held = env["rt"] as? String { routeReport(id, held, env["u0"] as? String) }
+            return env
         } catch is ScriptEmpty {
             throw ToolError("The page did not respond (still loading, showing a dialog, or not a web page).")
         }
@@ -815,8 +827,30 @@ final class Tools {
     /// ignore `tabIds`, and its request events do not reliably say which tab asked.
     private var routes: [Int: [[String: Any]]] = [:]
     private let mocks = MockServer()
-    /// Origin whose sessionStorage last got tab id's routes; another origin needs them again.
-    private var routeHost: [Int: String?] = [:]
+    // A page's copy of its tab's routes must never outlive what this daemon stands behind. The
+    // copy carries a tag (this daemon's `session` and a counter, new with every change) and a
+    // lease. main.js applies it only within the lease, which is renewed while the daemon runs:
+    // a daemon that died without clearing it (crash, lost tab, a site the tab has left) stops
+    // altering requests within one lease. Every agent call names the tag we stand behind for
+    // the tab ('' for none) and main.js drops any other copy before the call runs. Copies we
+    // left on sites the tab has moved on from are tracked, so a stale one is cleared after the
+    // command that brings the tab back. Exiting clears what it can reach (`shutdown`).
+    /// Tag of tab id's plain routes, when it has any.
+    private var routeTag: [Int: String] = [:]
+    private var routeSeq = 0
+    /// Per tab and site ("" for a page without an origin): the tag of the copy we left in that
+    /// site's sessionStorage, and when it was written or last confirmed. One whose tag is not the
+    /// tab's `routeTag` is stale. Entries go when their copy's lease is over.
+    private var routeCopies: [Int: [String: (tag: String, at: Date)]] = [:]
+    /// When tab id's page last took, confirmed or was asked about its routes.
+    private var routeSeen: [Int: Date] = [:]
+    /// The extension may lack our network rules (the call after a reconnect failed); sent again after the next call.
+    private var rulesStale = false
+    /// How long a page applies routes it has not heard about: longer than the daemon lives
+    /// without commands plus `routeRenew` and a margin, so a running daemon's routes never lapse.
+    static let routeLease = Daemon.idleLimit + 7 * 60
+    /// After a call, a routed tab whose page has not confirmed its routes for this long is renewed.
+    static let routeRenew: TimeInterval = 5 * 60
     static func origin(_ url: String?) -> String? {
         guard let c = URLComponents(string: url ?? ""), let h = c.host else { return nil }
         return "\(c.scheme ?? "")://\(h)" + (c.port.map { ":\($0)" } ?? "")
@@ -905,20 +939,46 @@ final class Tools {
         }
     }
 
-    /// Routes of tabs that are gone: their mocks are dropped, and their --global rules too.
-    private func pruneRoutes() {
-        let dead = routes.keys.filter { tabs[$0] == nil }
+    /// Routes of tabs that are gone (closed, or lost track of): their mocks are dropped, and
+    /// their --global rules too (unless `send` is false: the caller sends the rules). A lost
+    /// tab's page keeps its copy only until its lease ends or we contact it again: then no
+    /// tag names it and main.js drops it.
+    private func pruneRoutes(send: Bool = true) {
+        let dead = Set(routes.keys).union(routeTag.keys).union(routeCopies.keys).union(routeSeen.keys).filter { tabs[$0] == nil }
         guard !dead.isEmpty else { return }
         for id in dead {
             for r in routes[id] ?? [] { if let u = r["url"] as? String { mocks.remove(url: u) } }
             routes[id] = nil
+            routeTag[id] = nil
+            routeCopies[id] = nil
+            routeSeen[id] = nil
         }
-        _ = try? bridge.call("rules", ["rules": networkRules()], timeout: 5)
+        if send { _ = try? bridge.call("rules", ["rules": networkRules()], timeout: 5) }
     }
 
-    /// Sends all routes to the extension, and tab `id`'s to its page.
-    private func applyRoutes(page id: Int?) throws {
-        routes = routes.filter { tabs[$0.key] != nil }  // closed tabs
+    /// A new tag for tab id's page routes after a change (none when it has no page routes), so
+    /// copies of the old list, on this site or one the tab has left, are no longer named.
+    private func retag(_ id: Int) {
+        if pageRoutes(routes[id] ?? []).isEmpty { routeTag[id] = nil; return }
+        routeSeq += 1
+        routeTag[id] = "\(session).\(routeSeq)"
+    }
+
+    /// Records what tab id's page on `url`'s site (the tab's address when nil) holds now: a copy
+    /// tagged `tag`, or none ('' or nil). Copies whose lease is over are dropped from the record.
+    private func noteCopy(_ id: Int, _ url: String?, _ tag: String?) {
+        let now = Date()
+        var c = (routeCopies[id] ?? [:]).filter { now.timeIntervalSince($0.value.at) < Tools.routeLease }
+        c[Tools.origin(url ?? tabs[id]?.url) ?? ""] = (tag ?? "").isEmpty ? nil : (tag!, now)
+        routeCopies[id] = c.isEmpty ? nil : c
+        routeSeen[id] = routeTag[id] == nil && c.isEmpty ? nil : now
+    }
+
+    /// Sends all routes to the extension, and tab `id`'s to its page. Returns a note when the
+    /// page runs a main.js from before route leases.
+    @discardableResult
+    private func applyRoutes(page id: Int?) throws -> String? {
+        pruneRoutes(send: false)  // closed tabs; the rules go out next
         do {
             _ = try bridge.call("rules", ["rules": networkRules()])
         } catch let e as ToolError {
@@ -928,10 +988,25 @@ final class Tools {
             }
             throw ToolError("Safari refused the route: \(e.msg)")
         }
-        if let id {
-            _ = try agentCall(id, ["op": "route", "list": pageRoutes(routes[id] ?? [])])
-            routeHost[id] = Tools.origin(tabs[id]?.url)
+        rulesStale = false
+        guard let id else { return nil }
+        return try sendRoutes(id)
+    }
+
+    /// Puts tab id's page routes, tag and a fresh lease into its page (an empty list clears the
+    /// copy). A main.js from before leases answers without its state: it gets the bare list,
+    /// which it keeps until the tab's session ends, and the result says so.
+    private func sendRoutes(_ id: Int) throws -> String? {
+        let list = pageRoutes(routes[id] ?? [])
+        let lease = Int(Tools.routeLease * 1000)
+        var env = try agentCall(id, ["op": "route", "list": ["o": routeTag[id] ?? "", "t": lease, "l": list]])
+        var note: String?
+        if !(env["v"] is [String: Any]) {
+            env = try agentCall(id, ["op": "route", "list": list])
+            if !list.isEmpty { note = "this page runs a main.js from before route leases (reload it, or rebuild the extension with Extension/build.sh): its routes outlive the daemon" }
         }
+        noteCopy(id, env["u"] as? String, routeTag[id])
+        return note
     }
 
     /// `safari route`: mock, block, redirect or rewrite headers of the tab's requests, of every
@@ -978,7 +1053,7 @@ final class Tools {
             next.removeAll { $0["p"] as? String == p }
             next.append(r)
             head = "routed " + describe(r)
-            if r["g"] as? Bool == true { head += "\n\u{1E}--global: this applies to every Safari tab, the user's too, until `unroute` or t\(id) closes" }
+            if r["g"] as? Bool == true { head += "\n\u{1E}--global: this applies to every Safari tab, the user's too, until `unroute`, t\(id) closes or the daemon exits" }
         case "remove":
             if let p = a["pattern"] as? String {
                 guard list.contains(where: { $0["p"] as? String == p }) else {
@@ -991,35 +1066,129 @@ final class Tools {
                 next = []
             }
         default:
+            // Asking the page first makes main.js drop a copy we do not stand behind (a stale one,
+            // an earlier daemon's), so the list is what applies. A main.js from before leases cannot
+            // tell them apart: when it holds routes and we have none for it, they are cleared.
+            if let env = try? agentCall(id, ["op": "route"]), let n = env["v"] as? Int, n > 0, routeTag[id] == nil {
+                _ = try? agentCall(id, ["op": "route", "list": [Any]()])
+            }
             return list.isEmpty ? "no routes on t\(id)" : list.map(describe).joined(separator: "\n")
         }
         routes[id] = next.isEmpty ? nil : next
+        let oldTag = routeTag[id]
+        retag(id)
+        var note: String?
         do {
-            try applyRoutes(page: id)
+            note = try applyRoutes(page: id)
         } catch {
             routes[id] = list.isEmpty ? nil : list
+            routeTag[id] = oldTag
             if let u = added?["url"] as? String { mocks.remove(url: u) }
-            try? applyRoutes(page: id)
+            _ = try? applyRoutes(page: id)
             throw error
         }
         for r in list where !next.contains(where: { $0["url"] as? String == r["url"] as? String }) {
             if let u = r["url"] as? String { mocks.remove(url: u) }
         }
-        return head
+        return head + (note.map { "\n\u{1E}" + $0 } ?? "")
     }
 
     /// After a load in tab `id`: its fetch/XHR routes live in the site's sessionStorage, so a
-    /// new site needs them again.
+    /// new site needs them again, and a stale copy left on this site is replaced or cleared.
+    /// Dialogs answered in another tab than the call's are labelled.
     private func reapplyRoutes(_ id: Int) {
-        guard let list = routes[id], !list.isEmpty else { return }
-        if (try? agentCall(id, ["op": "route", "list": pageRoutes(list)])) != nil { routeHost[id] = Tools.origin(tabs[id]?.url) }
+        let n = dialogs.count
+        _ = try? sendRoutes(id)
+        if id != current, dialogs.count > n { for i in n..<dialogs.count { dialogs[i] = "(t\(id)) " + dialogs[i] } }
     }
 
-    /// After any call: a routed tab that is now on another site (a click, a script) gets its routes again.
+    /// What main.js said about tab id's route copy before a call ran (it has just dropped any
+    /// copy we did not name): it holds our tag, renewed, or none.
+    private func routeReport(_ id: Int, _ held: String, _ url: String?) {
+        guard routeTag[id] != nil || routeCopies[id] != nil else { return }
+        noteCopy(id, url, held)
+    }
+
+    /// After any call, for each tab with routes or with copies left on other sites: one now on
+    /// a site without its current routes (a click, a script, the user) gets them; a stale copy
+    /// on this site is cleared; and one not heard from for `routeRenew` is asked again, which
+    /// renews the lease or drops a stale copy wherever the tab is now.
     private func followRoutes() {
-        for id in routes.keys where tabs[id] != nil {
-            if routeHost[id] ?? nil != Tools.origin(tabs[id]?.url) { reapplyRoutes(id) }
+        if rulesStale {
+            rulesStale = false  // once: an extension without the op keeps failing
+            _ = try? bridge.call("rules", ["rules": networkRules()], timeout: 5)
         }
+        let now = Date()
+        for id in Set(routeTag.keys).union(routeCopies.keys).sorted() where tabs[id] != nil {
+            if let c = routeCopies[id] {
+                let live = c.filter { now.timeIntervalSince($0.value.at) < Tools.routeLease }
+                routeCopies[id] = live.isEmpty ? nil : live
+            }
+            let tag = routeTag[id]
+            guard tag != nil || routeCopies[id] != nil else { routeSeen[id] = nil; continue }  // nothing left anywhere
+            if routeCopies[id]?[Tools.origin(tabs[id]?.url) ?? ""]?.tag != tag { reapplyRoutes(id) }
+            else if now.timeIntervalSince(routeSeen[id] ?? .distantPast) > Tools.routeRenew, !blocked.contains(id) { renewRoutes(id) }
+        }
+    }
+
+    /// Between calls that name the tab: asks its page (wherever the tab is now, the user may
+    /// have moved it) to renew the copy we name and drop any other. Runs main.js's check
+    /// directly, without the agent (nothing injected, no dialogs taken). A routed page left
+    /// without its routes gets them again.
+    private func renewRoutes(_ id: Int) {
+        let tag = routeTag[id] ?? ""
+        routeSeen[id] = Date()  // tried: not again for routeRenew, whatever the answer
+        guard let r = try? exec(id, Tools.mainCall("rchk", [tag])),
+              let j = (try? JSONSerialization.jsonObject(with: Data(r.utf8))) as? [String: Any],
+              let held = j["v"] as? String else { return }  // no main.js, or one from before leases
+        noteCopy(id, nil, held)  // exec has refreshed the tab's address
+        if held != tag { reapplyRoutes(id) }
+    }
+
+    /// JS for the extension's isolated world that runs one main.js op and returns its reply
+    /// (`{"v":…}`, `{"e":…}` for an op main.js lacks), or '' when the page has no main.js.
+    /// It skips the agent and its handle check: only for ops that are safe in any tab.
+    static func mainCall(_ op: String, _ args: [Any]) -> String {
+        let q = jsonString(["op": op, "a": args])
+        return "(function(){var r='',h=function(e){r=e.detail};document.addEventListener('__smcp_r',h);"
+            + "document.dispatchEvent(new CustomEvent('__smcp_q',{detail:\(jsonString(q))}));document.removeEventListener('__smcp_r',h);return r})()"
+    }
+
+    /// The daemon is exiting, and its routes end with it: clears this daemon's copies in the
+    /// pages of tabs that have routes or copies of ours, and its network rules, within `budget`
+    /// seconds (each call is short: a tab behind a dialog must not hold up the exit). main.js
+    /// drops only copies tagged by this daemon; one from before leases has its bare list cleared.
+    /// Only tabs whose position Safari's tab id confirms are reached. Copies it cannot reach
+    /// (sites the tab is not on now, a page that did not answer) lapse with their lease, or are
+    /// dropped when a later daemon contacts the tab.
+    func shutdown(budget: TimeInterval) {
+        let end = Date().addingTimeInterval(budget)
+        func left() -> Double { min(1, end.timeIntervalSinceNow) }
+        let ids = Set(routeTag.keys).union(routeCopies.keys).filter { tabs[$0] != nil }.sorted()
+        let rules = !networkRules().isEmpty
+        guard (!ids.isEmpty || rules), bridge.connected else { return }
+        var cleared = 0
+        if !ids.isEmpty {
+            // Fresh positions by Safari's tab id: one short call instead of a sync.
+            var at: [Int: (w: Int, i: Int)] = [:]
+            if let r = try? bridge.call("tabs", [:], timeout: left()), let l = r["ok"] as? [[String: Any]] {
+                for t in l { if let x = t["id"] as? Int, let w = t["w"] as? Int, let i = t["i"] as? Int { at[x] = (w, i) } }
+            }
+            for id in ids where left() > 0.05 {
+                guard let t = tabs[id] else { continue }
+                // Only where Safari's tab id confirms the position: a main.js call arms dialog
+                // answering in the page it reaches, which must never be another tab.
+                guard let pos = t.xid.flatMap({ at[$0] }) else { continue }
+                func run(_ code: String) -> String? {
+                    (try? bridge.call("run", ["w": pos.w, "i": pos.i, "n": -1, "u": "*", "code": code], timeout: left()))?["ok"] as? String
+                }
+                guard let r = run(Tools.mainCall("rchk", ["", session + "."])) else { continue }
+                if r.hasPrefix("{\"v\"") { cleared += 1 }
+                else if r.hasPrefix("{\"e\""), run(Tools.mainCall("setRoutes", [[Any]()])) != nil { cleared += 1 }
+            }
+        }
+        if rules, left() > 0.05 { _ = try? bridge.call("rules", ["rules": []], timeout: left()) }
+        log("exit: route copies cleared in \(cleared) of \(ids.count) tab\(ids.count == 1 ? "" : "s") (where held)" + (rules ? "; network rules cleared" : ""))
     }
 
     /// Cookies of the tab's site: through the extension (all, HttpOnly too), else `document.cookie`.
@@ -1212,7 +1381,8 @@ final class Tools {
     private func passCheck(_ id: Int, _ text: String) throws -> String {
         var text = text
         let h = host(id)
-        if text.contains("(HTTP 429)") || text.contains("(HTTP 503)") { text += rate.backoff(host: h) }
+        // The status note ends the line; the title before it is the page's own text.
+        if text.hasSuffix("(HTTP 429)") || text.hasSuffix("(HTTP 503)") { text += rate.backoff(host: h) }
         guard let k = poll(id, botJS)?.result, !k.isEmpty, k != "~" else { return text }
         let what = ["cloudflare": "Cloudflare check", "perimeterx": "PerimeterX check"][k] ?? k
         let limit: Double = k == "cloudflare" || k == "bot check" ? 20 : 10

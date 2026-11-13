@@ -3,8 +3,8 @@ import Foundation
 import Network
 
 /// Local WebSocket the Safari extension connects to. The extension's background page tries
-/// every port in `ports`, so each server process (one per Claude Code session) takes the
-/// first free one. Both sides prove they know the token in `~/.config/safari-mcp/token`
+/// every port in `ports`, and the daemon takes the first free one (another program may hold
+/// some of them). Both sides prove they know the token in `~/.config/safari-mcp/token`
 /// before any command runs, so neither a web page nor another local listener can take part.
 final class Bridge {
     static let ports: ClosedRange<UInt16> = 47391...47399

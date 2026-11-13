@@ -1,6 +1,6 @@
 import SafariServices
 
-/// Answers the extension's one native request: the shared token the safari-mcp server
+/// Answers the extension's one native request: the shared token the safari daemon
 /// keeps in ~/.config/safari-mcp/token. Both sides sign each other's nonce with it.
 class SafariWebExtensionHandler: NSObject, NSExtensionRequestHandling {
     func beginRequest(with context: NSExtensionContext) {

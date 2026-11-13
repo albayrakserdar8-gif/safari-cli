@@ -127,7 +127,7 @@ enum Capture {
     /// Viewport rect in screen points. Falls back to assuming all browser chrome is on the
     /// top and left, with no page zoom, when Accessibility is not granted.
     static func viewport(wid: Int, iw: Double, ih: Double) throws -> (rect: CGRect, bounds: CGRect) {
-        guard let (bounds, pid) = window(wid) else { throw ToolError("Safari window not found; run tabs.") }
+        guard let (bounds, pid) = window(wid) else { throw ToolError("Safari window not found; run `safari tabs`.") }
         if let r = axViewport(pid: pid, bounds: bounds) { return (r, bounds) }
         let w = min(iw, Double(bounds.width)), h = min(ih, Double(bounds.height))
         return (CGRect(x: Double(bounds.maxX) - w, y: Double(bounds.maxY) - h, width: w, height: h), bounds)
@@ -162,7 +162,7 @@ enum Capture {
     /// calls back (for example when the window leaves the screen mid-capture), and a hung
     /// request blocks every later capture from the same process. A child can be killed.
     static func jpeg(wid: Int, bounds: CGRect, crop: CGRect, maxWidth: Int) throws -> (data: Data, width: Int, height: Int) {
-        guard let exe = Bundle.main.executableURL else { throw ToolError("Cannot locate the server binary for the screenshot helper.") }
+        guard let exe = Bundle.main.executableURL else { throw ToolError("Cannot locate the safari binary for the screenshot helper.") }
         let out = FileManager.default.temporaryDirectory.appendingPathComponent("smcp-\(getpid())-\(wid).jpg")
         defer { try? FileManager.default.removeItem(at: out) }
         func arr(_ r: CGRect) -> [Double] { [Double(r.minX), Double(r.minY), Double(r.width), Double(r.height)] }
@@ -269,7 +269,7 @@ enum Capture {
         }
         let r = g.result
         guard let image = r.image else {
-            throw ToolError("Could not capture the window (\(r.failure)). Screenshots need Screen Recording permission for the app running this server (System Settings > Privacy & Security), and the window must not be minimized.")
+            throw ToolError("Could not capture the window (\(r.failure)). Screenshots need Screen Recording permission for the app running safari (your terminal) (System Settings > Privacy & Security > Screen Recording), and the window must not be minimized.")
         }
         return image
     }

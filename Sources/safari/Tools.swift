@@ -44,14 +44,18 @@ final class Tools {
     private var safari: ExtBrowser {
         _ = bridge.ready()  // right after start, wait briefly for the extension to connect
         if bridge.generation != extGeneration {
-            if extGeneration != 0 { reconnected() } else { _ = try? bridge.call("rules", ["rules": []], timeout: 3) }
-            extGeneration = bridge.generation
+            let first = extGeneration == 0
+            extGeneration = bridge.generation  // before reconnected(): its sync comes back through here
+            if !first { reconnected() } else { _ = try? bridge.call("rules", ["rules": []], timeout: 3) }
         }
         return ext
     }
 
     /// Another copy of the extension took over (Safari restarted it): its tab and window ids
-    /// differ, so carry over the tabs whose URL is unique; the rest get new ids at the next sync.
+    /// differ. A tab whose URL is unique in both lists keeps its id; a tab we have worked in is
+    /// kept unconfirmed (`xid` nil) for `sync` to find by the handle in its page; the rest are
+    /// dropped. Old positions are never acted on: the sync here (or, if it fails, the one
+    /// `resolve`/`live` force) re-matches or drops every unconfirmed tab first.
     private func reconnected() {
         log("extension reconnected")
         routes = [:]  // the new copy of the extension holds no rules
@@ -59,18 +63,27 @@ final class Tools {
         focusFrame = [:]
         let list = (try? ext.listTabs()) ?? []
         var fresh: [Int: Tab] = [:]
-        for t in tabs.values where tabs.values.filter({ $0.url == t.url }).count == 1 {
-            let hits = list.filter { $0.url == t.url }
-            guard hits.count == 1 else { continue }
+        for t in tabs.values {
             var n = t
-            n.pos = hits[0].ref
-            n.visible = hits[0].current
-            n.xid = hits[0].xid
-            n.priv = n.priv || hits[0].priv
+            let hits = list.filter { $0.url == t.url }
+            if hits.count == 1, tabs.values.filter({ $0.url == t.url }).count == 1 {
+                n.pos = hits[0].ref
+                n.visible = hits[0].current
+                n.xid = hits[0].xid
+                n.priv = n.priv || hits[0].priv
+            } else if t.handle != nil {
+                n.xid = nil
+            } else { continue }
             fresh[t.id] = n
         }
         tabs = fresh
         counts = [:]
+        try? sync()
+        // `opened` is filtered where it is read (resolve, saveState).
+        shown = shown.filter { tabs[$0] != nil }
+        blocked = blocked.filter { tabs[$0] != nil }
+        lastUse = lastUse.filter { tabs[$0.key] != nil }
+        if let c = current, tabs[c] == nil { current = nil; defaultLost = true }
     }
 
     /// `safari --ext OP JSON`: one raw extension op, for debugging. `"tab": "t3"` fills in its address.
@@ -202,26 +215,10 @@ final class Tools {
         return ha == hb
     }
 
-    /// Longest common subsequence, as index pairs.
-    private func lcs(_ a: [String], _ b: [String]) -> [(Int, Int)] {
-        guard !a.isEmpty, !b.isEmpty else { return [] }
-        var len = Array(repeating: Array(repeating: 0, count: b.count + 1), count: a.count + 1)
-        for i in stride(from: a.count - 1, through: 0, by: -1) {
-            for j in stride(from: b.count - 1, through: 0, by: -1) {
-                len[i][j] = a[i] == b[j] ? len[i + 1][j + 1] + 1 : max(len[i + 1][j], len[i][j + 1])
-            }
-        }
-        var pairs: [(Int, Int)] = []
-        var i = 0, j = 0
-        while i < a.count && j < b.count {
-            if a[i] == b[j] { pairs.append((i, j)); i += 1; j += 1 } else if len[i + 1][j] >= len[i][j + 1] { i += 1 } else { j += 1 }
-        }
-        return pairs
-    }
-
-    /// Re-reads Safari's tabs and carries our ids over to wherever each tab is now.
-    /// Tabs keep their order unless moved, so matching the URL sequence per window finds
-    /// most of them; what is left is matched by the handle in the page, or dropped.
+    /// Re-reads Safari's tabs and carries our ids over to wherever each tab is now: by
+    /// Safari's tab id (`xid`); a tab left unconfirmed by `reconnected` (`xid` nil) by the
+    /// handle in its page. Old tabs not found are dropped (the model gets "gone"); listed
+    /// tabs not matched get new ids, or their old one back after a daemon restart (below).
     // A restarted daemon (idle exit, rebuild) gives tabs we worked in back the ids they had.
     // They are matched by the handle stored in the page (Safari's extension tab ids change
     // between connections), and only on the same site.
@@ -267,30 +264,12 @@ final class Tools {
             slot[li] = t.id
         }
 
-        // With the extension every tab has a fixed id: no guessing needed for those.
+        // Every listed tab has a fixed Safari id within one connection of the extension.
         var byXid: [Int: Int] = [:]
         for li in list.indices { if let x = list[li].xid { byXid[x] = li } }
         for old in tabs.values { if let x = old.xid, let li = byXid[x] { assign(old, li) } }
 
-        var wids: [Int] = []
-        for t in list where !wids.contains(t.ref.wid) { wids.append(t.ref.wid) }
-        for wid in wids {
-            let news = list.indices.filter { list[$0].ref.wid == wid && slot[$0] == nil }
-            let olds = tabs.values.filter { $0.pos.wid == wid && result[$0.id] == nil && $0.xid == nil }.sorted { $0.pos.idx < $1.pos.idx }
-            var po = 0, pn = 0
-            for (oi, ni) in lcs(olds.map(\.url), news.map { list[$0].url }) + [(olds.count, news.count)] {
-                let go = Array(olds[po..<oi]), gn = Array(news[pn..<ni])
-                if go.count == gn.count {
-                    // Same place, new URL: the tab navigated. For a tab we have worked in,
-                    // only take that on trust within one site; otherwise ask the page below.
-                    for k in go.indices where go[k].handle == nil || sameHost(go[k].url, list[gn[k]].url) { assign(go[k], gn[k]) }
-                }
-                if oi < olds.count { assign(olds[oi], news[ni]) }
-                po = oi + 1
-                pn = ni + 1
-            }
-        }
-
+        // After a reconnect: worked-in tabs are found by the handle in the page, never by position.
         let looseOld = tabs.values.filter { result[$0.id] == nil && $0.handle != nil && $0.xid == nil }.sorted { $0.id < $1.id }
         if !looseOld.isEmpty {
             var probed: [Int: String] = [:]
@@ -361,12 +340,13 @@ final class Tools {
     }
 
     private func resolve(_ a: [String: Any]) throws -> Int {
+        _ = safari  // notices an extension reconnect before any position is used
         if let raw = a["tab"] {
             let s = "\(raw)"
             guard let id = Int(s.hasPrefix("t") ? String(s.dropFirst()) : s) else {
                 throw ToolError("Bad tab id \(s); use an id from `safari tabs`, like t3.")
             }
-            if tabs[id] == nil { try sync() }
+            if tabs[id]?.xid == nil { try sync() }  // unknown, or unconfirmed since a reconnect
             guard tabs[id] != nil else {
                 // Never let later calls without a tab fall back to the user's visible tab instead.
                 if current == nil { defaultLost = true }
@@ -381,6 +361,7 @@ final class Tools {
             throw ToolError("Several tabs opened here are open (\(opened.sorted().map { "t\($0)" }.joined(separator: ", "))); put the tab id first: safari t3 <verb> (or export SAFARI_TAB=t3 once).")
         }
         if let c = current {
+            if tabs[c] != nil, tabs[c]?.xid == nil { try sync() }
             guard tabs[c] != nil else { throw gone(c) }
             return c
         }
@@ -395,11 +376,20 @@ final class Tools {
         Expect(count: counts[t.pos.wid] ?? -1, url: url ? t.url : nil)
     }
 
+    /// The tab as it is now. Reading `safari` first lets a reconnect (which re-syncs) happen
+    /// before the position is taken; a tab still unconfirmed after one is re-matched first.
+    private func live(_ id: Int) throws -> Tab {
+        _ = safari
+        if tabs[id] != nil, tabs[id]?.xid == nil { try sync() }
+        guard let t = tabs[id] else { throw gone(id) }
+        return t
+    }
+
     /// Runs `op` on the tab's position; Safari refuses if the tab is not what we expect,
     /// in which case positions are re-read and the call retried.
     private func guardedOp(_ id: Int, _ op: (TabRef, Expect) throws -> Bool) throws {
         for _ in 0..<3 {
-            guard let t = tabs[id] else { throw gone(id) }
+            let t = try live(id)
             if try op(t.pos, expect(t)) { return }
             try sync()
         }
@@ -409,7 +399,7 @@ final class Tools {
     /// Runs JavaScript in the tab after Safari has verified it is the tab we mean.
     private func exec(_ id: Int, _ code: String) throws -> String {
         for _ in 0..<3 {
-            guard let t = tabs[id] else { throw gone(id) }
+            let t = try live(id)
             if let r = try safari.js(t.pos, code, expect(t)) {
                 verifiedURL = t.url
                 tabs[id]?.url = r.url
@@ -422,7 +412,7 @@ final class Tools {
 
     /// JavaScript without the URL check, for polling while a navigation is in flight.
     private func poll(_ id: Int, _ code: String) -> (url: String, result: String)? {
-        guard let t = tabs[id] else { return nil }
+        guard let t = try? live(id) else { return nil }
         if let r = try? safari.js(t.pos, code, expect(t, url: false)) {
             tabs[id]?.url = r.url
             return r
@@ -464,12 +454,9 @@ final class Tools {
             }
             if let m = env["m"] as? String {
                 if tabs.values.contains(where: { $0.handle == m && $0.id != id }) {
-                    // This position holds another tab we know: tabs were reordered. Drop what
-                    // we believed about this window and let sync find tabs by their handles.
-                    guard let wid = tabs[id]?.pos.wid else { throw gone(id) }
-                    for t in tabs.values where t.pos.wid == wid {
-                        if t.handle == nil { tabs[t.id] = nil } else { tabs[t.id]?.url = "?" }
-                    }
+                    // This position holds another tab we know: tabs moved since the last sync
+                    // (same window count and URL, so Safari's check passed). Sync re-reads
+                    // positions by Safari's tab id; nothing else needs forgetting.
                     try sync()
                     guard tabs[id] != nil else { throw gone(id) }
                 } else {

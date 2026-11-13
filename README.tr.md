@@ -204,6 +204,7 @@ Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenm
 - `shot --full` sayfanın kendisini kaydırır; içteki bir kutuyu kaydıran sayfalarda yalnızca ilk ekran çıkar.
 - `pdf`, sayfanın anlık kopyasını JavaScript kapalıyken yeniden dizer: kullanıcının girişini isteyen görseller, yüklemeden sonra betiklerin çizdiği içerik ve başka kaynaklı canvas'lar eksik çıkabilir.
 - Safari'nin çerez deposunu adlandırmadığı bir gizli pencerede `cookies` yalnızca sayfanın okuyabildiği çerezleri görür (HttpOnly yok).
+- Safari web uygulamaları (Dock'a Ekle) sürülmez. Her biri eklentinin kendi kopyasını çalıştırır, safari bu kopyaları kullanmaz; `safari status` onları yok sayılan olarak sayar.
 - Data: adresleri (Tab Sleeper gibi eklentilerin uyuyan sekmeleri) eklentilerden gizlenir, bu yüzden `tabs` onları boş listeler.
 - Bot doğrulamaları başlık ve işaretlemeleriyle tanınır; başkaları fark edilmeden geçer. Hız sınırı `go`, `open` ve `crawl` için geçerlidir; sayfa yükleyen tıklamalar için değil.
 - `text` kipi bağlantı metinlerini ve veri tablosu hücrelerini kırpar (200 karakter, 60 satır); karmaşık tablolarda düzen bozulabilir. Sayfa düzeni için kullanılan tablolar metin olarak okunur.

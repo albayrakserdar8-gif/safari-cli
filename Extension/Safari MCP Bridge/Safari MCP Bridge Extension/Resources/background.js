@@ -225,7 +225,9 @@ function connect(port) {
         if (!(await getToken())) { ws.close(); return; }
         const mine = nonce();
         st.expect = await hmac('srv:' + mine);
-        ws.send(JSON.stringify({ auth: await hmac('ext:' + m.n), n: mine }));
+        // A Safari web app (Add to Dock) runs its own copy of this page, which sees only the
+        // web app's window; `app` lets the server leave that copy alone.
+        ws.send(JSON.stringify({ auth: await hmac('ext:' + m.n), n: mine, app: !!navigator.standalone }));
       } else if (m.auth && st.expect) {
         if (m.auth === st.expect) { st.ok = true; authed.add(ws); }
         else { token = null; ws.close(); }

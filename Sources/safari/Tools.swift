@@ -40,7 +40,7 @@ final class Tools {
     private var extGeneration = 0
 
     /// Safari, through the Safari CLI Bridge extension (the only way in). When it is not
-    /// connected, the first call throws the setup message (`Bridge.down`).
+    /// connected, the first call throws the setup message (`Bridge.downReason`).
     private var safari: ExtBrowser {
         _ = bridge.ready()  // right after start, wait briefly for the extension to connect
         if bridge.generation != extGeneration {
@@ -86,7 +86,9 @@ final class Tools {
     /// One line for `safari status`.
     func status() -> String {
         let ext = bridge.ready() ? "extension connected (port \(bridge.port))" : "extension NOT connected: " + bridge.downReason
-        return "daemon pid \(getpid()) · \(ext) · \(tabs.count) tabs tracked"
+        let apps = bridge.webApps
+        let ignored = apps > 0 && bridge.connected ? " · \(apps) web app cop\(apps == 1 ? "y" : "ies") ignored" : ""
+        return "daemon pid \(getpid()) · \(ext)\(ignored) · \(tabs.count) tabs tracked"
     }
 
     /// Window server id for a tab's window, for capture, real input and native dialogs.

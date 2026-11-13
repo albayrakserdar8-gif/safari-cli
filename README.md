@@ -200,6 +200,7 @@ This was tested on one Mac (macOS 27), not across a wide range of sites.
 - `shot --full` scrolls the page itself; pages that scroll an inner box show only their first screen.
 - `pdf` lays out a snapshot of the page again with JavaScript off: images that need the user's login, content drawn by scripts after load and cross-origin canvases may be missing.
 - In a private window whose cookie store Safari does not name, `cookies` sees only cookies the page can read (no HttpOnly).
+- Safari web apps (Add to Dock) are not driven. Each runs its own copy of the extension, which safari leaves alone; `safari status` counts them as ignored.
 - Data: URLs (sleeping tabs of extensions like Tab Sleeper) are hidden from extensions, so `tabs` lists them blank.
 - Bot checks are recognised by their titles and markup; others pass unnoticed. Pacing covers `go`, `open` and `crawl`, not clicks that load a page.
 - `text` mode trims link text and data-table cells (200 chars, 60 rows); complex tables may lose layout. Tables used for page layout are read as text.

@@ -73,5 +73,6 @@ The files below sit in `references/` next to this one. **Before you start a task
 
 - `safari status` shows whether the Safari CLI Bridge extension is connected; `safari stop` restarts the daemon on the next command.
 - "Safari CLI Bridge extension is not connected": ask the user to enable it in Safari > Settings > Extensions (safari cannot work without it). `file://` pages are refused: serve the folder with `python3 -m http.server`.
+- `tabs` lists only a web app's page, or `open` loses its tab at once: an old extension build is connected from a Safari web app; rebuild it with `Extension/build.sh`.
 - "no access to this site": the user must allow the extension on every website.
 - Logs, dialogs or routes missing on a page loaded before the extension was enabled: reload it.

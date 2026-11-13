@@ -19,7 +19,11 @@ final class Bridge {
     // update), each with its own tab ids. All authenticated connections are kept, but
     // requests always go to the oldest one, so ids stay consistent; `generation` changes
     // whenever that connection changes, which tells Tools to re-match its tabs.
+    // A Safari web app (Add to Dock) is a separate process with its own copy of the
+    // extension that sees only the web app's window. Those copies say so in the handshake
+    // (`app`) and are kept in `apps`, which no request ever goes to.
     private var conns: [NWConnection] = []
+    private var apps: [NWConnection] = []
     private var gen = 0
     private var seq = 0
     private var pending: [Int: (sem: DispatchSemaphore, box: Box, via: NWConnection)] = [:]
@@ -34,6 +38,8 @@ final class Bridge {
 
     var connected: Bool { q.sync { !conns.isEmpty } }
     var generation: Int { q.sync { gen } }
+    /// Connected copies of the extension that run inside Safari web apps and are not used.
+    var webApps: Int { q.sync { apps.count } }
 
     /// True once the extension is connected. Shortly after start it waits a little, since the
     /// extension retries every 2 s and the first tool call usually comes right away.
@@ -51,12 +57,14 @@ final class Bridge {
     }
 
     /// Why the extension is not connected, for errors and `safari status`.
-    var downReason: String {
+    var downReason: String { reason(apps: webApps) }
+
+    private func reason(apps: Int) -> String {
         port == 0 ? "ports \(Bridge.ports.lowerBound)-\(Bridge.ports.upperBound) are all in use (stop other safari-cli or safari-mcp servers)"
+            : apps > 0 ? "only the copy inside a Safari web app (Add to Dock) is connected, and it cannot see Safari's tabs; open Safari itself and turn on Safari CLI Bridge in Safari > Settings > Extensions"
             : "turn on Safari CLI Bridge in Safari > Settings > Extensions and allow it on every website (build it once with Extension/build.sh; it needs Xcode)"
     }
 
-    private var down: ToolError { ToolError("The Safari CLI Bridge extension is not connected: " + downReason + ".") }
 
     /// Sends one command and waits for its reply. Throws a setup message when the extension
     /// is not connected or the connection drops.
@@ -64,7 +72,8 @@ final class Bridge {
         let sem = DispatchSemaphore(value: 0)
         let box = Box()
         let id: Int = try q.sync {
-            guard let c = conns.first else { throw down }
+            // On `q` already, so not `downReason`, which takes the queue itself.
+            guard let c = conns.first else { throw ToolError("The Safari CLI Bridge extension is not connected: " + reason(apps: apps.count) + ".") }
             seq += 1
             pending[seq] = (sem, box, c)
             var m = args
@@ -117,7 +126,7 @@ final class Bridge {
     }
 
     private func accept(_ c: NWConnection) {
-        // A new extension connection replaces the old one (Safari restarted, page reloaded).
+        // Joins `conns` or `apps` once it has authenticated (see `receive`).
         c.stateUpdateHandler = { [weak self] st in
             switch st {
             case .failed, .cancelled: self?.drop(c)
@@ -131,6 +140,7 @@ final class Bridge {
     }
 
     private func drop(_ c: NWConnection) {
+        if let i = apps.firstIndex(where: { $0 === c }) { apps.remove(at: i); return }
         guard let i = conns.firstIndex(where: { $0 === c }) else { return }
         conns.remove(at: i)
         if i == 0 { gen += 1 }
@@ -156,8 +166,13 @@ final class Bridge {
                         return
                     }
                     ok = true
-                    if self.conns.isEmpty { log("extension connected on port \(self.port)"); self.gen += 1 }
-                    self.conns.append(c)
+                    if m["app"] as? Bool == true {
+                        log("extension copy in a Safari web app connected; not used")
+                        self.apps.append(c)
+                    } else {
+                        if self.conns.isEmpty { log("extension connected on port \(self.port)"); self.gen += 1 }
+                        self.conns.append(c)
+                    }
                     self.send(c, ["auth": self.hmac("srv:" + theirs)])
                 } else if let id = m["id"] as? Int, let p = self.pending.removeValue(forKey: id) {
                     p.box.value = m

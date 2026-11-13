@@ -67,22 +67,26 @@ final class MockServer {
 
     private func accept(_ c: NWConnection) {
         c.start(queue: q)
-        q.asyncAfter(deadline: .now() + 10) { if c.state != .cancelled { c.cancel() } }
-        read(c, Data())
+        // Watchdog for the request head only: an idle socket is dropped after 10 s, but a connection
+        // that got its head may wait for a delayed answer (see `answer`).
+        var gotHead = false
+        q.asyncAfter(deadline: .now() + 10) { if !gotHead && c.state != .cancelled { c.cancel() } }
+        read(c, Data()) { gotHead = true }
     }
 
     /// Reads until the end of the request head; the body (if any) is ignored.
-    private func read(_ c: NWConnection, _ buf: Data) {
+    private func read(_ c: NWConnection, _ buf: Data, _ onHead: @escaping () -> Void) {
         c.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, done, err in
             guard let self else { return }
             var buf = buf
             if let data { buf.append(data) }
             if let r = buf.range(of: Data("\r\n\r\n".utf8)) {
+                onHead()
                 self.answer(c, String(decoding: buf[..<r.lowerBound], as: UTF8.self))
             } else if err != nil || done || buf.count > 65536 {
                 c.cancel()
             } else {
-                self.read(c, buf)
+                self.read(c, buf, onHead)
             }
         }
     }
@@ -128,5 +132,7 @@ final class MockServer {
         var data = Data(out.utf8)
         if !noBody { data.append(body) }
         c.send(content: data, completion: .contentProcessed { _ in c.cancel() })
+        // The head watchdog is over by now: bound the send too, so a peer that never reads leaks nothing.
+        q.asyncAfter(deadline: .now() + 10) { if c.state != .cancelled { c.cancel() } }
     }
 }

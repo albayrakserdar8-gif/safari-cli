@@ -1247,26 +1247,92 @@ final class Tools {
         return ["wait": r.wait, "site": r.key]
     }
 
+    /// What `settle` saw right after an action. `act` builds the result line from it, never by
+    /// looking into the agent's text, which carries page-controlled names and values.
+    private enum Settled: Equatable {
+        /// The page or its address changed; `title | url` of where it is now.
+        case navigated(String)
+        /// Nothing on the page reacted (judged only for clicks, keys, hovers, drags, submits).
+        case unchanged
+        /// Same page: changed in place, or not judged.
+        case same
+    }
+
     /// Reports a navigation the action caused, so the model need not look.
-    private func settle(_ id: Int, _ result: String, href: String, tabURL: String, wasReady: Bool, twice: Bool) -> String {
+    private func settle(_ id: Int, href: String, tabURL: String, wasReady: Bool, twice: Bool) -> Settled {
         var changed = true
         for wait: useconds_t in twice ? [120_000, 250_000] : [120_000] {
             usleep(wait)
-            guard let s = peek(id) else { return result + " → " + waitLoad(id, marked: false, from: href, timeout: 10).text }
+            guard let s = peek(id) else { return .navigated(waitLoad(id, marked: false, from: href, timeout: 10).text) }
             if s.url != href || s.ready == "leaving" || (wasReady && s.ready != "complete") {
-                return result + " → " + waitLoad(id, marked: false, from: href, timeout: 10).text
+                return .navigated(waitLoad(id, marked: false, from: href, timeout: 10).text)
             }
             if s.tabURL != tabURL {
                 // Safari has the new address but still shows the old document: mark it and wait.
                 mark += 1
                 _ = poll(id, "if(location.href===\(jsonString(href)))window.__smcpOld=\(mark);''")
                 let (text, stuck) = waitLoad(id, marked: true, from: href, timeout: 10, grace: 1.5)
-                return stuck ? result : result + " → " + text
+                return stuck ? .same : .navigated(text)
             }
             changed = s.changed
         }
         // Synthetic events are ignored by some pages; tell the model when nothing reacted.
-        return twice && !changed ? result + " (no change on the page yet)" : result
+        return twice && !changed ? .unchanged : .same
+    }
+
+    /// Prefixes the refs in an agent result from a child frame with the frame's alias
+    /// (`e5` → `f1e5`), as `read` showed them. Names, values, roles and option texts come from
+    /// the page, so a ref counts only where the agent writes one: outside JSON strings, after
+    /// one of the agent's own lead-ins, and in its shape (`e5 role "name"`, `! e5: …`, `ref e5 is …`).
+    static func frameRefs(_ s: String, _ alias: String) -> String {
+        // Scalars, not Characters: a quote followed by a combining mark is still a quote.
+        let c = Array(s.unicodeScalars)
+        func at(_ k: Int, _ w: String) -> Bool {
+            let u = Array(w.unicodeScalars)
+            return k >= 0 && k + u.count <= c.count && c[k..<k + u.count].elementsEqual(u)
+        }
+        func before(_ i: Int, _ w: String) -> Bool { at(i - w.unicodeScalars.count, w) }
+        let leads = ["\n", ", ", ": ", "clicked ", "dragged ", "hovered ", "filled ", "typed into ", "scrolled ", " to ", " in ", " on "]
+        // ` role words "` after the ref, as desc() writes it.
+        func desc(_ j: Int) -> Bool {
+            func word(_ u: Unicode.Scalar) -> Bool { u != "\"" && !u.properties.isWhitespace }
+            var k = j, words = 0
+            while k + 1 < c.count, c[k] == " " {
+                if c[k + 1] == "\"" { return words > 0 }
+                guard word(c[k + 1]) else { return false }
+                k += 1
+                while k < c.count, word(c[k]) { k += 1 }
+                words += 1
+            }
+            return false
+        }
+        func isRef(_ i: Int) -> Bool {
+            var j = i + 1
+            while j < c.count, ("0"..."9").contains(c[j]) { j += 1 }
+            guard j > i + 1 else { return false }
+            // `ref e5 is stale`, and a failed field of a form: `! e5: …`.
+            if before(i, "ref ") { return at(j, " is ") }
+            if (i == 2 && at(0, "! ")) || before(i, "\n! ") { return desc(j) || at(j, ": ") }
+            return desc(j) && (i == 0 || leads.contains { before(i, $0) })
+        }
+        var out = String.UnicodeScalarView()
+        var quoted = false
+        var i = 0
+        while i < c.count {
+            let ch = c[i]
+            if quoted {
+                out.append(ch)
+                if ch == "\\", i + 1 < c.count, c[i + 1] != "\n" { out.append(c[i + 1]); i += 2; continue }
+                // JSON.stringify escapes newlines, so a raw one always ends a stray quote.
+                if ch == "\"" || ch == "\n" { quoted = false }
+            } else {
+                if ch == "\"" { quoted = true }
+                else if ch == "e", isRef(i) { out.append(contentsOf: alias.unicodeScalars) }
+                out.append(ch)
+            }
+            i += 1
+        }
+        return String(out)
     }
 
     private func act(_ a: [String: Any]) throws -> String {
@@ -1303,7 +1369,7 @@ final class Tools {
             result = env["v"] as? String ?? "ok"
             if frame != 0, let alias = frameIDs[id]?.firstIndex(of: frame).map({ "f\($0 + 1)" }) {
                 // Report frame refs as the model knows them, and judge page changes by the top document.
-                result = result.replacing(#/\be(\d+)\b/#) { alias + "e" + $0.1 }
+                result = Tools.frameRefs(result, alias)
                 env["u"] = tabs[id]?.url ?? ""
                 env["u0"] = env["u"]
                 env["r"] = "complete"
@@ -1312,16 +1378,18 @@ final class Tools {
         if ["scroll", "dialog"].contains(action) { return result }
         let twice = ["click", "dblclick", "rclick", "drag", "key", "hover"].contains(action) || a["submit"] != nil
         // The address from before the action, so a pushState route change shows up as one.
-        var out = settle(id, result, href: env["u0"] as? String ?? env["u"] as? String ?? "", tabURL: verifiedURL,
-                         wasReady: env["r"] as? String == "complete", twice: twice)
-        guard !out.contains(" → "), a["os"] as? Bool != true else { return out }
-        // Pages often react a moment later (a timer, an animation): give them up to 1.2 s more.
+        let settled = settle(id, href: env["u0"] as? String ?? env["u"] as? String ?? "", tabURL: verifiedURL,
+                             wasReady: env["r"] as? String == "complete", twice: twice)
+        if case .navigated(let page) = settled { return result + " → " + page }
         let noChange = " (no change on the page yet)"
-        if frame == 0, out.hasSuffix(noChange) {
+        var unchanged = settled == .unchanged
+        if a["os"] as? Bool == true { return result + (unchanged ? noChange : "") }
+        // Pages often react a moment later (a timer, an animation): give them up to 1.2 s more.
+        if frame == 0, unchanged {
             let t0 = Date()
             while Date().timeIntervalSince(t0) < 1.2 {
                 usleep(150_000)
-                if peek(id)?.changed == true { out = String(out.dropLast(noChange.count)); break }
+                if peek(id)?.changed == true { unchanged = false; break }
             }
         }
         // The page may still be waiting for its own requests (adding to a cart, an address lookup):
@@ -1342,7 +1410,7 @@ final class Tools {
             if twice, let t = d["t"] as? String, !t.isEmpty { extra += " · new text: " + t; changed = true }
             if var c = d["c"] as? String, !c.isEmpty {
                 if frame != 0, let alias = frameIDs[id]?.firstIndex(of: frame).map({ "f\($0 + 1)" }) {
-                    c = c.replacing(#/\be(\d+)\b/#) { alias + "e" + $0.1 }
+                    c = Tools.frameRefs(c, alias)
                 }
                 extra += " · also changed: " + c
                 changed = true
@@ -1352,10 +1420,8 @@ final class Tools {
         // A dialog in a frame reaches the top document by postMessage, after the frame call returned.
         if frame != 0 { _ = try? agentCall(id, ["op": "nop"]) }
         // settle judges the top document right after the action; later or in-frame changes count too.
-        if changed && out.hasSuffix(" (no change on the page yet)") {
-            return String(out.dropLast(" (no change on the page yet)".count)) + extra
-        }
-        return out + extra
+        if changed { unchanged = false }
+        return result + (unchanged ? noChange : "") + extra
     }
 
     /// Answers a dialog Safari shows natively, via Accessibility. Only tried when the tab's last

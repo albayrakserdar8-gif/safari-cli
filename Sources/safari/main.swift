@@ -23,6 +23,10 @@ do {
         print(String(decoding: d, as: UTF8.self))
         exit(0)
     }
+    // `safari --selftest` checks the pure functions without Safari or the daemon (tests).
+    if argv == ["--selftest"] {
+        exit(SelfTest.run())
+    }
     // `safari --reserve URL [lo hi]` asks for a pacing slot without sleeping or navigating (tests).
     if argv.first == "--reserve", argv.count >= 2 {
         var a: [String: Any] = ["url": argv[1]]

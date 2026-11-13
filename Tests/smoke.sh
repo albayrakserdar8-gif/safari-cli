@@ -25,6 +25,7 @@ check "missing element is a usage error" test "$(code t3 click)" = 2
 check "unknown option is a usage error" test "$(code t3 read --nope)" = 2
 check "global verb takes no tab" test "$(code t3 tabs)" = 2
 check "close needs a tab" test "$(code close)" = 2
+check "selftest passes" "$BIN" --selftest
 
 parses '"args":{"action":"new","url":"x.com"},"out":null,"tool":"tabs"' open x.com
 parses '"mode":"text"' t5 text -q pricing

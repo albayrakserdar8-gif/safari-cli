@@ -61,34 +61,69 @@ if(window===top){
   document.addEventListener('keydown',function(ev){if(!M.rec||!ev.isTrusted)return;var e=ev.target;
     if(ev.key==='Enter'&&(field(e)&&e.tagName!=='TEXTAREA'||e.tagName==='SELECT'||(e.tagName==='INPUT'&&/^(checkbox|radio)$/.test(e.type)))){M.rec.ke=Date.now();if(field(e))rfill(e);var s=rsel(e);if(s)radd('key Enter '+s)}else if(ev.key==='Escape')radd('key Escape')},true)}
 function clip(s,k){s=String(s==null?'':s).replace(/\s+/g,' ').trim();return s.length>k?s.slice(0,k-1)+'…':s}
-function fmt(v){if(typeof v==='string')return v;if(v instanceof Error)return v.name+': '+v.message;try{return JSON.stringify(v)}catch(e){return String(v)}}
+// The hooks below run on every page the user visits, touched by safari or not, so all they
+// store is bounded: cut() caps a string without scanning the rest of it.
+function cut(s,k){s=String(s);return s.length>k?s.slice(0,k)+'…':s}
+// Console arguments: a cheap JSON-like preview instead of a full JSON.stringify (depth 3,
+// 10 keys or items per level, ~400 chars). Reads only own enumerable properties it shows,
+// calls no toJSON/toString, and never throws.
+function pv(v,d,o){var t=typeof v;if(o.n<=0)return'…';
+  if(v===null||t==='number'||t==='boolean'||t==='undefined')return String(v);
+  if(t==='string')return JSON.stringify(cut(v,d?100:300));
+  if(t==='bigint')return String(v)+'n';
+  if(t==='symbol')return Symbol.prototype.toString.call(v);
+  if(t==='function')return'ƒ '+cut(v.name||'anonymous',60);
+  if(v instanceof Error)return cut(v.name+': '+v.message,300);
+  if(v instanceof Date){var ms=Date.prototype.getTime.call(v);return ms===ms?new Date(ms).toISOString():'Invalid Date'}
+  if(typeof Element!=='undefined'&&v instanceof Element)return'<'+v.tagName.toLowerCase()+(v.id?'#'+cut(v.id,40):'')+'>';
+  if(v instanceof Map)return'Map('+v.size+')';if(v instanceof Set)return'Set('+v.size+')';
+  if(ArrayBuffer.isView(v))return(v.constructor&&v.constructor.name||'View')+'('+(v.length!=null?v.length:v.byteLength)+')';
+  if(v instanceof ArrayBuffer)return'ArrayBuffer('+v.byteLength+')';
+  var a=Array.isArray(v);if(d>2)return a?'[…]':'{…}';
+  var p=[],n=0,s,i;
+  if(a){for(i=0;i<v.length&&i<10&&o.n>0;i++){s=pv(v[i],d+1,o);o.n-=s.length+1;p.push(s)}if(v.length>i)p.push('…+'+(v.length-i))}
+  else for(var k in v){if(!Object.prototype.hasOwnProperty.call(v,k))continue;if(++n>10||o.n<=0){p.push('…');break}
+    s=JSON.stringify(cut(k,40))+':';try{s+=pv(v[k],d+1,o)}catch(e){s+='?'}o.n-=s.length+1;p.push(s)}
+  return a?'['+p.join(',')+']':'{'+p.join(',')+'}'}
+function fmt(v){try{return typeof v==='string'?cut(v,300):pv(v,0,{n:400})}catch(e){return'?'}}
 function push(arr,x){arr.push(x);arr.t=(arr.t||0)+1;if(arr.length>300)arr.shift()}
 // Bodies of text/JSON responses, kept for the last 50 requests.
-var BOD=new Map();
-function keep(id,ct,b){if(!/json|text|xml|javascript|html|csv/i.test(ct||''))return;BOD.set(id,{c:ct,b:String(b).slice(0,4000)});if(BOD.size>50)BOD.delete(BOD.keys().next().value)}
+var BOD=new Map(),TXT=/json|text|xml|javascript|html|csv/i,STREAM=/event-stream|ndjson|jsonl|json-seq|x-mixed-replace|grpc/i;
+function keep(id,ct,b){if(!TXT.test(ct||''))return;BOD.set(id,{c:ct,b:String(b).slice(0,4000)});if(BOD.size>50)BOD.delete(BOD.keys().next().value)}
+// Reads at most ~4000 chars from a clone of r. Streams (SSE, ndjson) are never cloned: a
+// clone tees the body, and an unread or endless branch would hold it all in memory.
+// Cancelling the clone's branch of the tee leaves the page's own branch running.
+function keepHead(id,ct,r){if(STREAM.test(ct)){keep(id,ct,'(streamed response; body not kept)');return}
+  var b=r.clone().body;if(!b||typeof b.getReader!=='function'||typeof TextDecoder==='undefined')return;
+  var rd=b.getReader(),dec=new TextDecoder(),s='';
+  function stop(){try{rd.cancel().catch(function(){})}catch(e){}}
+  function step(x){if(x.done){keep(id,ct,s+dec.decode());return}
+    s+=dec.decode(x.value,{stream:true});if(s.length>=4000){keep(id,ct,s);stop();return}return rd.read().then(step)}
+  rd.read().then(step).catch(stop)}
 function hook(){if(M.con)return false;M.con=[];M.net=[];M.nn=0;M.cur={};
-  ['log','info','warn','error','debug'].forEach(function(l){var o=console[l];console[l]=function(){try{push(M.con,l+' '+[].map.call(arguments,fmt).join(' '))}catch(e){}return o.apply(console,arguments)}});
-  addEventListener('error',function(e){push(M.con,'exception '+(e.message||(e.target&&(e.target.src||e.target.href))||'')+(e.filename?' @'+e.filename.split('/').pop()+':'+e.lineno:''))},true);
+  ['log','info','warn','error','debug'].forEach(function(l){var o=console[l];console[l]=function(){
+    try{var n=arguments.length,t=[].slice.call(arguments,0,20).map(fmt).join(' ');push(M.con,l+' '+cut(n>20?t+' …':t,2000))}catch(e){}return o.apply(console,arguments)}});
+  addEventListener('error',function(e){push(M.con,'exception '+cut(e.message||(e.target&&(e.target.src||e.target.href))||'',1000)+(e.filename?' @'+cut(e.filename.slice(e.filename.lastIndexOf('/')+1),200)+':'+e.lineno:''))},true);
   addEventListener('unhandledrejection',function(e){push(M.con,'rejection '+fmt(e.reason))});
   var f=window.fetch;
   if(f)window.fetch=function(i,o){var u=typeof i==='string'?i:(i&&i.url)||String(i),m=(o&&o.method)||(i&&i.method)||'GET',t=performance.now(),id='n'+(++M.nn),args=arguments;
-    var rt=route(u),tag='';if(rt){tag=' (mocked)';var k=rt.r.k;
+    var rt=route(u),tag='';u=cut(u,2000);if(rt){tag=' (mocked)';var k=rt.r.k;
       if(k==='block'){push(M.net,id+' '+m+' ERR '+u+' 0ms (blocked)');return Promise.reject(new TypeError('Load failed'))}
       var to=dest(rt);if(to)args=[i instanceof Request?new Request(to,i):to,o];
       if(rt.r.hq){var h=hdrs(new Headers((o&&o.headers)||(i instanceof Request?i.headers:undefined)),rt.r.hq);args=[args[0],Object.assign({},o,{headers:h})]}}
     var hs=rt&&rt.r.k==='headers'&&rt.r.hs;
     return f.apply(this,args).then(function(r){if(hs)r=new Response(r.body,{status:r.status,statusText:r.statusText,headers:hdrs(new Headers(r.headers),hs)});
       push(M.net,id+' '+m+' '+r.status+' '+u+' '+Math.round(performance.now()-t)+'ms'+tag);
-      try{var ct=r.headers.get('content-type');if(/json|text|xml|javascript|html|csv/i.test(ct||''))r.clone().text().then(function(b){keep(id,ct,b)},function(){})}catch(e){}return r},
+      try{var ct=r.headers.get('content-type');if(TXT.test(ct||''))keepHead(id,ct,r)}catch(e){}return r},
       function(e){push(M.net,id+' '+m+' ERR '+u+' '+e);throw e})};
   var xo=XMLHttpRequest.prototype.open,xs=XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open=function(m,u){this.__q=[m,u];var rt=route(u),a=[].slice.call(arguments);this.__rt=rt;
+  XMLHttpRequest.prototype.open=function(m,u){this.__q=[m,cut(u,2000)];var rt=route(u),a=[].slice.call(arguments);this.__rt=rt;
     if(rt){var to=dest(rt);if(to)a[1]=to}return xo.apply(this,a)};
   XMLHttpRequest.prototype.send=function(){var x=this,t=performance.now(),id='n'+(++M.nn),rt=x.__rt;
     if(rt&&rt.r.k==='block'){push(M.net,id+' '+x.__q[0]+' ERR '+x.__q[1]+' 0ms (blocked)');setTimeout(function(){['error','loadend'].forEach(function(e){x.dispatchEvent(new ProgressEvent(e))})},0);return}
     if(rt&&rt.r.hq)rt.r.hq.forEach(function(h){if(h[1]!=='')try{x.setRequestHeader(h[0],h[1])}catch(e){}});
     var q=x.__q;x.addEventListener('loadend',function(){if(!q)return;push(M.net,id+' '+q[0]+' '+(x.status||'ERR')+' '+q[1]+' '+Math.round(performance.now()-t)+'ms'+(rt?' (mocked)':''));
-      try{if(x.responseType===''||x.responseType==='text')keep(id,x.getResponseHeader('content-type'),x.responseText)}catch(e){}},{once:true});return xs.apply(this,arguments)};
+      try{var ct=x.getResponseHeader('content-type');if((x.responseType===''||x.responseType==='text')&&TXT.test(ct||''))keep(id,ct,x.responseText)}catch(e){}},{once:true});return xs.apply(this,arguments)};
   return true}
 var STATIC=/^(img|css|link|script|font|video|audio|image|icon|stylesheet|media)$/;
 function logs(a){var fresh=hook(),net=a.kind==='network'||!!a.id,kind=net?'net':'con',arr=net?M.net:M.con,note='';
@@ -120,7 +155,7 @@ M.dlg=[];M.dp=null;M.armed=false;try{M.armed=sessionStorage.getItem('__smcp_arme
 function arm(dp){M.armed=true;try{sessionStorage.setItem('__smcp_armed','1')}catch(e){}if(dp!==undefined)M.dp=dp;for(var i=0;i<frames.length;i++)try{frames[i].postMessage({__smcp:'arm',dp:dp},'*')}catch(e){}}
 addEventListener('message',function(e){var d=e.data;if(!d||typeof d!=='object')return;
   if(d.__smcp==='arm'&&e.source===parent&&window!==top)arm(d.dp);
-  else if(d.__smcp==='dlg'&&window===top&&typeof d.r==='string')M.dlg.push(d.r)});
+  else if(d.__smcp==='dlg'&&window===top&&typeof d.r==='string'&&M.dlg.length<50)M.dlg.push(cut(d.r,500))});
 ['alert','confirm','prompt'].forEach(function(t){var orig=window[t];window[t]=function(m,d){if(!M.armed)return orig.apply(window,arguments);
   var p=M.dp,acc=t==='alert'||(p!=null&&p!=='dismiss'),v;M.dp=null;
   if(t==='confirm')v=acc;else if(t==='prompt')v=acc?(p&&p!=='accept'?p:d==null?'':String(d)):null;

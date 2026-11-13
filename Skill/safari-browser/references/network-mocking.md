@@ -1,6 +1,6 @@
 # Mocking, blocking and rewriting requests (`route`)
 
-A plain `route` acts on the tab's own fetch/XHR (its frames too), inside the page: mocked and blocked requests never reach the network, and other tabs are untouched. Rules follow the tab to other sites and last until `unroute` or the tab closes; after a click that leaves the site they apply once the next safari command runs.
+A plain `route` acts on the tab's own fetch/XHR (its frames too), inside the page: mocked and blocked requests never reach the network, and other tabs are untouched. Rules follow the tab to other sites and last until `unroute`, the tab closes or the daemon exits (30 min after the last command); after a click that leaves the site they apply once the next safari command runs.
 
 ```bash
 safari t5 route '*/api/cart*' --status 500 --body '{"error":"down"}'   # fake an error

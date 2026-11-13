@@ -195,7 +195,8 @@ This was tested on one Mac (macOS 27), not across a wide range of sites.
 - On sites with strict CSP (GitHub, Gmail), the extension runs `js` in an isolated context: it sees the DOM but not the page's JavaScript variables.
 - Dialogs during the first load of a site safari has not touched yet are Safari's own and block calls for 20 s (answerable with `dialog`, via Accessibility).
 - Agents share one daemon, so they must put the tab id first (or set `SAFARI_TAB`) once more than one new tab is open.
-- A plain `route` covers only the tab's own fetch/XHR, intercepted in the page (mocked ones never reach the network; Workers, `sendBeacon` and `EventSource` are not covered). Scripts, styles, images, frames and pages need `--global`: Safari's network rules ignore their tab filter, and its request events do not reliably say which tab asked, so they apply to every tab, the user's too, until `unroute`, the routing tab closes or the daemon stops. With `--global`, Safari changes only standard header names (not custom `X-` ones), its regex engine lacks `|`, `{n}` and lookahead, a `--block` beats an overlapping mock, and a `--doc` page has the mock's origin (`127.0.0.1`), without site cookies. Workers, service workers and WebSocket messages are not mocked; a mocked fetch's `response.url` is the local mock address.
+- A plain `route` covers only the tab's own fetch/XHR, intercepted in the page (mocked ones never reach the network; Workers, `sendBeacon` and `EventSource` are not covered). Scripts, styles, images, frames and pages need `--global`: Safari's network rules ignore their tab filter, and its request events do not reliably say which tab asked, so they apply to every tab, the user's too, until `unroute`, the routing tab closes or the daemon stops. Plain routes end with the daemon too (`safari stop`, a restart for a new build, 30 min without commands): it clears them on exit, a page that stops hearing from it drops them within 37 min, and the next safari call to the tab drops any it no longer stands behind. With `--global`, Safari changes only standard header names (not custom `X-` ones), its regex engine lacks `|`, `{n}` and lookahead, a `--block` beats an overlapping mock, and a `--doc` page has the mock's origin (`127.0.0.1`), without site cookies. Workers, service workers and WebSocket messages are not mocked; a mocked fetch's `response.url` is the local mock address.
+- `logs` keeps the first 4000 characters of text and JSON response bodies; streamed responses (`text/event-stream`, NDJSON) keep none. Console objects are shown as a short preview (3 levels, 10 keys or items), not full JSON.
 - `record` covers one site in one tab, and does not record rich-text editors or password values.
 - `shot --full` scrolls the page itself; pages that scroll an inner box show only their first screen.
 - `pdf` lays out a snapshot of the page again with JavaScript off: images that need the user's login, content drawn by scripts after load and cross-origin canvases may be missing.
@@ -210,6 +211,7 @@ This was tested on one Mac (macOS 27), not across a wide range of sites.
 
 ```bash
 Tests/smoke.sh                                             # CLI and daemon test, no Safari permission needed
+safari --selftest                                          # pure-function checks, no Safari needed
 (cd Tests && python3 -m http.server 8765 --bind 127.0.0.1)  # serve test pages
 ```
 

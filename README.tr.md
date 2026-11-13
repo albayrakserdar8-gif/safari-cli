@@ -35,6 +35,10 @@ Giriş yaptığın sitelerde günlük işler için uygundur: okuma, arama, form 
 - Sunucu kaydı yok: komut çalıştırabilen her ajan kullanabilir, yeniden derleme bir sonraki komutta devreye girer.
 - Kullanım kılavuzu yalnızca tarayıcı işlerinde yüklenen bir skill'dedir.
 
+## Nasıl çalışır
+
+`safari` fiili çözümler, arka plandaki daemon'a unix soket üzerinden tek bir istek gönderir ve yanıtı yazar. Daemon, Safari'yi eklentinin WebSocket'i üzerinden sürer; sayfada iki enjekte betikle çalışır: biri sayfanın kendi dünyasında (konsol ve fetch kancaları, iletişim kutuları, `js`, route'lar), diğeri eklentinin izole dünyasında (ref'ler, okuma, işlemler). `docs/architecture.png` bütün resmi gösterir; `docs/architecture.excalidraw` düzenlenebilir sahnesidir.
+
 ## Kurulum
 
 macOS 14 ya da üstü, Command Line Tools ve Safari eklentisi için Xcode gerekir.
@@ -137,7 +141,7 @@ Tek bir Mac'te ölçüldü:
 
 | | |
 |---|---|
-| Skill | yaklaşık 1.550 token, yalnızca tarayıcı işlerinde yüklenir; sekiz `references/` dosyası (her biri 400-850 token) yalnızca iş gerektirince okunur (MCP sürümü her oturumda yaklaşık 875 token araç şeması gönderiyordu, skill'i de ayrıca) |
+| Skill | yaklaşık 1.680 token, yalnızca tarayıcı işlerinde yüklenir; sekiz `references/` dosyası (her biri 400-850 token) yalnızca iş gerektirince okunur (MCP sürümü her oturumda yaklaşık 875 token araç şeması gönderiyordu, skill'i de ayrıca) |
 | Varsayılan `read` | yaklaşık 500 token (Wikipedia ana sayfa), 1.100 (Hacker News) |
 | Çağrı süresi | `read` 7–60 ms, işlemler 170–470 ms, `shot` 0,9–2,1 sn; komut başına yaklaşık 10 ms daha, daemon'u başlatan ilk komutta 0,2 sn |
 | Bellek | Boşta 9 MB, kullanımdan sonra yaklaşık 34 MB |
@@ -190,12 +194,15 @@ Bu turlardan sonra düzeltilenler:
 
 Dokuzuncu tur (Kasım 2026) safari'yi dört görevde playwright-cli ile karşılaştırdı; her araç ve görev için bir Claude Haiku ajanı çalıştı. İkisi de her soruyu doğru yanıtladı; safari TodoMVC'de (`type` bir öğe istiyordu) ve books.toscrape'te (`table` kart ızgarasını görmüyordu) daha çok komut harcadı. Bunun sonucunda `type` odaktaki alana yazar oldu, `fill` ve `type`'a `--submit` eklendi, `table` tekrar eden kartları kendisi bulur (sabitlemek için seçiciyi de verir) ve hücrelerden buton yazılarını atar. İki kez yeniden koşulduğunda TodoMVC 16 yerine 10–13, books.toscrape 10 yerine 5–9 komut sürdü.
 
+Onuncu tur (Kasım 2026) görev turu değil, kodun baştan sona gözden geçirilmesiydi. Bu turda gerçek Safari'yi yerel test sayfalarıyla süren canlı bir regresyon betiği (134 kontrol: okuma, işlem, iletişim kutuları ve çerçeveler, `wait`, `js`, loglar, depolama, çerezler, `state`, `route` ve yaşam döngüsü, `challenge.html` ile `captcha.html`) ve saf fonksiyonlar için `safari --selftest` eklendi. İlk koşular üç gerçek hata buldu ve düzeltildi: üst sayfada verilen bir iletişim kutusu yanıtı alt çerçevelerde kurulu kalıyor, sonraki bir çerçeve `confirm`'ü kabul ediyordu; `fill`'den hemen sonraki `click` zamanlayıcının değişikliğini beklemeden dönüyordu; `js` bayat bir route kopyasını yerinde bırakıyordu. Aynı turda düz route'lara etiket ve 37 dakikalık kira eklendi (hiçbir daemon'un yenilemediği kopya istekleri değiştirmeyi bırakır) ve eklenti yeniden bağlandığında sekme kimlikleri sayfadaki handle ile korunur oldu.
+
 Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenmedi.
 
 ## Sınırlar
 
 - Kapalı shadow DOM okunmaz. En çok 8 iframe okunur.
 - Bazı siteler sayfa içi olayları yok sayar; `hover` yalnızca okunabilen CSS `:hover` kurallarını taklit eder. Bu durumlarda `--os` kullan.
+- `--os` tuşları klavye düzenini izler (karakter tuşları etkin düzende bulunur), böylece `cmd+i` Türkçe Q'da da AZERTY'de de doğru tuşa gider; `key A` büyük A yazar.
 - Katı CSP'li sitelerde (GitHub, Gmail) eklenti `js`'i ayrı bir ortamda çalıştırır: DOM'u görür, sayfanın JavaScript değişkenlerini görmez.
 - safari'nin henüz girmediği bir sitenin ilk yüklenişinde açılan iletişim kutuları Safari'nin kendisinindir ve çağrıları 20 sn bekletir (`dialog` ile, Erişilebilirlik üzerinden yanıtlanabilir).
 - Ajanlar tek bir daemon'u paylaşır; birden fazla yeni sekme açıkken sekme kimliğini başa yazmalı (ya da `SAFARI_TAB` kullanmalı).
@@ -214,10 +221,12 @@ Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenm
 ## Geliştirme
 
 ```bash
-Tests/smoke.sh                                             # CLI ve daemon testi, Safari izni gerekmez
-safari --selftest                                          # saf fonksiyon testleri, Safari gerekmez
+make test                                                   # derleme, sayfa betiği sözdizimi, selftest, CLI ve daemon testi
+make test-live                                              # gerçek Safari'de canlı sınamalar (eklenti açık; kendi arka plan sekmeleri)
 (cd Tests && python3 -m http.server 8765 --bind 127.0.0.1)  # test sayfalarını sun
 ```
+
+`make test` Safari izni gerektirmez. `make test-live` gerçek Safari'yi test sayfalarıyla sürer, eklenti bağlı değilse 77 ile çıkar ve kurulu eklenti route kirasından eskiyse o kontrolleri atlar. `safari --selftest` yalnızca saf fonksiyon kontrollerini çalıştırır.
 
 Elle sınama için `http://127.0.0.1:8765/fixture.html`'i `safari open` ile aç (form, iletişim kutuları, gecikmeli öğe, tablo, fetch, iframe). `route.html` (fetch/XHR/Worker butonları; `route` taklit edene kadar eksik olan bir betik, stil dosyası ve görsel) ile `drop.html` (bir bırakma alanı) `route` ve `drop` içindir.
 

@@ -35,6 +35,10 @@ Good for everyday work on sites you are logged into: reading, searching, filling
 - No server registration: any agent that can run a command can use it, and a rebuild takes effect on the next command.
 - The usage guide lives in a skill that is loaded only for browser tasks.
 
+## How it works
+
+`safari` parses the verb, sends one request to a background daemon over a unix socket, and prints the reply. The daemon drives Safari through the extension's WebSocket, and works in the page with two injected scripts: one in the page's own world (console and fetch hooks, dialogs, `js`, routes) and one in the extension's isolated world (refs, reading, actions). `docs/architecture.png` shows the whole picture; `docs/architecture.excalidraw` is the editable scene.
+
 ## Install
 
 Needs macOS 14 or later, the Command Line Tools, and Xcode for the Safari extension.
@@ -135,7 +139,7 @@ Measured on one Mac:
 
 | | |
 |---|---|
-| Skill | about 1,550 tokens, loaded only for browser tasks; eight `references/` files (400-850 tokens each) are read only when a task needs them (the MCP version sent about 875 tokens of tool schemas every session, plus its skill) |
+| Skill | about 1,680 tokens, loaded only for browser tasks; eight `references/` files (400-850 tokens each) are read only when a task needs them (the MCP version sent about 875 tokens of tool schemas every session, plus its skill) |
 | Default `read` | about 500 tokens (Wikipedia home), 1,100 (Hacker News) |
 | Call time | `read` 7–60 ms, actions 170–470 ms, `shot` 0.9–2.1 s; about 10 ms more per command, 0.2 s for the first one that starts the daemon |
 | Memory | 9 MB idle, about 34 MB after use |
@@ -186,12 +190,15 @@ Fixed after these rounds:
 
 A ninth round (November 2026) compared safari with playwright-cli on four tasks, one Claude Haiku agent per tool and task. Both answered everything correctly; safari needed more commands on TodoMVC (`type` required an element) and on books.toscrape (`table` did not see the card grid). This led to `type` into the focused field, `--submit` on `fill` and `type`, and `table` guessing repeated cards (with the selector to pin them) and leaving button text out of cells. Rerun twice, TodoMVC took 10–13 commands instead of 16 and books.toscrape 5–9 instead of 10.
 
+A tenth round (November 2026) was a pass over the code rather than a task round. It added a live regression script that drives the real Safari through the local test pages (134 checks: reading, acting, dialogs and frames, `wait`, `js`, logs, storage, cookies, `state`, `route` and its lifecycle, `challenge.html` and `captcha.html`) and `safari --selftest` for the pure functions. Its first runs found three real faults, now fixed: a dialog answer given on the top page stayed armed in child frames, so a later frame `confirm` was accepted; a click right after `fill` returned before a timer's change; and `js` left a stale route copy in place. The same pass gave plain routes a tag and a 37-minute lease, so a copy no daemon renews stops changing requests, and made an extension reconnect keep tab ids through the handle in the page.
+
 This was tested on one Mac (macOS 27), not across a wide range of sites.
 
 ## Limits
 
 - Closed shadow DOM is not read. Up to 8 iframes are read.
 - Some sites ignore in-page events, and `hover` only emulates readable CSS `:hover` rules. Use `--os` there.
+- `--os` keys follow the keyboard layout (character keys are looked up on the current layout), so `cmd+i` works on Turkish Q as well as on AZERTY; `key A` types an upper-case A.
 - On sites with strict CSP (GitHub, Gmail), the extension runs `js` in an isolated context: it sees the DOM but not the page's JavaScript variables.
 - Dialogs during the first load of a site safari has not touched yet are Safari's own and block calls for 20 s (answerable with `dialog`, via Accessibility).
 - Agents share one daemon, so they must put the tab id first (or set `SAFARI_TAB`) once more than one new tab is open.
@@ -210,10 +217,12 @@ This was tested on one Mac (macOS 27), not across a wide range of sites.
 ## Development
 
 ```bash
-Tests/smoke.sh                                             # CLI and daemon test, no Safari permission needed
-safari --selftest                                          # pure-function checks, no Safari needed
+make test                                                   # build, page-script syntax, selftest, CLI and daemon test
+make test-live                                              # live checks in the real Safari (extension on; its own background tabs)
 (cd Tests && python3 -m http.server 8765 --bind 127.0.0.1)  # serve test pages
 ```
+
+`make test` needs no Safari permission. `make test-live` drives the real Safari through the test pages, exits 77 when the extension is not connected, and skips the route-lease checks when the installed extension predates them. `safari --selftest` runs only the pure-function checks.
 
 Open `http://127.0.0.1:8765/fixture.html` with `safari open` for manual checks (form, dialogs, delayed element, table, fetch, iframe). `route.html` (fetch/XHR/Worker buttons, and a script, stylesheet and image that are missing until `route` mocks them) and `drop.html` (a drop zone) cover `route` and `drop`.
 

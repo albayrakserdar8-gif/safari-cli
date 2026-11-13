@@ -147,7 +147,7 @@ function hook(){if(M.con)return false;M.con=[];M.net=[];M.nn=0;M.cur={};
 var STATIC=/^(img|css|link|script|font|video|audio|image|icon|stylesheet|media)$/;
 function logs(a){var fresh=hook(),net=a.kind==='network'||!!a.id,kind=net?'net':'con',arr=net?M.net:M.con,note='';
   if(net&&a.id){var b=BOD.get(a.id),l=M.net.find(function(x){return x.indexOf(a.id+' ')===0});
-    if(!l)return'no request '+a.id+' in the log';
+    if(!l)throw new Error('no request '+a.id+' in the log');
     return clip(l,300)+(b?'\n'+b.c+'\n'+b.b.slice(0,(a.limit||40)*100):'\n(no body kept: only text/JSON bodies of the last 50 requests)')}
   var from=a.new&&M.cur[kind]!=null?arr.length-Math.min(arr.length,arr.t-M.cur[kind]):0;M.cur[kind]=arr.t||0;arr=arr.slice(from);
   // With the extension, wr is every request of the tab since it started loading (from webRequest).
@@ -174,9 +174,11 @@ M.dlg=[];M.dp=null;M.armed=false;try{M.armed=sessionStorage.getItem('__smcp_arme
 function arm(dp){M.armed=true;try{sessionStorage.setItem('__smcp_armed','1')}catch(e){}if(dp!==undefined)M.dp=dp;for(var i=0;i<frames.length;i++)try{frames[i].postMessage({__smcp:'arm',dp:dp},'*')}catch(e){}}
 addEventListener('message',function(e){var d=e.data;if(!d||typeof d!=='object')return;
   if(d.__smcp==='arm'&&e.source===parent&&window!==top)arm(d.dp);
-  else if(d.__smcp==='dlg'&&window===top&&typeof d.r==='string'&&M.dlg.length<50)M.dlg.push(cut(d.r,500))});
+  else if(d.__smcp==='dlg'&&window===top&&typeof d.r==='string'){if(M.dlg.length<50)M.dlg.push(cut(d.r,500));if(M.dp!=null)arm(null)}});
 ['alert','confirm','prompt'].forEach(function(t){var orig=window[t];window[t]=function(m,d){if(!M.armed)return orig.apply(window,arguments);
   var p=M.dp,acc=t==='alert'||(p!=null&&p!=='dismiss'),v;M.dp=null;
+  // The answer was for one dialog: frames that were told it must not keep it for a later one.
+  if(p!=null&&window===top)arm(null);
   if(t==='confirm')v=acc;else if(t==='prompt')v=acc?(p&&p!=='accept'?p:d==null?'':String(d)):null;
   var r=t+' '+JSON.stringify(clip(m,120))+' \u2192 '+(t==='prompt'&&acc?JSON.stringify(v):acc?'accepted':'dismissed');
   if(window===top)M.dlg.push(r);else try{top.postMessage({__smcp:'dlg',r:'(frame) '+r},'*')}catch(e){}

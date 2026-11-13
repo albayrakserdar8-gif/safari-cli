@@ -4,7 +4,7 @@ BIN := $(CURDIR)/.build/release/safari
 SKILL := $(CURDIR)/Skill/safari-browser
 SKILL_DIRS := $(HOME)/.claude/skills $(HOME)/.config/opencode/skills
 
-.PHONY: build install uninstall test
+.PHONY: build install uninstall test test-live
 
 build:
 	swift build -c release
@@ -37,3 +37,7 @@ test: build
 	awk '/static let mainSource = #"""/{f=1;next} /^    """#/{f=0} f' Sources/safari/PageAgent.swift > "$${TMPDIR:-/tmp}/safari-main.js"
 	node --check "$${TMPDIR:-/tmp}/safari-main.js"
 	Tests/smoke.sh
+
+# Live check against the real Safari (not part of `test`): needs the extension on; opens background tabs and closes them.
+test-live: build
+	Tests/live.sh

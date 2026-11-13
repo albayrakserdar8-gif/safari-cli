@@ -155,7 +155,7 @@ enum PageAgent {
     var STATIC=/^(img|css|link|script|font|video|audio|image|icon|stylesheet|media)$/;
     function logs(a){var fresh=hook(),net=a.kind==='network'||!!a.id,kind=net?'net':'con',arr=net?M.net:M.con,note='';
       if(net&&a.id){var b=BOD.get(a.id),l=M.net.find(function(x){return x.indexOf(a.id+' ')===0});
-        if(!l)return'no request '+a.id+' in the log';
+        if(!l)throw new Error('no request '+a.id+' in the log');
         return clip(l,300)+(b?'\n'+b.c+'\n'+b.b.slice(0,(a.limit||40)*100):'\n(no body kept: only text/JSON bodies of the last 50 requests)')}
       var from=a.new&&M.cur[kind]!=null?arr.length-Math.min(arr.length,arr.t-M.cur[kind]):0;M.cur[kind]=arr.t||0;arr=arr.slice(from);
       // With the extension, wr is every request of the tab since it started loading (from webRequest).
@@ -182,9 +182,11 @@ enum PageAgent {
     function arm(dp){M.armed=true;try{sessionStorage.setItem('__smcp_armed','1')}catch(e){}if(dp!==undefined)M.dp=dp;for(var i=0;i<frames.length;i++)try{frames[i].postMessage({__smcp:'arm',dp:dp},'*')}catch(e){}}
     addEventListener('message',function(e){var d=e.data;if(!d||typeof d!=='object')return;
       if(d.__smcp==='arm'&&e.source===parent&&window!==top)arm(d.dp);
-      else if(d.__smcp==='dlg'&&window===top&&typeof d.r==='string'&&M.dlg.length<50)M.dlg.push(cut(d.r,500))});
+      else if(d.__smcp==='dlg'&&window===top&&typeof d.r==='string'){if(M.dlg.length<50)M.dlg.push(cut(d.r,500));if(M.dp!=null)arm(null)}});
     ['alert','confirm','prompt'].forEach(function(t){var orig=window[t];window[t]=function(m,d){if(!M.armed)return orig.apply(window,arguments);
       var p=M.dp,acc=t==='alert'||(p!=null&&p!=='dismiss'),v;M.dp=null;
+      // The answer was for one dialog: frames that were told it must not keep it for a later one.
+      if(p!=null&&window===top)arm(null);
       if(t==='confirm')v=acc;else if(t==='prompt')v=acc?(p&&p!=='accept'?p:d==null?'':String(d)):null;
       var r=t+' '+JSON.stringify(clip(m,120))+' \u2192 '+(t==='prompt'&&acc?JSON.stringify(v):acc?'accepted':'dismissed');
       if(window===top)M.dlg.push(r);else try{top.postMessage({__smcp:'dlg',r:'(frame) '+r},'*')}catch(e){}
@@ -559,9 +561,10 @@ enum PageAgent {
       if(P){i.pointerId=1;i.pointerType='mouse';i.isPrimary=true}
       if(more)for(var k in more)i[k]=more[k];
       return el.dispatchEvent(new C(type,i))}
-    function watch(){S.fx=0;var mo=new MutationObserver(hit),ev=['input','change','scroll','hashchange','submit'];
+    function watch(pf){S.fx=0;var mo=new MutationObserver(hit),ev=['input','change','scroll','hashchange','submit'];
       function stop(){mo.disconnect();ev.forEach(function(e){removeEventListener(e,hit,true)})}
-      function hit(){S.fx=1;stop()}
+      // Moving focus off an edited field makes the browser fire its change: not a reaction to this click.
+      function hit(e){if(pf&&e&&e.type==='change'&&e.target===pf)return;S.fx=1;stop()}
       mo.observe(document,{subtree:true,childList:true,attributes:true,characterData:true});ev.forEach(function(e){addEventListener(e,hit,true)});setTimeout(stop,3000)}
     // While Safari's window is in the background (the usual case here), focus() moves focus
     // without firing focus/blur. Forms that commit on blur (Angular) then never see the
@@ -752,7 +755,7 @@ enum PageAgent {
       if(h.n)l.forEach(function(e){e.classList.add('__smcp_hover')});S.hv=l;return h}
     function act(a){S.note='';if(a.text!=null&&(a.action==='dialog'||a.action==='click'))a.text=String(a.text).replace(/^answer\s*[:=]?\s*/i,'');var r=act1(a);return r+S.note}
     function act1(a){var t;S.fx=1;S.f0=null;S.slider=false;
-      if(a.action==='click'||a.action==='dblclick'||a.action==='key'||a.action==='hover'||a.submit){watch();S.t0=new Set(lines());S.n0=null;try{S.n0=mcall('ncount')}catch(e){}}
+      if(a.action==='click'||a.action==='dblclick'||a.action==='key'||a.action==='hover'||a.submit){watch(a.action==='key'||a.submit?null:document.activeElement);S.t0=new Set(lines());S.n0=null;try{S.n0=mcall('ncount')}catch(e){}}
       if(/^(click|dblclick|rclick|drag|key|hover|fill|check|select|type)$/.test(a.action)){fsnap(a);S.q0=null;try{S.q0=mcall('nn0')}catch(e){}}
       switch(a.action){
         case'click':t=need(a);if(a.text!=null)try{mcall('policy',[String(a.text)])}catch(e){}if(/^(INPUT|TEXTAREA|SELECT)$/.test(t.to.tagName)||t.to.isContentEditable)S.fx=1;if(S.hv)hov(t.to);press(t);return'clicked '+desc(t.el);

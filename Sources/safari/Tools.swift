@@ -1778,6 +1778,8 @@ final class Tools {
         guard var code = a["code"] as? String else { throw ToolError("code required") }
         let id = try resolve(a)
         let slot = nextID("s")
+        // js skips `__smcp.call`, which is where a page drops a route copy we no longer stand behind.
+        if routeTag[id] != nil || routeCopies[id] != nil { _ = try? agentCall(id, ["op": "nop"]) }
         var prelude = ""
         if a["ref"] != nil || a["selector"] != nil || a["x"] != nil {
             // Mark the element in the DOM, which both the page's world and the extension's see.

@@ -1,0 +1,16 @@
+<!doctype html><meta charset="utf-8"><title>Long</title>
+<!-- A Hacker News-shaped list for text and table: 40 two-row records (rank, icon-only vote link,
+     title and site links, the first site link longer than its title; then points, user, hide and comments under an empty cell), spacer rows, a More row. -->
+<table class="itemlist"><tbody></tbody></table>
+<script>
+var tb=document.querySelector('tbody'),h='';
+for(var n=1;n<=40;n++){var id=5000+n;
+  h+='<tr class="athing" id="'+id+'"><td class="title"><span class="rank">'+n+'.</span></td>'+
+    '<td class="votelinks"><a href="vote?id='+id+'&how=up&goto=news"><div class="votearrow" title="upvote"></div></a></td>'+
+    '<td class="title"><span class="titleline"><a href="story'+n+'.html">Story '+n+'</a> <span class="sitebit">(<a href="from?site=x.com">'+(n===1?'github.com/example-org':'x.com')+'</a>)</span></span></td></tr>'+
+    '<tr><td colspan="2"></td><td class="subtext">'+n+' points by <a href="user?id=user'+n+'">user'+n+'</a> 3 hours ago | <a href="hide?id='+id+'&goto=news">hide</a> | <a href="item?id='+id+'">'+n+' comments</a></td></tr>'+
+    '<tr class="spacer" style="height:5px"></tr>'}
+h+='<tr><td colspan="2"></td><td class="title"><a href="long.html?p=2">More</a></td></tr>';
+tb.innerHTML=h;
+</script>
+<style>.votearrow{width:10px;height:10px;background:#999}</style>

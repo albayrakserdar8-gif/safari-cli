@@ -399,6 +399,23 @@ s "$T" go "$URL/list.html?p=1" --delay 0
 s "$T" crawl --delay 0 --json
 json "crawl --json: 12 rows from 3 pages, progress in notes" 'rc==0 and len(d["rows"])==12 and d["pages"]==3 and "no next page; done" in d["notes"]'
 
+# --- long.html: 40 two-row records (Hacker News-shaped) with spacer rows
+s "$T" go "$URL/long.html" --delay 0
+s "$T" text
+like "text: 60 rows with text, spacers not counted, then a note" '^\| 30\. \|  \| Story 30 \(x\.com\) \|$' '^\|  \| 30 points by user30 ' \
+  '^\(… 21 more rows: --max 0, or table\)$' '!Story 31 '
+s "$T" text --max 0
+has "text --max 0: every row" "| 40. |  | Story 40 (x.com) |" "40 points by user40" "|  | More |"
+like "text --max 0: no row note" '!more rows'
+s "$T" table
+like "table: two-row records merged, main link (not the vote link), element id" \
+  "^1\.	Story 1 \(github\.com/example-org\)	1 points by user1 3 hours ago \| hide \| 1 comments	$(rx "$URL/story1.html")	5001$" \
+  "^40\.	Story 40 \(x\.com\)	.*	$(rx "$URL/story40.html")	5040$" '!vote\?id' '!user\?id=' '!More'
+holds "table: header and 40 rows" test "$(grep -c . <<<"$OUT")" = 41
+errs "table: the note counts records" 0 "40 rows from table.itemlist"
+s "$T" table --json
+json "table --json: 40 records (all rows, no --max needed)" 'rc==0 and len(d["rows"])==40 and d["rows"][0]["id"]=="5001" and d["rows"][0]["link"].endswith("/story1.html")'
+
 # --- drop
 s "$T" go "$URL/drop.html" --delay 0
 printf 'hello drop file' >"$tmp/drop.txt"

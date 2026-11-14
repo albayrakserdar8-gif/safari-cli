@@ -34,7 +34,7 @@ safari t5 close
 |---|---|
 | Buttons, links, fields to act on | `read` (visible controls only; prices and messages need `text`) |
 | One control or text anywhere | `read -q "sign in"` (top 10 hits) |
-| Page text | `text` (markdown; `text -q "refund policy"` for the relevant blocks) |
+| Page text | `text` (markdown; `text -q "refund policy"` for the relevant blocks; long tables stop at 60 rows: `--max 0` for all, or `table`) |
 | Lists and tables as data | `table` (TSV with `link`, `id`; finds card lists too; `--json`, `--rows ".card"`) |
 | Links | `links` (`-q` filters) |
 | What an action changed | its result line first; then `read --diff` |

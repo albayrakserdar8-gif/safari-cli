@@ -5,7 +5,7 @@
 <script>
 var p=+(new URLSearchParams(location.search).get('p')||1),tb=document.querySelector('tbody');
 for(var i=1;i<=4;i++){var n=(p-1)*4+i,tr=document.createElement('tr');tr.setAttribute('data-id',String(1000+n));
-  tr.innerHTML='<td><img alt=""></td><td><a href="item.html?id='+n+'">Car\t'+n+'</a></td><td>'+(2020+n%5)+'</td><td>'+(n*1000).toLocaleString('tr-TR')+' TL</td>';tb.appendChild(tr)}
+  tr.innerHTML='<td><a href="vote.html?id='+n+'&how=up"><img alt=""></a></td><td><a href="item.html?id='+n+'">Car\t'+n+'</a></td><td>'+(2020+n%5)+'</td><td>'+(n*1000).toLocaleString('tr-TR')+' TL</td>';tb.appendChild(tr)}
 var ad=document.createElement('tr');ad.innerHTML='<td colspan="4">Advertise here</td>';tb.insertBefore(ad,tb.children[2]);
 var hid=document.createElement('tr');hid.style.display='none';hid.innerHTML='<td>x</td><td>hidden</td><td>1</td><td>2</td>';tb.appendChild(hid);
 if(p<3)document.getElementById('nav').innerHTML='<a href="list.html?p='+(p+1)+'">Sonraki</a>';

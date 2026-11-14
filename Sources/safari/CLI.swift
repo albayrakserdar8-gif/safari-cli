@@ -106,6 +106,8 @@ enum CLI {
         let cut = argv.firstIndex(of: "--") ?? argv.endIndex
         var (tool, args, out) = try parseVerb(argv[..<cut].filter { $0 != "--json" } + argv[cut...])
         if tool != "help" { args["json"] = true }
+        // Rows cut at --max are no longer JSON: --json takes every row unless --max says otherwise.
+        if tool == "table", args["max_chars"] == nil { args["max_chars"] = 0 }
         return (tool, args, out)
     }
 

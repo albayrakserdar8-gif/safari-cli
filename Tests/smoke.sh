@@ -118,7 +118,8 @@ parses '"stop":true,"tab":"t5"},"out":null,"tool":"record"' t5 record --stop
 parses '"json":true' t5 read --json
 parses '"action":"click","json":true,"ref":"e3"' t5 click e3 --json
 parses '"text":"--json"' t5 fill e4 -- --json
-parses '"json":true,"rows":".card"' t5 table --rows .card --json
+parses '"json":true,"max_chars":0,"rows":".card"' t5 table --rows .card --json
+parses '"json":true,"max_chars":500' t5 table --json --max 500
 check "help --json is one JSON object" bash -c '"$0" help --json | python3 -c "import json,sys; d=json.load(sys.stdin); assert d[\"ok\"] and \"safari\" in d[\"text\"]"' "$BIN"
 out=$("$BIN" t3 click --json 2>"$SAFARI_CLI_HOME.err"); rc=$?
 check "--json usage error: exit 2, kind usage, nothing on stderr" bash -c '[ "$1" = 2 ] && [ ! -s "$3" ] && python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d[\"ok\"] is False and d[\"kind\"]==\"usage\"" "$2"' _ "$rc" "$out" "$SAFARI_CLI_HOME.err"

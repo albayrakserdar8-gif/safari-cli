@@ -333,7 +333,7 @@ enum PageAgent {
     var NOISE={NAV:1,HEADER:1,FOOTER:1,ASIDE:1,navigation:1,banner:1,contentinfo:1,complementary:1,search:1};
     function short(h){var u;try{u=new URL(h,location.href)}catch(e){return''}
       if(!/^(https?|file):$/.test(u.protocol))return'';return u.origin===location.origin?(u.pathname+u.search+u.hash):u.href}
-    function md(root,fit){
+    function md(root,fit,all){
       var lines=[],U=new Map(),buf='',pf='',ind='',c=0,il=0;
       function flush(){var t=buf.replace(/[ \t\n\r ]+/g,' ').trim();buf='';if(t){lines.push(pf+t);pf=ind}}
       var here=location.pathname+location.search;
@@ -369,24 +369,26 @@ enum PageAgent {
           for(var i=0;i<ks.length;i++){var li=ks[i];if(li.nodeType!==1)continue;if(li.tagName!=='LI'){node(li);continue}
             j++;pf=sv+(t==='OL'?j+'. ':'- ');ind=sv+'  ';walk(li);flush();ind=sv;pf=sv}
           return}
-        if(t==='TABLE'&&!n.querySelector('table')&&!layout(n)){flush();var rows=[].slice.call(n.rows),cols=0;
-          rows.slice(0,60).forEach(function(r,ri){var cs=[].map.call(r.cells,function(x){return clip(inner(x),200).replace(/\|/g,'\\|')});
-            if(!cs.join(''))return;lines.push(ind+'| '+cs.join(' | ')+' |');if(!cols){cols=cs.length;lines.push(ind+'|'+' --- |'.repeat(cols))}});
-          if(rows.length>60)lines.push(ind+'(… '+(rows.length-60)+' more rows)');return}
+        // Up to 60 rows with text (all with --max 0); empty spacer rows do not count.
+        if(t==='TABLE'&&!n.querySelector('table')&&!layout(n)){flush();var rows=[].slice.call(n.rows),cols=0,j=0,left=0;
+          rows.forEach(function(r){if(!all&&j>=60){if(/\S/.test(r.textContent))left++;return}
+            var cs=[].map.call(r.cells,function(x){return clip(inner(x),200).replace(/\|/g,'\\|')});
+            if(!cs.join(''))return;j++;lines.push(ind+'| '+cs.join(' | ')+' |');if(!cols){cols=cs.length;lines.push(ind+'|'+' --- |'.repeat(cols))}});
+          if(left)lines.push(ind+'(… '+left+' more rows: --max 0, or table)');return}
         var blk=BLK[t]||t==='LI'||(t.indexOf('-')>0&&/^(block|flex|grid|list-item|table)/.test(getComputedStyle(n).display));
         if(blk)flush();walk(n);if(blk)flush();else if(t==='TD'||t==='TH')buf+=' '}
       node(root);flush();return{lines:lines,urls:[...U.keys()]}}
     // A table used for page layout (long cells holding paragraphs, as on Hacker News) is read
     // as text, so its cells are not cut short like data cells.
     function layout(n){return [].some.call(n.querySelectorAll('td,th'),function(c){return c.textContent.length>200&&!!c.querySelector('div,p,ul,ol,pre,blockquote')})}
-    function text(root){
-      if(root)return md(root,false);
+    function text(root,all){
+      if(root)return md(root,false,all);
       // One article is the content; several (search results, feeds) are items of a list.
       var m=document.querySelector('main,[role=main]'),as=m?[]:document.querySelectorAll('article');
       if(!m&&as.length===1)m=as[0];
-      var r=m&&md(m,false);
+      var r=m&&md(m,false,all);
       if(r&&r.lines.join('').length>=200)return r;
-      r=md(document.body,true);return r.lines.join('').length>=200?r:md(document.body,false)}
+      r=md(document.body,true,all);return r.lines.join('').length>=200?r:md(document.body,false,all)}
     function foot(m,used){var f=[];m.urls.forEach(function(u,i){if(!used||used.has(i+1))f.push('['+(i+1)+']: '+u)});return f.length?'\n\n'+f.join('\n'):''}
     // BM25 over the markdown lines; the best ones are returned in page order, each under its nearest heading.
     // -q "/re/flags" is a regular expression; anything else is words.
@@ -424,7 +426,7 @@ enum PageAgent {
       return cut}
 
     // Rows of the biggest visible table (or of --rows matches) as TSV or JSON, with each row's
-    // first link and data-id when it has them.
+    // main link and id when it has them.
     function table(a){
       var root=a.ref?get(a.ref):a.selector?document.querySelector(a.selector):null;
       if(a.selector&&!root)throw new Error('selector matched nothing');
@@ -437,6 +439,16 @@ enum PageAgent {
         if(/(\.\.\.|…)/.test(t))e.querySelectorAll('[title]').forEach(function(x){var v=(x.innerText||'').replace(/\s+/g,' ').trim(),b=v.replace(/\s*(\.\.\.|…)$/,''),ti=x.getAttribute('title').replace(/\s+/g,' ').trim();
           if(b&&b!==v&&ti.indexOf(b)===0&&t.indexOf(v)>=0)t=t.replace(v,ti)});
         return t}
+      // The row's main link: most letters and digits, icon-only links skipped, action links (vote,
+      // hide, cart; ?how=, ?do=) and bare host or URL texts ("(github.com)" after a title) down-weighted,
+      // links in a title or name counted twice.
+      function mainLink(el){var best=null,bs=0,first=null;
+        [].forEach.call(el.querySelectorAll('a[href]'),function(x){var h=x.getAttribute('href'),u;if(!h||h[0]==='#'||/^(javascript|mailto|tel):/i.test(h))return;
+          if(!first)first=x;if(!vis(x))return;var s=(ct(x).match(/[\p{L}\p{N}]/gu)||[]).length;if(s<2)return;try{u=new URL(x.href)}catch(e){return}
+          if(/(^|\/)(vote|upvote|downvote|login|logout|signin|signup|hide|flag|report|fave|favorite|like|share|subscribe|follow|cart|wishlist)(\.\w+)?(\/|$)/i.test(u.pathname)||/[?&](how|action|act|do)=/i.test(u.search)||/^(https?:\/\/)?[\w-]+(\.[\w-]+)+(\/\S*)?$/i.test(ct(x)))s/=10;
+          var c=x.closest('h1,h2,h3,h4,h5,h6,[class*=title],[class*=name]');if(c&&el.contains(c))s*=2;
+          if(s>bs){bs=s;best=x}});
+        best=best||first;return best?best.href:''}
       function cells(el){var c=[].filter.call(el.children,vis);return(c.length?c:[el]).map(ct)}
       // Siblings sharing tag and first class (a product grid, search results), each followed down
       // through single-child wrappers (li > article). Menus fall out: one cell, short text, or nav.
@@ -459,7 +471,7 @@ enum PageAgent {
         if(cnt(sel)!==n){var q=sig(top.p)+' > '+sig(it)+(it!==e0?' > '+sig(e0):'');if(cnt(q)===n)sel=q;else sel=null}
         if(sel)pin=true;else sel=sig(e0);
         return{rows:top.rows,sel:sel,pin:pin}}
-      var head=null,rows=[],src;
+      var head=null,rows=[],src,tb=false;
       if(a.rows){
         var els=[].filter.call((root||document).querySelectorAll(a.rows),vis);
         if(!els.length)throw new Error('no visible element matches '+a.rows);
@@ -485,15 +497,23 @@ enum PageAgent {
             for(var k=0;k<sp;k++){cs[col]=tx;hold[col]=rs>1?{left:rs-1,t:tx}:null;col++;carry()}});
           if(!rows.length&&(tr.parentNode.tagName==='THEAD'||[].every.call(tr.cells,function(c){return c.tagName==='TH'})))heads.push(cs);else rows.push({el:tr,c:cs,n:n})});
         if(heads.length)head=[];heads.forEach(function(h){h.forEach(function(x,i){x=x.replace(/\[[^\]]{1,12}\]/g,'').trim();if(x&&head[i]!==x&&(head[i]||'').split(' ').pop()!==x)head[i]=head[i]?head[i]+' '+x:x})});
-        src='table'+(t.id?'#'+t.id:t.className?'.'+String(t.className).trim().split(/\s+/)[0]:'');
+        tb=true;src='table'+(t.id?'#'+t.id:t.className?'.'+String(t.className).trim().split(/\s+/)[0]:'');
       }
       // Separator and ad rows have far fewer cells than the usual row.
-      var cnt={},w=0;rows.forEach(function(r){cnt[r.c.length]=(cnt[r.c.length]||0)+1});for(var k in cnt)if(!w||cnt[k]>cnt[w])w=+k;
-      rows=rows.filter(function(r){return(r.n||r.c.length)*2>w&&r.c.some(Boolean)});
+      var cnt,w;
+      function sep(){cnt={};w=0;rows.forEach(function(r){cnt[r.c.length]=(cnt[r.c.length]||0)+1});for(var k in cnt)if(!w||cnt[k]>cnt[w])w=+k;
+        rows=rows.filter(function(r){return(r.n||r.c.length)*2>w&&r.c.some(Boolean)})}
+      sep();
+      // Two-row records (a title row, then a row of details under an empty first cell, as on
+      // Hacker News) become one row, when at least a third of the rows are such continuations.
+      if(tb&&!a.rows){var cont=rows.map(function(r,i){var p=rows[i-1];return i>0&&!r.c[0]&&!!p.c[0]});
+        if(cont.filter(Boolean).length*3>=rows.length){var m=[];
+          rows.forEach(function(r,i){var p=m[m.length-1];if(cont[i]&&p&&!p.mg){p.c=p.c.concat(r.c.filter(Boolean));p.n=0;p.mg=1}else m.push(r)});
+          rows=m;sep()}}
       if(!rows.length)throw new Error('the table has no data rows');
       rows.forEach(function(r){while(r.c.length<w)r.c.push('');r.c.length=w;
-        var id=r.el.getAttribute('data-id')||'';if(!id)[].some.call(r.el.attributes,function(x){if(/^data-[\w-]*id$/i.test(x.name)&&x.value){id=x.value;return true}});r.id=id;
-        var l=[].find.call(r.el.querySelectorAll('a[href]'),function(x){var h=x.getAttribute('href');return h&&h[0]!=='#'&&!/^javascript:/i.test(h)});r.l=l?l.href:''});
+        var id=r.el.getAttribute('data-id')||'';if(!id)[].some.call(r.el.attributes,function(x){if(/^data-[\w-]*id$/i.test(x.name)&&x.value){id=x.value;return true}});
+        if(!id&&/\d/.test(r.el.id)&&r.el.id.length<=40)id=r.el.id;r.id=id;r.l=mainLink(r.el)});
       head=(head||[]).slice(0,w);while(head.length<w)head.push('');
       // Columns empty in every row (images, checkboxes) are left out.
       var keep=[];for(var i=0;i<w;i++)if(rows.some(function(r){return r.c[i]}))keep.push(i);
@@ -526,7 +546,7 @@ enum PageAgent {
         hits.sort(function(p,r){return r.sc-p.sc});
         body=hits.slice(0,10).map(function(h){var x=h.x;return(x.el?x.s:ref(x.tel)+' text '+JSON.stringify(clip(x.s,100)))+(x.inv?'':' (offscreen)')}).join('\n')||'no match for '+qshow(a.query);
       }else if(a.mode==='text'){
-        md0=text(root);body=a.query?rank(md0,a.query,a.max_chars||6000):md0.lines.join('\n')||(root?'(no text there: try read --all, or shot for images and canvas)':'(no text on the page)');
+        md0=text(root,a.max_chars===0);body=a.query?rank(md0,a.query,a.max_chars||6000):md0.lines.join('\n')||(root?'(no text there: try read --all, or shot for images and canvas)':'(no text on the page)');
       }else if(a.mode==='links'){
         body=links(root||document.body,a.query);
       }else{

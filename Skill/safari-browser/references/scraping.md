@@ -9,7 +9,7 @@ safari t5 table --rows ".card"      # a list of cards: one row per match
 safari t5 table --sel "#results table"
 ```
 
-Without a table of 3+ rows, `table` guesses repeated cards (a product grid, results) and names them on stderr: `20 rows from cards article.product_pod (guessed; pin with --rows 'article.product_pod')`. Card columns are named after the card's parts (`h3`, `product_price`); button text is left out. If it picked the wrong list, give `--rows`; pass the same `--rows` to `crawl` when the guess could change between pages. Ad and separator rows and empty columns are dropped. Tables used for page layout are read poorly; use `text` there.
+Without a table of 3+ rows, `table` guesses repeated cards (a product grid, results) and names them on stderr: `20 rows from cards article.product_pod (guessed; pin with --rows 'article.product_pod')`. Card columns are named after the card's parts (`h3`, `product_price`); button text is left out. If it picked the wrong list, give `--rows`; pass the same `--rows` to `crawl` when the guess could change between pages. Ad and separator rows and empty columns are dropped. `link` is the row's main link (the one with the most text, not an icon or a vote/hide/cart action); `id` comes from `data-id`/`data-*id` or a numeric element id. Two-row records (a title row, then a details row under an empty first cell, as on Hacker News) come out as one row. Tables used for page layout are read poorly; use `text` there.
 
 ## Pacing per site
 

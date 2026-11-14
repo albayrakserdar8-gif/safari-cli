@@ -10,7 +10,7 @@ Some harnesses run shell commands from a script (a JavaScript REPL, say) rather 
 {"ok":false,"kind":"blocked","error":"t5: example.com blocked this browser …","tab":"t5"}
 ```
 
-`url` comes with almost every call on a tab, `title` mainly after calls that loaded a page, `nav` only when one did. `table` and `crawl` give `rows` (objects; `crawl` adds `pages`) instead of `text`; with `-o FILE`, `file` and `chars`; `shot` gives `files`. A failure can carry `rows` and `notes` too (a crawl that stopped on page 3). `--id-only` is ignored with `--json`.
+`url` comes with almost every call on a tab, `title` mainly after calls that loaded a page, `nav` only when one did. `table` and `crawl` give `rows` (objects, all of them unless `--max`; `crawl` adds `pages`) instead of `text`; with `-o FILE`, `file` and `chars`; `shot` gives `files`. A failure can carry `rows` and `notes` too (a crawl that stopped on page 3). `--id-only` is ignored with `--json`.
 
 - **A non-zero exit may throw.** Exit 1 is an ordinary outcome, so run safari so that it does not throw and branch on `ok` and `kind`:
 

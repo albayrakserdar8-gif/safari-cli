@@ -94,7 +94,7 @@ enum Downloads {
     static func run(_ a: [String: Any]) -> Int32 {
         guard a["wait"] as? Bool == true else {
             let found = items(within: 600)
-            print(found.isEmpty ? "(no downloads in the last 10 minutes)" : found.map(\.line).joined(separator: "\n"))
+            Out.data(found.isEmpty ? "(no downloads in the last 10 minutes)" : found.map(\.line).joined(separator: "\n"))
             return 0
         }
         // Waits for the downloads started in the last 2 minutes to end.
@@ -102,13 +102,12 @@ enum Downloads {
         while true {
             let found = items(within: 120)
             if !found.isEmpty && found.allSatisfy(\.done) {
-                print(found.map(\.line).joined(separator: "\n"))
+                Out.data(found.map(\.line).joined(separator: "\n"))
                 return found.first?.failed == nil ? 0 : 1
             }
             if Date() > deadline {
                 let msg = found.isEmpty ? "no download started in the last 2 minutes" : found.map(\.line).joined(separator: "\n")
-                FileHandle.standardError.write(Data((msg + "\n").utf8))
-                return 1
+                return Out.fail(msg, kind: "timeout")
             }
             usleep(500_000)
         }

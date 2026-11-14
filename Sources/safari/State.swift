@@ -36,8 +36,8 @@ enum State {
                     return fail("safari: cannot write \(path)")
                 }
                 try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path)
-                c.notes.forEach(note)
-                print("saved \(cookies.count) cookies, \((page["local"] as? [String: Any])?.count ?? 0) local, \((page["session"] as? [String: Any])?.count ?? 0) session keys of \(origin) → \(path)")
+                Out.data("saved \(cookies.count) cookies, \((page["local"] as? [String: Any])?.count ?? 0) local, \((page["session"] as? [String: Any])?.count ?? 0) session keys of \(origin) → \(path)")
+                c.notes.forEach(Out.note)
                 return 0
             }
             guard let d = FileManager.default.contents(atPath: path), let file = json(String(decoding: d, as: UTF8.self)) as? [String: Any] else {
@@ -51,8 +51,8 @@ enum State {
             let put = "var w=function(st,o){for(var k in o)st.setItem(k,o[k])};w(localStorage,\(jsonString(local)));w(sessionStorage,\(jsonString(session)));return 'ok'"
             _ = try call("js", ["code": put])
             let r = try call("navigate", ["url": "reload"])
-            c.notes.forEach(note)
-            print("loaded \(c.data.split(separator: " ").dropFirst().first ?? "0") of \(cookies.count) cookies, \(local.count) local, \(session.count) session keys; reloaded: \(r.data.split(separator: "\n").first ?? "")")
+            Out.data("loaded \(c.data.split(separator: " ").dropFirst().first ?? "0") of \(cookies.count) cookies, \(local.count) local, \(session.count) session keys; reloaded: \(r.data.split(separator: "\n").first ?? "")")
+            c.notes.forEach(Out.note)
             return 0
         } catch let f as Client.Failure {
             return fail(f.msg.hasPrefix("safari") ? f.msg : "safari: " + f.msg)
@@ -61,9 +61,5 @@ enum State {
         }
     }
 
-    private static func note(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
-    private static func fail(_ msg: String) -> Int32 {
-        note(msg)
-        return 1
-    }
+    private static func fail(_ msg: String) -> Int32 { Out.fail(msg) }
 }

@@ -86,6 +86,39 @@ enum SelfTest {
             eq("rule \(s.isEmpty ? "\"\"" : s) is nil", Rate.Rule(s) == nil, true)
         }
 
+        // Rate holds (after a block page): per site and its subdomains, until they expire or reset.
+        let rate = Rate(persist: false)
+        eq("not held", rate.heldFor(host: "cimri.com") == nil, true)
+        eq("hold key", rate.hold(host: "www.cimri.com", for: 900), "cimri.com")
+        eq("held site", rate.heldFor(host: "cimri.com")?.key, Optional("cimri.com"))
+        eq("held subdomain", rate.heldFor(host: "m.cimri.com")?.key, Optional("cimri.com"))
+        eq("held for 15 min", (rate.heldFor(host: "cimri.com")?.secs ?? 0) > 890, true)
+        eq("other site not held", rate.heldFor(host: "example.com") == nil, true)
+        eq("rate list shows the hold", (try? rate.command([:])) ?? "", "cimri.com held 15 min")
+        eq("reset ends the hold", rate.reset("cimri.com"), true)
+        eq("not held after reset", rate.heldFor(host: "cimri.com") == nil, true)
+        eq("reset again finds nothing", rate.reset("cimri.com"), false)
+        rate.hold(host: "x.org", for: -1)
+        eq("an expired hold is gone", rate.heldFor(host: "x.org") == nil, true)
+        _ = try? rate.command(["site": "y.org", "range": "5"])
+        rate.hold(host: "y.org", for: 60)
+        eq("rate SITE reset keeps the saved rule", (try? rate.command(["site": "y.org", "range": "reset"])) ?? "", "y.org: hold and temporary slowdown ended; keeps 5 s between pages")
+        eq("…and the rule stays", (try? rate.command(["site": "y.org"])) ?? "", "y.org 5 s")
+
+        // Tools.withScheme: http for this machine, https for the rest, a scheme kept.
+        for (u, w) in [("cimri.com/arama?q=a:b", "https://cimri.com/arama?q=a:b"), ("example.com", "https://example.com"),
+                       ("localhost:8765/x", "http://localhost:8765/x"), ("localhost", "http://localhost"), ("127.0.0.1:8765/a", "http://127.0.0.1:8765/a"),
+                       ("[::1]:3000/", "http://[::1]:3000/"), ("http://a.b/c", "http://a.b/c"), ("HTTPS://A.b", "HTTPS://A.b"),
+                       ("about:blank", "about:blank"), ("data:text/html,x", "data:text/html,x"), ("javascript:void(0)", "javascript:void(0)"),
+                       ("blob:https://a.b/1", "blob:https://a.b/1"), ("localhost.example.com", "https://localhost.example.com")] {
+            eq("withScheme \(u)", Tools.withScheme(u), w)
+        }
+        // Tools.isLoopback: no 2-4 s pace floor for a server on this machine.
+        for (u, w) in [("http://localhost:8765/", true), ("http://127.0.0.1:8765/", true), ("http://127.1.2.3/", true), ("http://[::1]:3000/", true),
+                       ("https://example.com/", false), ("https://localhost.example.com/", false), ("https://127.example.com/", false)] {
+            eq("isLoopback \(u)", Tools.isLoopback(URL(string: u)?.host ?? ""), w)
+        }
+
         // Rate.site: lowercase, without a leading www.
         eq("site strips www", Rate.site("WWW.Example.com"), "example.com")
         eq("site keeps a subdomain", Rate.site("sub.example.com"), "sub.example.com")
@@ -105,6 +138,26 @@ enum SelfTest {
         }
         usage("click -- -weird is no ref", ["t5", "click", "--", "-weird"])
         usage("unknown verb", ["frob"])
+
+        // --json: any verb, anywhere before "--"; after it, it is text.
+        if let a = parse("read --json", ["t5", "read", "--json"])?.args { eq("read --json", a["json"] as? Bool, Optional(true)) }
+        if let a = parse("--json first", ["--json", "t5", "click", "e3"])?.args {
+            eq("--json first: still a click", a["action"] as? String, Optional("click"))
+            eq("--json first", a["json"] as? Bool, Optional(true))
+        }
+        if let a = parse("fill -- --json", ["t5", "fill", "e4", "--", "--json"])?.args {
+            eq("fill -- --json is the text", a["text"] as? String, Optional("--json"))
+            eq("fill -- --json is no flag", a["json"] == nil, true)
+        }
+        eq("wantsJSON stops at --", CLI.wantsJSON(["t5", "type", "--", "--json"]), false)
+
+        // Out.envelope: fixed key order, no empty notes, nav only when true, nested rows.
+        eq("envelope order", Out.envelope(["notes": ["n"], "text": "x", "tab": "t5", "ok": true, "url": "https://a.b/", "title": "A", "nav": true]),
+           #"{"ok":true,"tab":"t5","url":"https://a.b/","title":"A","nav":true,"text":"x","notes":["n"]}"#)
+        eq("envelope drops empty notes and nav false", Out.envelope(["ok": true, "text": "", "notes": [String](), "nav": false]), #"{"ok":true,"text":""}"#)
+        eq("envelope rows", Out.envelope(["ok": true, "rows": [["a": "1"]], "pages": 2]), #"{"ok":true,"rows":[{"a":"1"}],"pages":2}"#)
+        eq("envelope error", Out.envelope(["error": "Tab t9 is gone", "ok": false, "kind": "gone", "tab": "t9"]),
+           #"{"ok":false,"kind":"gone","error":"Tab t9 is gone","tab":"t9"}"#)
 
         print("selftest: \(total) checks, \(failed) failed")
         return failed == 0 ? 0 : 1

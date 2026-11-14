@@ -179,10 +179,10 @@ final class Daemon {
         // Pacing: the client asks for a slot before navigating and sleeps itself.
         if tool == "reserve" { return tools.reserve(args).merging(["ok": true]) { a, _ in a } }
         if tool == "rate" {
-            do { return ["ok": true, "text": try tools.rate.command(args)] } catch let e as ToolError { return ["ok": false, "text": e.msg] } catch { return ["ok": false, "text": "\(error)"] }
+            do { return ["ok": true, "text": try tools.rate.command(args)] } catch let e as ToolError { return ["ok": false, "text": e.msg, "kind": e.kind] } catch { return ["ok": false, "text": "\(error)"] }
         }
         if tool == "ext" {
-            do { return ["ok": true, "text": try tools.rawExt(args["op"] as? String ?? "", args["args"] as? [String: Any] ?? [:])] } catch let e as ToolError { return ["ok": false, "text": e.msg] } catch { return ["ok": false, "text": "\(error)"] }
+            do { return ["ok": true, "text": try tools.rawExt(args["op"] as? String ?? "", args["args"] as? [String: Any] ?? [:])] } catch let e as ToolError { return ["ok": false, "text": e.msg, "kind": e.kind] } catch { return ["ok": false, "text": "\(error)"] }
         }
         guard Tools.names.contains(tool) else { return ["ok": false, "text": "unknown tool \(tool)"] }
         do {
@@ -194,11 +194,12 @@ final class Daemon {
                 case .image(let d): images.append(d.base64EncodedString())
                 }
             }
-            return ["ok": true, "text": text.joined(separator: "\n"), "img": images]
+            // tab, url, title, nav: what the call left the tab at, for `--json`.
+            return tools.reply().merging(["ok": true, "text": text.joined(separator: "\n"), "img": images]) { $1 }
         } catch let e as ToolError {
-            return ["ok": false, "text": e.msg]
+            return tools.reply(failed: true).merging(["ok": false, "text": e.msg, "kind": e.kind]) { $1 }
         } catch {
-            return ["ok": false, "text": "\(error)"]
+            return tools.reply(failed: true).merging(["ok": false, "text": "\(error)"]) { $1 }
         }
     }
 

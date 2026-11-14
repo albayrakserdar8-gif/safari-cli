@@ -4,7 +4,10 @@ import UniformTypeIdentifiers
 
 struct ToolError: Error {
     let msg: String
-    init(_ msg: String) { self.msg = msg }
+    /// What went wrong, for callers that branch on it (`--json`): gone, timeout, check, offline,
+    /// noanswer, dialog, or error for everything else.
+    let kind: String
+    init(_ msg: String, kind: String = "error") { self.msg = msg; self.kind = kind }
 }
 
 enum Content {
@@ -144,18 +147,22 @@ final class Tools {
 
     func call(_ name: String, _ a: [String: Any]) throws -> [Content] {
         dialogs = []
+        callTab = nil
+        navigated = false
+        seenURL = []
+        seenTitle = []
         defer { if let c = current { lastUse[c] = Date() } }
         var out: [Content]
         do {
             out = try dispatch(name, a)
-        } catch let e as ToolError where e.msg.hasPrefix("Safari did not answer in time") {
+        } catch let e as ToolError where e.kind == "noanswer" {
             // Most likely a dialog the page agent could not intercept (shown before it was injected).
             guard let id = current else { throw e }
             blocked.insert(id)
             if let t = tabs[id], t.visible, let msg = Capture.dialog(wid: cg(t.pos.wid), answer: nil) {
-                throw ToolError("The page shows a dialog: \(jsonString(clip(msg, 200))). Answer it with: safari t\(id) dialog accept (or dismiss).")
+                throw ToolError("The page shows a dialog: \(jsonString(clip(msg, 200))). Answer it with: safari t\(id) dialog accept (or dismiss).", kind: "dialog")
             }
-            throw ToolError(e.msg + " If so, `safari t\(id) dialog accept` (or dismiss) answers it; it needs Accessibility permission and shows the tab.")
+            throw ToolError(e.msg + " If so, `safari t\(id) dialog accept` (or dismiss) answers it; it needs Accessibility permission and shows the tab.", kind: "noanswer")
         }
         saveState()
         pruneRoutes()
@@ -171,6 +178,24 @@ final class Tools {
 
     /// Dialogs the page agent answered during this call.
     private var dialogs: [String] = []
+    /// The tab this call named or worked in, whether it loaded a page there, and which tabs had
+    /// their address or title read from Safari or the page during it (`reply`).
+    private var callTab: Int?
+    private var navigated = false
+    private var seenURL = Set<Int>(), seenTitle = Set<Int>()
+
+    /// Fields for the daemon's reply about the last call: `tab`, and `url`/`title` only when they
+    /// were read during the call (so they describe the tab after it), `nav` when it loaded a page.
+    /// With `failed`, only the tab.
+    func reply(failed: Bool = false) -> [String: Any] {
+        guard let id = callTab else { return [:] }
+        var r: [String: Any] = ["tab": "t\(id)"]
+        guard !failed, let t = tabs[id] else { return r }
+        if seenURL.contains(id) { r["url"] = t.url }
+        if seenTitle.contains(id) { r["title"] = t.title }
+        if navigated { r["nav"] = true }
+        return r
+    }
     /// Tabs whose last call timed out, probably behind a native dialog.
     private var blocked: Set<Int> = []
 
@@ -213,7 +238,7 @@ final class Tools {
     private func clip(_ s: String, _ n: Int) -> String { s.count > n ? String(s.prefix(n - 1)) + "…" : s }
 
     private func gone(_ id: Int) -> ToolError {
-        ToolError("Tab t\(id) is gone (closed, or changed outside this session); run `safari tabs` for current ids.")
+        ToolError("Tab t\(id) is gone (closed, or changed outside this session); run `safari tabs` for current ids.", kind: "gone")
     }
 
     private func sameHost(_ a: String, _ b: String) -> Bool {
@@ -309,6 +334,8 @@ final class Tools {
         for (k, t) in result where !t.priv && pw.contains(t.pos.wid) { result[k]?.priv = true }
         tabs = result
         order = slot.compactMap { $0 }
+        seenURL.formUnion(result.keys)
+        seenTitle.formUnion(result.keys)
         counts = [:]
         for t in list { counts[t.ref.wid, default: 0] += 1 }
         synced = true
@@ -352,6 +379,7 @@ final class Tools {
             guard let id = Int(s.hasPrefix("t") ? String(s.dropFirst()) : s) else {
                 throw ToolError("Bad tab id \(s); use an id from `safari tabs`, like t3.")
             }
+            callTab = id
             if tabs[id]?.xid == nil { try sync() }  // unknown, or unconfirmed since a reconnect
             guard tabs[id] != nil else {
                 // Never let later calls without a tab fall back to the user's visible tab instead.
@@ -364,10 +392,11 @@ final class Tools {
         }
         opened = opened.filter { tabs[$0] != nil }
         if opened.count > 1 {
-            throw ToolError("Several tabs opened here are open (\(opened.sorted().map { "t\($0)" }.joined(separator: ", "))); put the tab id first: safari t3 <verb> (or export SAFARI_TAB=t3 once).")
+            throw ToolError("Several tabs opened here are open (\(opened.sorted().map { "t\($0)" }.joined(separator: ", "))); put the tab id first: safari t3 <verb> (or set SAFARI_TAB=t3).")
         }
         if let c = current {
             if tabs[c] != nil, tabs[c]?.xid == nil { try sync() }
+            callTab = c
             guard tabs[c] != nil else { throw gone(c) }
             return c
         }
@@ -375,6 +404,7 @@ final class Tools {
         try sync()
         guard let front = order.first(where: { tabs[$0]?.visible == true }) else { throw ToolError("Safari has no open tab; use `safari open <url>`.") }
         current = front
+        callTab = front
         return front
     }
 
@@ -409,6 +439,7 @@ final class Tools {
             if let r = try safari.js(t.pos, code, expect(t)) {
                 verifiedURL = t.url
                 tabs[id]?.url = r.url
+                seenURL.insert(id)
                 return r.result
             }
             try sync()
@@ -421,6 +452,7 @@ final class Tools {
         guard let t = try? live(id) else { return nil }
         if let r = try? safari.js(t.pos, code, expect(t, url: false)) {
             tabs[id]?.url = r.url
+            seenURL.insert(id)
             return r
         }
         try? sync()
@@ -661,6 +693,8 @@ final class Tools {
         guard let r = poll(id, stateJS) else { return nil }
         let f = r.result.split(separator: "\n", maxSplits: 4, omittingEmptySubsequences: false)
         guard f.count == 5 else { return nil }
+        tabs[id]?.title = String(f[4])
+        seenTitle.insert(id)
         return PageState(ready: String(f[0]), url: String(f[1]), status: Int(f[2]) ?? 0, changed: f[3] != "0", title: String(f[4]), tabURL: r.url)
     }
 
@@ -668,7 +702,7 @@ final class Tools {
     /// so any unmarked document is the new one; otherwise a change away from `from` is.
     /// `stuck` means nothing happened: the marked document stayed and Safari was not
     /// heading anywhere.
-    private func waitLoad(_ id: Int, marked: Bool, from: String?, timeout: Double, grace: Double = 1.2) -> (text: String, stuck: Bool) {
+    private func waitLoad(_ id: Int, marked: Bool, from: String?, timeout: Double, grace: Double = 1.2) -> (text: String, stuck: Bool, status: Int) {
         let start = Date()
         var moved = false
         var stuck = false
@@ -679,7 +713,7 @@ final class Tools {
         var settled: String?
         while true {
             let t = Date().timeIntervalSince(start)
-            guard tabs[id] != nil else { return ("lost track of the tab while it was loading; run `safari tabs`", false) }
+            guard tabs[id] != nil else { return ("lost track of the tab while it was loading; run `safari tabs`", false, 0) }
             if let s = peek(id) {
                 last = s
                 if s.ready == "old" {
@@ -704,16 +738,17 @@ final class Tools {
             usleep(t < 1 ? 60_000 : 150_000)
         }
         defer { mark += 1 }
-        guard let last else { return ("(page did not respond)", false) }
+        guard let last else { return ("(page did not respond)", false, 0) }
         if last.ready == "old" { _ = poll(id, "delete window.__smcpOld;''") }
         tabs[id]?.title = last.title
+        seenTitle.insert(id)
         var note = ""
         if stuck { note = " (no navigation happened)" }
         else if last.ready == "old" && !inPage { note = " (the new page has not arrived yet)" }
         else if last.ready != "complete" && last.ready != "old" { note = " (still loading)" }
         let status = last.status != 0 ? last.status : tabs[id].map { safari.status($0.pos) } ?? 0
         if status >= 400 { note += " (HTTP \(status))" }
-        return ((last.title.isEmpty ? "" : clip(last.title, 80) + " | ") + clip(last.url, 200) + note, stuck)
+        return ((last.title.isEmpty ? "" : clip(last.title, 80) + " | ") + clip(last.url, 200) + note, stuck, status)
     }
 
     // MARK: tools
@@ -752,7 +787,7 @@ final class Tools {
         case "new":
             var url = a["url"] as? String ?? ""
             try noFile(url)
-            if !url.isEmpty && !url.contains(":") { url = "https://" + url }
+            if !url.isEmpty { url = Tools.withScheme(url) }
             let priv = a["private"] as? Bool ?? false
             try sync()
             // Prefer the current tab's window, but never mix private and normal tabs in one window.
@@ -771,12 +806,13 @@ final class Tools {
             guard let id = (tabs.values.first { pos.xid != nil && $0.xid == pos.xid } ?? tabs.values.first { $0.pos == pos.ref })?.id else { throw ToolError("Opened a tab but lost track of it; run `safari tabs`.") }
             if priv { tabs[id]?.priv = true }
             current = id
+            callTab = id
             defaultLost = false
             opened.insert(id)
             saveState()
             var loaded = ""
             if !url.isEmpty {
-                let text = waitLoad(id, marked: false, from: "about:blank", timeout: 15, grace: 8).text
+                let (text, _, status) = waitLoad(id, marked: false, from: "about:blank", timeout: 15, grace: 8)
                 // Unreachable host: Safari's error page, which no script can enter. Close the tab rather
                 // than hand back an id for a page that is not there (scripts use `open --id-only`).
                 let errorPage = peek(id)?.url.hasPrefix("safari-resource:") == true
@@ -788,7 +824,8 @@ final class Tools {
                     saveState()
                     throw ToolError("Safari could not load \(clip(url, 120)) (unreachable host, or not a web page); closed the tab it opened.")
                 }
-                loaded = ": " + (try passCheck(id, text))
+                navigated = true
+                loaded = ": " + (try passCheck(id, text, status))
             }
             // Stamp the page now, so the tab keeps its id even if the daemon restarts next.
             if !url.isEmpty { _ = try? agentCall(id, ["op": "nop"]) }
@@ -1340,11 +1377,12 @@ final class Tools {
             }
         case "reload": _ = try exec(id, "location.reload();''")
         default:
-            if !url.contains(":") { url = "https://" + url }
+            url = Tools.withScheme(url)
             try guardedOp(id) { try safari.setURL($0, url, $1) }
         }
         usleep(100_000)
-        let (text, _) = waitLoad(id, marked: true, from: url == "reload" ? nil : from, timeout: 15, grace: 1.5)
+        let (text, _, status) = waitLoad(id, marked: true, from: url == "reload" ? nil : from, timeout: 15, grace: 1.5)
+        navigated = true
         if !["back", "forward", "reload"].contains(url), let s = peek(id), s.url.hasPrefix("safari-resource:") {
             throw ToolError("Safari could not open \(clip(url, 120)) (\(clip(s.title, 60))); the tab now shows Safari's error page.")
         }
@@ -1354,7 +1392,23 @@ final class Tools {
             let t = tabs[id]
             throw ToolError("Safari could not load \(clip(url, 120)): the page did not respond" + (t.map { "; the tab shows \(jsonString(clip($0.title, 60))) | \(clip($0.url, 120))" } ?? ""))
         }
-        return try passCheck(id, text)
+        return try passCheck(id, text, status)
+    }
+
+    /// A URL as typed (`cimri.com/arama?q=a:b`) with its scheme: http for this machine, https
+    /// for the rest; one that has a scheme (or is about:, data:, blob:, javascript:) as it is.
+    static func withScheme(_ url: String) -> String {
+        let l = url.lowercased()
+        if l.contains("://") || ["about:", "data:", "blob:", "javascript:"].contains(where: { l.hasPrefix($0) }) { return url }
+        let host = l.prefix { !"/?#".contains($0) }
+        let local = host == "localhost" || host.hasPrefix("localhost:") || host.hasPrefix("127.") || host.hasPrefix("[::1]")
+        return (local ? "http://" : "https://") + url
+    }
+
+    /// localhost, 127.*, ::1: a server on this machine (URL.host, with or without brackets).
+    static func isLoopback(_ host: String) -> Bool {
+        let h = host.lowercased()
+        return h == "localhost" || h == "::1" || h == "[::1]" || h.wholeMatch(of: #/127(\.\d+){3}/#) != nil
     }
 
     // MARK: bot checks and pacing
@@ -1362,7 +1416,8 @@ final class Tools {
     /// Per-site pacing for navigations; the client sleeps on the slots it hands out.
     let rate = Rate()
 
-    /// The kind of bot check the page shows ("cloudflare", "captcha"…), "" for none, "~" while loading.
+    /// The kind of bot check the page shows ("cloudflare", "captcha"…, "blocked" for a block page
+    /// that no check follows), "" for none, "~" while loading.
     /// A captcha on a normal page (a login form) does not count: it needs a check-like title,
     /// an HTTP error, or a page with almost nothing else on it.
     private let botJS = #"(function(){if(document.readyState!=='complete')return'~';var d=document,t=(d.title||'').trim(),st=(performance.getEntriesByType('navigation')[0]||{}).responseStatus||0,"#
@@ -1371,19 +1426,25 @@ final class Tools {
         + #"if(d.querySelector('#challenge-form,#challenge-running,#cf-challenge-running,#cf-please-wait,script[src*="/cdn-cgi/challenge-platform"]'))k='cloudflare';"#
         + #"else if(d.querySelector('#px-captcha'))k='perimeterx';"#
         + #"else if(d.querySelector('iframe[src*="hcaptcha.com"],iframe[src*="recaptcha"],iframe[src*="challenges.cloudflare.com"],.g-recaptcha,.h-captcha,.cf-turnstile'))k='captcha';"#
+        + #"else if(d.querySelector('#cf-error-details,[data-translate="block_headline"],.cf-error-code')||(st===403&&/^(attention required|access denied)/i.test(t)))k='blocked';"#
         + #"else if(tm)k='bot check';return k&&(tm||st>=400||n<6)?k:''})()"#
 
     private func host(_ id: Int) -> String { URL(string: tabs[id]?.url ?? "")?.host ?? "" }
 
     /// After a load: a bot-check page that passes by itself is waited out (the result then
     /// describes the real page); one that does not is an error naming the tab, so `&&` chains stop.
-    /// Either way the site is paced more slowly for the rest of the session.
-    private func passCheck(_ id: Int, _ text: String) throws -> String {
+    /// Either way the site is paced more slowly for the rest of the session. A block page is an
+    /// error at once, and the site's loads are refused for 15 min. `status` is waitLoad's.
+    private func passCheck(_ id: Int, _ text: String, _ status: Int) throws -> String {
         var text = text
         let h = host(id)
-        // The status note ends the line; the title before it is the page's own text.
-        if text.hasSuffix("(HTTP 429)") || text.hasSuffix("(HTTP 503)") { text += rate.backoff(host: h) }
+        if status == 429 || status == 503 { text += rate.backoff(host: h) }
         guard let k = poll(id, botJS)?.result, !k.isEmpty, k != "~" else { return text }
+        if k == "blocked" {
+            let site = h.isEmpty ? "the site" : rate.hold(host: h, for: 900)
+            throw ToolError("t\(id): \(site) blocked this browser (block page\(status >= 400 ? ", HTTP \(status)" : "")). Waiting, solving or reloading will not clear it; do not retry or re-submit. Tell the user."
+                + (h.isEmpty ? "" : " Loads of \(site) are held for 15 min (safari rate \(site) reset ends that)."), kind: "blocked")
+        }
         let what = ["cloudflare": "Cloudflare check", "perimeterx": "PerimeterX check"][k] ?? k
         let limit: Double = k == "cloudflare" || k == "bot check" ? 20 : 10
         let start = Date()
@@ -1396,12 +1457,14 @@ final class Tools {
             if clear >= 2, let s = peek(id) {
                 tabs[id]?.title = s.title
                 tabs[id]?.url = s.url
+                seenTitle.insert(id)
+                seenURL.insert(id)
                 let st = s.status >= 400 ? " (HTTP \(s.status))" : ""
                 // Backoff counts from now, after the wait.
                 return (s.title.isEmpty ? "" : clip(s.title, 80) + " | ") + clip(s.url, 200) + st + " (passed a \(what))" + rate.backoff(host: h)
             }
         }
-        throw ToolError("t\(id): \(what) on \(h) did not clear in \(Int(limit)) s\(rate.backoff(host: h)). Show it to the user (safari t\(id) show), ask them to solve it, then: safari t\(id) wait --load")
+        throw ToolError("t\(id): \(what) on \(h) did not clear in \(Int(limit)) s\(rate.backoff(host: h)). Show it to the user (safari t\(id) show), ask them to solve it, then: safari t\(id) wait --load", kind: "check")
     }
 
     /// Answers the client before a navigation: how long to wait for this site's next slot.
@@ -1410,18 +1473,25 @@ final class Tools {
         if ["", "back", "forward", "reload"].contains(u) {
             guard a["tab"] != nil || current != nil, let id = try? resolve(a) else { return ["wait": 0] }
             u = tabs[id]?.url ?? ""
-        } else if !u.contains(":") { u = "https://" + u }
+        } else { u = Tools.withScheme(u) }
         guard let h = URL(string: u)?.host else { return ["wait": 0] }
+        // After a block page the site is held: no new loads or reloads (back and forward still go).
+        if !["back", "forward"].contains(a["url"] as? String ?? ""), let held = rate.heldFor(host: h) {
+            return ["wait": 0, "held": held.secs, "site": held.key]
+        }
         func rule(_ k: String) -> Rate.Rule? { (a[k] as? [Double]).flatMap { $0.count == 2 ? Rate.Rule(lo: $0[0], hi: $0[1]) : nil } }
-        guard let r = rate.reserve(host: h, override: rule("delay"), fallback: rule("fallback")) else { return ["wait": 0] }
+        // A site without a rule still gets 2-4 s between loads (its first load goes at once); a server
+        // on this machine does not.
+        let floor = Tools.isLoopback(h) ? nil : Rate.Rule(lo: 2, hi: 4)
+        guard let r = rate.reserve(host: h, override: rule("delay"), fallback: rule("fallback") ?? floor) else { return ["wait": 0] }
         return ["wait": r.wait, "site": r.key]
     }
 
     /// What `settle` saw right after an action. `act` builds the result line from it, never by
     /// looking into the agent's text, which carries page-controlled names and values.
     private enum Settled: Equatable {
-        /// The page or its address changed; `title | url` of where it is now.
-        case navigated(String)
+        /// The page or its address changed; `title | url` of where it is now, and its HTTP status.
+        case navigated(String, Int)
         /// Nothing on the page reacted (judged only for clicks, keys, hovers, drags, submits).
         case unchanged
         /// Same page: changed in place, or not judged.
@@ -1433,16 +1503,17 @@ final class Tools {
         var changed = true
         for wait: useconds_t in twice ? [120_000, 250_000] : [120_000] {
             usleep(wait)
-            guard let s = peek(id) else { return .navigated(waitLoad(id, marked: false, from: href, timeout: 10).text) }
+            guard let s = peek(id) else { let w = waitLoad(id, marked: false, from: href, timeout: 10); return .navigated(w.text, w.status) }
             if s.url != href || s.ready == "leaving" || (wasReady && s.ready != "complete") {
-                return .navigated(waitLoad(id, marked: false, from: href, timeout: 10).text)
+                let w = waitLoad(id, marked: false, from: href, timeout: 10)
+                return .navigated(w.text, w.status)
             }
             if s.tabURL != tabURL {
                 // Safari has the new address but still shows the old document: mark it and wait.
                 mark += 1
                 _ = poll(id, "if(location.href===\(jsonString(href)))window.__smcpOld=\(mark);''")
-                let (text, stuck) = waitLoad(id, marked: true, from: href, timeout: 10, grace: 1.5)
-                return stuck ? .same : .navigated(text)
+                let (text, stuck, status) = waitLoad(id, marked: true, from: href, timeout: 10, grace: 1.5)
+                return stuck ? .same : .navigated(text, status)
             }
             changed = s.changed
         }
@@ -1550,7 +1621,11 @@ final class Tools {
         // The address from before the action, so a pushState route change shows up as one.
         let settled = settle(id, href: env["u0"] as? String ?? env["u"] as? String ?? "", tabURL: verifiedURL,
                              wasReady: env["r"] as? String == "complete", twice: twice)
-        if case .navigated(let page) = settled { return result + " → " + page }
+        if case .navigated(let page, let status) = settled {
+            navigated = true
+            // The new page may be a bot check or a block page; an error names the action that led there.
+            do { return result + " → " + (try passCheck(id, page, status)) } catch let e as ToolError { throw ToolError(result + " → " + e.msg, kind: e.kind) }
+        }
         let noChange = " (no change on the page yet)"
         var unchanged = settled == .unchanged
         if a["os"] as? Bool == true { return result + (unchanged ? noChange : "") }
@@ -1627,8 +1702,8 @@ final class Tools {
         if a["load"] as? Bool == true {
             // The page has finished loading and is not a bot check (after the user solved one).
             let limit = min(max(a["timeout"] as? Double ?? 15, 0.5), 30)
-            let (text, _) = waitLoad(id, marked: false, from: nil, timeout: limit, grace: 0)
-            return try passCheck(id, text)
+            let (text, _, status) = waitLoad(id, marked: false, from: nil, timeout: limit, grace: 0)
+            return try passCheck(id, text, status)
         }
         var o = pick(a, ["ref", "selector", "text"])
         guard !o.isEmpty else { throw ToolError("wait needs text, ref or selector") }
@@ -1648,7 +1723,7 @@ final class Tools {
             }
             first = false
             if Date().timeIntervalSince(start) > limit {
-                throw ToolError("timed out after \(String(format: "%g", limit))s waiting for \(what) to \(gone ? "disappear" : "appear")")
+                throw ToolError("timed out after \(String(format: "%g", limit))s waiting for \(what) to \(gone ? "disappear" : "appear")", kind: "timeout")
             }
             usleep(150_000)
         }
@@ -1839,25 +1914,40 @@ final class Tools {
                   let env = (try? JSONSerialization.jsonObject(with: Data(r.result.utf8))) as? [String: Any] else { continue }
             if env["p"] != nil { continue }
             tabs[id]?.url = r.url
-            if env["x"] != nil { return "(page navigated before the script returned) " + waitLoad(id, marked: false, from: nil, timeout: 10).text }
+            if env["x"] != nil {
+                navigated = true
+                let w = waitLoad(id, marked: false, from: nil, timeout: 10)
+                do { return "(page navigated before the script returned) " + (try passCheck(id, w.text, w.status)) } catch let e as ToolError {
+                    throw ToolError("the script navigated → " + e.msg, kind: e.kind)
+                }
+            }
             if let e = env["e"] as? String { throw ToolError(clip(e, 600)) }
             var v = env["v"] as? String ?? "undefined"
             // A string result prints as itself, not as a JSON literal, so shell tools can use it.
             if v.hasPrefix("\""), let d = v.data(using: .utf8), let str = try? JSONSerialization.jsonObject(with: d, options: .fragmentsAllowed) as? String { v = str }
-            // Notes start with \u{1E}: the client prints those lines to stderr, so the data stays clean.
+            // Notes start with \u{1E} and are not data (Client.split); the page's result cannot make one.
+            v.removeAll { $0 == "\u{1E}" }
             let max = a["max_chars"] as? Int ?? 4000
-            var out = max > 0 && v.count > max ? String(v.prefix(max)) + "\n\u{1E}… \(v.count - max) more chars (--max 0 for all, or -o FILE)" : v
-            if !note.isEmpty { out += "\n\u{1E}" + note.trimmingCharacters(in: .whitespaces) }
+            var out = max > 0 && v.count > max ? String(v.prefix(max)) : v
             // The script sent the tab somewhere else: wait, so the next call sees the new page.
             var navigated = r.url != before
             if !navigated, code.range(of: #"location|history\.|\.submit\(|\.click\(|\.open\("#, options: .regularExpression) != nil {
                 usleep(120_000)
                 if let s = peek(id) { navigated = s.tabURL != before || s.url != href || s.ready != "complete" } else { navigated = true }
             }
-            if navigated { out += " → " + waitLoad(id, marked: false, from: href, timeout: 10, grace: 6).text }
+            if navigated {
+                self.navigated = true
+                let w = waitLoad(id, marked: false, from: href, timeout: 10, grace: 6)
+                do { out += " → " + (try passCheck(id, w.text, w.status)) } catch let e as ToolError {
+                    throw ToolError("the script navigated → " + e.msg, kind: e.kind)
+                }
+            }
+            // Notes last, each on its own line, after the data and the page it led to.
+            if max > 0 && v.count > max { out += "\n\u{1E}… \(v.count - max) more chars (--max 0 for all, or -o FILE)" }
+            if !note.isEmpty { out += "\n\u{1E}" + note.trimmingCharacters(in: .whitespaces) }
             return out
         }
-        throw ToolError("js still running after 15 s; result discarded (the code may keep running in the page)")
+        throw ToolError("js still running after 15 s; result discarded (the code may keep running in the page)", kind: "timeout")
     }
 
     private func screenshot(_ a: [String: Any]) throws -> [Content] {

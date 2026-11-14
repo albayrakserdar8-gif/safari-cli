@@ -63,14 +63,11 @@ enum Pdf {
         if let err = r.run() { return fail("safari: " + err) }
         let pages = CGPDFDocument(path as CFURL)?.numberOfPages ?? 0
         guard pages > 0 else { return fail("safari: the PDF came out empty") }
-        print("\(path.path) (\(pages) page\(pages == 1 ? "" : "s")\(r.single ? ", one long page" : ""))")
+        Out.data("\(path.path) (\(pages) page\(pages == 1 ? "" : "s")\(r.single ? ", one long page" : ""))")
         return 0
     }
 
-    private static func fail(_ msg: String) -> Int32 {
-        FileHandle.standardError.write(Data((msg + "\n").utf8))
-        return 1
-    }
+    private static func fail(_ msg: String) -> Int32 { Out.fail(msg) }
 
     /// Loads the snapshot in an off-screen WKWebView and prints it to `to`.
     private final class Renderer: NSObject, WKNavigationDelegate {

@@ -28,15 +28,21 @@ final class Rate {
     private var boost: [String: Double] = [:]
     /// When each site's next navigation may start.
     private var next: [String: Date] = [:]
+    /// Sites that showed a block page, and until when their loads are refused; this daemon only.
+    private var held: [String: Date] = [:]
     private let file = Paths.dir + "/rate.json"
+    /// False (tests): rate.json is neither read nor written.
+    private let persist: Bool
 
-    init() {
-        guard let d = FileManager.default.contents(atPath: file),
+    init(persist: Bool = true) {
+        self.persist = persist
+        guard persist, let d = FileManager.default.contents(atPath: file),
               let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: String] else { return }
         for (k, v) in o { if let r = Rule(v) { rules[k] = r } }
     }
 
     private func save() {
+        guard persist else { return }
         let o = rules.mapValues { $0.lo == $0.hi ? String(format: "%g", $0.lo) : String(format: "%g-%g", $0.lo, $0.hi) }
         if let d = try? JSONSerialization.data(withJSONObject: o, options: [.sortedKeys]) {
             try? d.write(to: URL(fileURLWithPath: file), options: [.atomic])
@@ -88,11 +94,45 @@ final class Rate {
         return " (pacing \(k): " + Rule(lo: r.lo * f, hi: r.hi * f).text + " between pages)"
     }
 
-    /// `safari rate [SITE [RANGE|off]]`.
+    /// The site showed a block page: refuse its loads for `secs` (`rate SITE reset` ends that).
+    /// Returns the key the hold is under.
+    @discardableResult
+    func hold(host: String, for secs: Double) -> String {
+        let k = key(host)
+        held[k] = Date().addingTimeInterval(secs)
+        return k
+    }
+
+    /// Seconds left on the hold covering this host, and its key; nil when the host is not held.
+    func heldFor(host: String) -> (secs: Double, key: String)? {
+        let h = Rate.site(host), now = Date()
+        held = held.filter { $0.value > now }
+        guard let k = held.keys.filter({ h == $0 || h.hasSuffix("." + $0) }).max(by: { $0.count < $1.count }) else { return nil }
+        return (held[k]!.timeIntervalSince(now), k)
+    }
+
+    /// Ends holds and temporary slowdowns of the site and its subdomains; saved rules stay.
+    func reset(_ site: String) -> Bool {
+        func under(_ k: String) -> Bool { k == site || k.hasSuffix("." + site) }
+        let now = Date()
+        let had = held.contains { under($0.key) && $0.value > now } || session.keys.contains(where: under) || boost.keys.contains(where: under)
+        held = held.filter { !under($0.key) }
+        session = session.filter { !under($0.key) }
+        boost = boost.filter { !under($0.key) }
+        next = next.filter { !under($0.key) }
+        return had
+    }
+
+    /// `safari rate [SITE [RANGE|off|reset]]`.
     func command(_ a: [String: Any]) throws -> String {
         guard let site = (a["site"] as? String).map({ Rate.site($0.contains("://") ? URL(string: $0)?.host ?? $0 : $0) }) else { return list() }
         guard let v = a["range"] as? String else {
-            return rule(key(site)).map { "\(key(site)) \(pacing(key(site), $0))" } ?? "\(site) not paced"
+            let h = heldFor(host: site).map { ", held \(minutes($0.secs)) min" } ?? ""
+            return rule(key(site)).map { "\(key(site)) \(pacing(key(site), $0))" + h } ?? "\(site) not paced" + h
+        }
+        if v == "reset" {
+            let kept = rules[site].map { "; keeps \($0.text) between pages" } ?? ""
+            return (reset(site) ? "\(site): hold and temporary slowdown ended" : "\(site) was not held or slowed down") + kept
         }
         if v == "off" || v == "0" {
             let had = rules.removeValue(forKey: site) != nil || session.removeValue(forKey: site) != nil
@@ -101,7 +141,7 @@ final class Rate {
             save()
             return had ? "\(site) no longer paced" : "\(site) was not paced"
         }
-        guard let r = Rule(v) else { throw ToolError("give seconds between pages, e.g. 10 or 8-14, or off") }
+        guard let r = Rule(v) else { throw ToolError("give seconds between pages, e.g. 10 or 8-14, off or reset") }
         rules[site] = r
         session[site] = nil
         boost[site] = nil
@@ -116,8 +156,15 @@ final class Rate {
     }
 
     private func list() -> String {
-        let all = Set(rules.keys).union(session.keys).sorted()
+        let now = Date()
+        held = held.filter { $0.value > now }
+        let all = Set(rules.keys).union(session.keys).union(held.keys).sorted()
         if all.isEmpty { return "(no sites paced; safari rate SITE 8-14)" }
-        return all.map { "\($0) \(pacing($0, rule($0)!))" }.joined(separator: "\n")
+        return all.map { k in
+            let h = held[k].map { "held \(minutes($0.timeIntervalSince(now))) min" }
+            return k + " " + ([rule(k).map { pacing(k, $0) }, h].compactMap { $0 }.joined(separator: ", "))
+        }.joined(separator: "\n")
     }
+
+    private func minutes(_ s: Double) -> Int { max(1, Int((s / 60).rounded(.up))) }
 }

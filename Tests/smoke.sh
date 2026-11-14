@@ -65,6 +65,7 @@ parses '"delay":[5,5],"tab":"t5","url":"x.com"},"out":null,"tool":"navigate"' t5
 parses '"delay":[2,3],"idonly":true' open x.com --id-only --delay 2-3
 parses '"action":"wait","load":true' t5 wait --load
 parses '"args":{"range":"off","site":"x.com"},"out":null,"tool":"rate"' rate x.com off
+parses '"args":{"range":"reset","site":"x.com"},"out":null,"tool":"rate"' rate x.com reset
 check "crawl needs a tab" test "$(code crawl)" = 2
 check "bad --delay is a usage error" test "$(code t3 go x.com --delay soon)" = 2
 check "bad rate is a usage error" test "$(code rate x.com fast)" = 2
@@ -114,6 +115,14 @@ parses '"clear":true,"tab":"t5"},"out":null,"tool":"storage"' t5 storage --clear
 parses '"action":"drop","dtext":"hi","selector":"#zone"' t5 drop --sel '#zone' --text hi
 check "drop needs files or text" test "$(code t3 drop e4)" = 2
 parses '"stop":true,"tab":"t5"},"out":null,"tool":"record"' t5 record --stop
+parses '"json":true' t5 read --json
+parses '"action":"click","json":true,"ref":"e3"' t5 click e3 --json
+parses '"text":"--json"' t5 fill e4 -- --json
+parses '"json":true,"rows":".card"' t5 table --rows .card --json
+check "help --json is one JSON object" bash -c '"$0" help --json | python3 -c "import json,sys; d=json.load(sys.stdin); assert d[\"ok\"] and \"safari\" in d[\"text\"]"' "$BIN"
+out=$("$BIN" t3 click --json 2>"$SAFARI_CLI_HOME.err"); rc=$?
+check "--json usage error: exit 2, kind usage, nothing on stderr" bash -c '[ "$1" = 2 ] && [ ! -s "$3" ] && python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d[\"ok\"] is False and d[\"kind\"]==\"usage\"" "$2"' _ "$rc" "$out" "$SAFARI_CLI_HOME.err"
+rm -f "$SAFARI_CLI_HOME.err"
 check "record needs a tab" test "$(code record)" = 2
 parses '"full":true,"tab":"t5"},"out":null,"tool":"screenshot"' t5 shot --full
 check "shot --full with an element is a usage error" test "$(code t3 shot e4 --full)" = 2
@@ -145,7 +154,11 @@ check "another build gets restart" grep -q '"restart":true' <<<"$reply"
 out=$("$BIN" status 2>&1)
 check "client restarts the daemon" bash -c '[[ "$1" == *"daemon pid"* && "$1" != *"pid $2 "* ]]' _ "$out" "$pid"
 # Pacing slots are handed out by the daemon; nothing navigates here.
-check "unpaced site gets no wait" test "$("$BIN" --reserve https://example.com/a)" = 0.0
+check "unpaced site's first load goes at once" test "$("$BIN" --reserve https://y.org/a)" = 0.0
+check "unpaced site's next load waits 2-4 s" bash -c 'w=$("$0" --reserve y.org/b); [[ $w == [23].* || $w == 4.0 ]]' "$BIN"
+check "no 2-4 s on this machine" bash -c '"$0" --reserve http://127.0.0.1:9/a >/dev/null; [ "$("$0" --reserve 127.0.0.1:9/b)" = 0.0 ] && "$0" --reserve http://localhost:9/a >/dev/null && [ "$("$0" --reserve http://localhost:9/b)" = 0.0 ]' "$BIN"
+check "--delay 0 skips the 2-4 s" bash -c '"$0" --reserve https://z.org/a 0 0 >/dev/null; [ "$("$0" --reserve https://z.org/b 0 0)" = 0.0 ]' "$BIN"
+check "rate SITE reset" bash -c '"$0" rate x.com reset | grep -q "x.com was not held"' "$BIN"
 check "rate set" bash -c '"$0" rate example.com 2-3 | grep -q "2-3 s"' "$BIN"
 check "rate saved" grep -q '"example.com"' "$SAFARI_CLI_HOME/rate.json"
 check "first page of a paced site goes at once" test "$("$BIN" --reserve https://www.example.com/a)" = 0.0
@@ -176,9 +189,18 @@ while todo and time.time() < end:
 time.sleep(6)' &
 holder=$!
 sleep 3
+out=$("$BIN" t999 read --json 2>"$SAFARI_CLI_HOME/err"); rc=$?
+check "no extension, --json: exit 1, kind offline, one JSON line, nothing on stderr" bash -c '[ "$1" = 1 ] && [ ! -s "$3" ] && python3 -c "import json,sys; assert len(sys.argv[1].splitlines())==1; d=json.loads(sys.argv[1]); assert d[\"ok\"] is False and d[\"kind\"]==\"offline\" and d[\"tab\"]==\"t999\", d" "$2" || { echo "$2" >&2; false; }' _ "$rc" "$out" "$SAFARI_CLI_HOME/err"
+out=$("$BIN" t999 crawl --json 2>"$SAFARI_CLI_HOME/err"); rc=$?
+check "no extension, crawl --json: exit 1, rows [], the error in the envelope" bash -c '[ "$1" = 1 ] && [ ! -s "$3" ] && python3 -c "import json,sys; d=json.loads(sys.argv[1]); assert d[\"ok\"] is False and d[\"rows\"]==[] and \"page 1\" in d[\"error\"], d" "$2" || { echo "$2" >&2; false; }' _ "$rc" "$out" "$SAFARI_CLI_HOME/err"
 out=$("$BIN" t999 read 2>&1); rc=$?
 check "no extension: commands fail with the setup message" bash -c '[ "$1" = 1 ] && [[ $2 == *"extension is not connected"* ]] || { echo "$2" >&2; false; }' _ "$rc" "$out"
 check "no extension: status says why" bash -c '"$0" status | grep -q "NOT connected"' "$BIN"
+# crawl reports a failed page as a note: marked "note: " only when stdout and stderr are one stream.
+out=$("$BIN" t999 crawl 2>&1); rc=$?
+check "merged streams: notes are marked" bash -c '[ "$1" = 1 ] && [[ $2 == "note: safari: page 1: "* ]] || { echo "$2" >&2; false; }' _ "$rc" "$out"
+out=$("$BIN" t999 crawl 2>&1 >/dev/null)
+check "separate streams: notes are not marked" bash -c '[[ $1 == "safari: page 1: "* ]] || { echo "$1" >&2; false; }' _ "$out"
 "$BIN" stop >/dev/null 2>&1
 kill $holder 2>/dev/null; wait $holder 2>/dev/null
 exit $fail

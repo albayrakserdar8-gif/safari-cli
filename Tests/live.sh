@@ -18,6 +18,7 @@ cleanup() {
   local t
   for t in "${TABS[@]}"; do "$BIN" "$t" close >/dev/null 2>&1; done
   [ -n "$RATE_RESET" ] && "$BIN" rate 127.0.0.1 off >/dev/null 2>&1
+  "$BIN" rate 127.0.0.1 reset >/dev/null 2>&1   # a hold left by the block page checks
   [ -n "$SERVER" ] && kill "$SERVER" 2>/dev/null && wait "$SERVER" 2>/dev/null
   rm -rf "$tmp"
 }
@@ -77,6 +78,13 @@ like() {
 }
 # errs NAME RC TEXT: exit RC and stderr contains TEXT.
 errs() { if [ "$RC" = "$2" ] && [[ $ERR == *"$3"* ]]; then ok "$1"; else bad "$1" "want exit $2, stderr containing: $3" "$(got)"; fi; }
+# json NAME EXPR [ARG…]: stdout is one JSON object (d), stderr is empty, and the Python expression
+# EXPR holds; rc is the exit status, a the ARGs.
+json() {
+  local n="$1" e="$2"; shift 2
+  if [ -z "$ERR" ] && python3 -c 'import json,sys; o=sys.argv[1]; d=json.loads(o); rc=int(sys.argv[3]); a=sys.argv[4:]; sys.exit(0 if len(o.splitlines())==1 and eval(sys.argv[2]) else 1)' "$OUT" "$e" "$RC" "$@" 2>/dev/null
+  then ok "$n"; else bad "$n" "want one JSON object with: $e, nothing on stderr" "$(got)"; fi
+}
 # holds NAME COMMAND…: a plain shell test.
 holds() { local n="$1"; shift; if "$@"; then ok "$n"; else bad "$n" "failed: $*"; fi; }
 # rx TEXT: TEXT as a literal in an extended regex.
@@ -115,6 +123,8 @@ if [ "$RC" = 0 ] && [[ $OUT =~ ^t[0-9]+$ ]]; then
   [ "$RC" = 0 ] && forget "$B"
   s "$B" read
   errs "a closed tab is gone" 1 "Tab $B is gone"
+  s "$B" read --json
+  json "--json: a closed tab is kind gone, exit 1" 'rc==1 and d["ok"] is False and d["kind"]=="gone" and d["tab"]==a[0]' "$B"
   s tabs
   like "tabs no longer lists it" "!^$B[ *]" "^$T "
 else
@@ -127,11 +137,18 @@ like "read: page line and controls" "^safari-cli fixture \| $(rx "$URL/fixture.h
   '^e[0-9]+ combobox "Size' '^e[0-9]+ checkbox "Newsletter"$' '^e[0-9]+ radio "Red"$' '^e[0-9]+ button "Send"$' '^e[0-9]+ link "details link"$'
 like "read: frame block with frame refs" "^--- frame f[0-9]+ $(rx "$URL/frame.html")$" \
   '^f[0-9]+e[0-9]+ textbox "Frame field"$' '^f[0-9]+e[0-9]+ button "Frame confirm"$'
+s "$T" read --json
+json "read --json: tab, url, the text, no nav" 'rc==0 and d["ok"] and d["tab"]==a[0] and d["url"]==a[1] and "textbox \"Name\"" in d["text"] and "nav" not in d' "$T" "$URL/fixture.html"
 s "$T" read -q Newsletter
 like "read -q: the matching control only" '^e[0-9]+ checkbox "Newsletter"$' '!button "Send"' '!textbox "Name"'
 s "$T" text
 has "text: page and frame as markdown" "# Fixture" "  1. Conference" "| Pear \| green | 0.90 |" $'```\nline one\nline two\n```' \
   "### Inside the frame" "Frame paragraph text."
+# A script runner that merges stdout and stderr: the data first, then the note marked "note: ".
+M=$("$BIN" "$T" text --max 50 2>&1)
+holds "merged streams: data first, the note last as note: …" bash -c '[[ $(head -1 <<<"$1") == "safari-cli fixture | "* && $(tail -1 <<<"$1") == "note: … "*" more chars; --offset "* ]] || { echo "$1" >&2; false; }' _ "$M"
+s "$T" text --max 50
+holds "separate streams: the note alone on stderr, unmarked" bash -c '[[ $1 == "… "*" more chars"* && $2 == "safari-cli fixture | "* ]]' _ "$ERR" "$OUT"
 s "$T" links
 like "links: names and URLs" '^e[0-9]+ "About" https://example\.com/about$' '^e[0-9]+ "details link" /fixture\.html#details$' \
   '^e[0-9]+ "Elsewhere" https://example\.org/$'
@@ -245,6 +262,18 @@ holds "js -o FILE: the whole result in the file" test "$n chars, $x not x" = "50
 j '"y".repeat(100)' --max 10
 is "js --max: capped stdout" yyyyyyyyyy
 errs "js --max: the note on stderr" 0 "… 90 more chars"
+j '"y".repeat(100)' --max 10 --json
+json "js --json: the text, and the note in notes" 'rc==0 and d["text"]=="y"*10 and any("90 more chars" in x for x in d["notes"])'
+j '"a\n\x1eb"'
+is "js: a \\x1e line in the result is data, not a note" $'a\nb'
+j 'var p = document.createElement("p"); p.id = "fake"; p.textContent = "\x1efake note"; document.querySelector("h1").after(p); return 1'
+s "$T" text --max 0
+holds "text: a \\x1e line on the page is data, not a note" bash -c '[[ $1 == *"fake note"* && $2 != *"fake note"* ]]' _ "$OUT" "$ERR"
+j 'document.getElementById("fake").remove(); return 1'
+s "$T" storage local live_x $'a\x1eb'
+s "$T" storage local live_x
+is "storage: a \\x1e in a value is dropped" ab
+s "$T" storage --delete live_x
 j 'throw new Error("boom")'
 errs "js: a thrown error exits 1" 1 "Error: boom"
 
@@ -335,6 +364,10 @@ is "highlight --hide: the box is gone" 0
 # --- navigation, table and crawl on list.html
 s "$T" go "$URL/list.html?p=1" --delay 0
 is "go URL" "List | $URL/list.html?p=1"
+s "$T" go "$URL/list.html?p=1" --delay 0 --json
+json "go --json: nav, url and title of the loaded page" 'rc==0 and d["nav"] is True and d["url"]==a[0] and d["title"]=="List" and d["tab"]==a[1]' "$URL/list.html?p=1" "$T"
+s "$T" table --json
+json "table --json: rows, not text" 'rc==0 and "text" not in d and len(d["rows"])==4 and d["rows"][0]["id"]=="1001"'
 s "$T" table
 like "table: rows with link and id columns, ad and hidden rows left out" "^Title	Year	Price	link	id$" \
   "^Car 1	2021	1\.000 TL	$(rx "$URL/item.html?id=1")	1001$" "^Car 4	2024	4\.000 TL	$(rx "$URL/item.html?id=4")	1004$" '!Advertise' '!hidden'
@@ -345,13 +378,16 @@ is "js sees the page's own variables" 1
 SON=$(ref link Sonraki)
 s "$T" click "$SON"
 is "click that navigates: → title | url" "clicked $SON link \"Sonraki\" → List | $URL/list.html?p=2"
-s "$T" go back
+s "$T" go back --delay 0
 is "go back" "List | $URL/list.html?p=1"
-s "$T" go forward
+s "$T" go forward --delay 0
 is "go forward" "List | $URL/list.html?p=2"
 j 'document.title = "changed"; return document.title'
-s "$T" go reload
+s "$T" go reload --delay 0
 is "go reload" "List | $URL/list.html?p=2"
+j 'setTimeout(function(){ location.href = "list.html?p=1" }, 50); return "abcdefghij"' --max 4
+is "js that navigates: the capped result, then the page" "abcd → List | $URL/list.html?p=1"
+holds "…and the note on stderr, without the page" bash -c '[[ $1 == *"… 6 more chars"* && $1 != *"→"* ]]' _ "$ERR"
 s "$T" go "$URL/list.html?p=1" --delay 0
 s "$T" crawl --delay 0
 like "crawl: 3 pages merged" "^Title	Year	Price	link	id$" "^Car 1	2021	1\.000 TL	$(rx "$URL/item.html?id=1")	1001$" \
@@ -359,6 +395,9 @@ like "crawl: 3 pages merged" "^Title	Year	Price	link	id$" "^Car 1	2021	1\.000 TL
 holds "crawl: header and 12 rows, no duplicates" test "$(grep -c . <<<"$OUT")/$(cut -f5 <<<"$OUT" | sort -u | grep -c .)" = 13/13
 errs "crawl: progress on stderr" 0 "page 3/5 · 4 rows, 4 new"
 errs "crawl: stops at the last page" 0 "no next page; done"
+s "$T" go "$URL/list.html?p=1" --delay 0
+s "$T" crawl --delay 0 --json
+json "crawl --json: 12 rows from 3 pages, progress in notes" 'rc==0 and len(d["rows"])==12 and d["pages"]==3 and "no next page; done" in d["notes"]'
 
 # --- drop
 s "$T" go "$URL/drop.html" --delay 0
@@ -440,7 +479,7 @@ is "back on origin A: the fetch is not mocked" '{"items":[1,2,3]}'
 TITLE='for (var i = 0; i < 60 && document.title.indexOf("·") < 0; i++) await new Promise(r => setTimeout(r, 50)); return document.title'
 if lease "a copy with another daemon's tag is dropped by the next agent call"; then
   j 'sessionStorage.setItem("__smcp_routes", JSON.stringify({o: "other.1", t: 600000, x: Date.now() + 600000, l: [{p: "*/api/data.json", k: "block"}]})); return 1'
-  s "$T" go reload
+  s "$T" go reload --delay 0
   j "$TITLE"
   is "a copy within its lease applies from the start of a load" 'route test · failed'
   s "$T" read   # an agent call: it names the tag the daemon stands behind ('' here)
@@ -451,7 +490,7 @@ if lease "a copy with another daemon's tag is dropped by the next agent call"; t
 fi
 if lease "a copy past its lease is ignored at load"; then
   j 'sessionStorage.setItem("__smcp_routes", JSON.stringify({o: "other.2", t: 600000, x: Date.now() - 1000, l: [{p: "*/api/data.json", k: "block"}]})); return 1'
-  s "$T" go reload
+  s "$T" go reload --delay 0
   j "$TITLE"
   is "a copy past its lease is ignored at load" 'route test · {"items":[1,2,3]}'
 fi
@@ -485,6 +524,39 @@ has "a bot check that passes is waited out" "$URL/fixture.html" "(passed a "
 [ -n "$RATE_RESET" ] && "$BIN" rate 127.0.0.1 off >/dev/null 2>&1
 s "$T" go "$URL/captcha.html" --delay 0
 errs "a captcha that stays exits 1" 1 "did not clear"
+
+# --- block page (last of all: it holds 127.0.0.1 for 15 min, ended by rate 127.0.0.1 reset)
+"$BIN" rate 127.0.0.1 reset >/dev/null 2>&1   # no slot left over from the checks above
+t0=$(python3 -c 'import time; print(time.time())')
+s "$T" go "$URL/blocked.html" --delay 0
+took=$(python3 -c 'import sys, time; print(time.time() - float(sys.argv[1]))' "$t0")
+errs "a block page fails at once" 1 "127.0.0.1 blocked this browser (block page)"
+holds "…within 4 s, without waiting for it to clear ($took s)" python3 -c 'import sys; sys.exit(float(sys.argv[1]) >= 4)' "$took"
+s "$T" go "$URL/fixture.html" --delay 0
+errs "the site is then held" 1 "loads are held for 15 more min"
+s "$T" go "$URL/fixture.html" --delay 0 --json
+json "--json: the held site is kind blocked" 'rc==1 and d["ok"] is False and d["kind"]=="blocked" and "held" in d["error"]'
+s rate 127.0.0.1
+has "rate SITE shows the hold" "held 15 min"
+s rate 127.0.0.1 reset
+has "rate SITE reset ends it" "127.0.0.1: hold and temporary slowdown ended"
+s "$T" go "$URL/fixture.html" --delay 0
+has "after the reset the site loads" "$URL/fixture.html"
+BLK='var a = document.createElement("a"); a.href = "blocked.html"; a.id = "blk"; a.textContent = "to the block page"; document.body.prepend(a); return 1'
+j "$BLK"
+s "$T" click --sel '#blk'
+errs "a click that leads to a block page exits 1, naming the click" 1 "clicked "
+holds "…and the block" bash -c '[[ $1 == *" → t"*": 127.0.0.1 blocked this browser"* ]]' _ "$ERR"
+"$BIN" rate 127.0.0.1 reset >/dev/null 2>&1
+s "$T" go "$URL/fixture.html" --delay 0
+j "$BLK"
+s "$T" click --sel '#blk' --json
+json "click --json into a block page: kind blocked" 'rc==1 and d["kind"]=="blocked" and d["tab"]==a[0]' "$T"
+"$BIN" rate 127.0.0.1 reset >/dev/null 2>&1
+s "$T" go "$URL/fixture.html" --delay 0
+j 'setTimeout(function(){ location.href = "blocked.html" }, 50); return "x"'
+errs "js that leads to a block page exits 1" 1 "the script navigated → t"
+"$BIN" rate 127.0.0.1 reset >/dev/null 2>&1
 
 echo "$nok ok, $nfail failed, $nskip skipped in ${SECONDS} s"
 exit $fail

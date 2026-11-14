@@ -25,4 +25,4 @@ safari click --sel 'a[href="/orders"]'
 - `<select>` choices are recorded from the change, however the user made it (`select` itself has no `--os` mode).
 - Only the user's own actions count; safari's commands are not recorded. Text typed into rich editors (contenteditable) is not recorded.
 - Recording covers one site in one tab: moving to another site ends it, and `--stop` then says it is not recording.
-- Replay with the tab id (`export SAFARI_TAB=t9` in a script, or put `t9` after `safari`). Read the result after each step that matters, and ask before replaying anything that submits, buys or deletes.
+- Replay with the tab id after `safari` on each line (`safari t9 go …`); the header's `export SAFARI_TAB` works only where the shell lasts between commands. Read the result after each step that matters, and ask before replaying anything that submits, buys or deletes.

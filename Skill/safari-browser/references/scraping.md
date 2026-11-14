@@ -4,7 +4,7 @@
 
 ```bash
 safari t5 table                     # TSV of the biggest visible table (or repeated cards), plus link and id columns
-safari t5 table --json -o rows.json
+safari t5 table --json -o rows.json   # a JSON array in the file; --json alone prints {"ok":…,"rows":[…]}
 safari t5 table --rows ".card"      # a list of cards: one row per match
 safari t5 table --sel "#results table"
 ```
@@ -22,7 +22,11 @@ safari rate example.com off
 safari t5 go URL --delay 8-14   # one call only
 ```
 
-`go` and `open` wait for the site's slot (`(waited 9.4 s: pacing …)`). The daemon hands out slots, so several agents on one site queue up. A bot check or a 429/503 answer slows the site down for the session. Clicks that load a page are not paced.
+`go` and `open` wait for the site's slot (`(waited 9.4 s: pacing …)`). The daemon hands out slots, so several agents on one site queue up. A site without a rule gets 2-4 s between loads (not `localhost` or `127.*`); `--delay 0` skips that, but not a slot already booked. A bot check or a 429/503 answer slows the site down for the session. Clicks that load a page are not paced.
+
+## Blocked
+
+A block page ("Sorry, you have been blocked", access denied; HTTP 403 usually) is not a check that passes: `go`, `open`, `click`, `js` and `crawl` exit 1 at once (`kind` `blocked` with `--json`), and loads of the site from any tab are refused for 15 min (`go back`/`forward` still work). Do not reload, retry, re-submit or switch tabs to get around it; safari does not try to evade blocks. Tell the user. `safari rate SITE` shows the hold; `safari rate SITE reset` ends it and any session slowdown, keeping a saved rule; use it only when the user says so.
 
 ## `crawl`: a paged list in one command
 
@@ -31,11 +35,11 @@ safari t5 crawl --pages 5 -o rows.tsv          # from this page: table, next pag
 safari t5 crawl --next "Sonraki" --rows ".card" --json -o rows.json
 ```
 
-It follows `rel=next` or a link named "Next"/"Sonraki" (or `--next TEXT`), merges the rows and drops duplicates by `id`. Progress goes to stderr. Unpaced sites get 3-6 s between pages. A crawl of many pages takes minutes: run it in the background.
+It follows `rel=next` or a link named "Next"/"Sonraki" (or `--next TEXT`), merges the rows and drops duplicates by `id`. Progress goes to stderr (`notes` with `--json`). Unpaced sites get 3-6 s between pages. A crawl of many pages takes minutes: run it in the background, or give the call a long timeout.
 
 ## Loops
 
-Shell loops keep bulk output out of the conversation:
+Loops, in the shell or a script, keep bulk output out of the conversation:
 
 ```bash
 for u in $(cat urls.txt); do safari t5 go "$u" >/dev/null && safari t5 text --max 2000 >> pages.md; done

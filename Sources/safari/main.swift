@@ -20,43 +20,42 @@ do {
     if argv.first == "--parse" {
         let (tool, args, out) = try CLI.parse(Array(argv.dropFirst()))
         let d = try JSONSerialization.data(withJSONObject: ["tool": tool, "args": args, "out": out ?? NSNull()], options: [.sortedKeys, .withoutEscapingSlashes])
-        print(String(decoding: d, as: UTF8.self))
-        exit(0)
+        Out.data(String(decoding: d, as: UTF8.self))
+        Out.end(0)
     }
     // `safari --selftest` checks the pure functions without Safari or the daemon (tests).
     if argv == ["--selftest"] {
-        exit(SelfTest.run())
+        Out.end(SelfTest.run())
     }
     // `safari --reserve URL [lo hi]` asks for a pacing slot without sleeping or navigating (tests).
     if argv.first == "--reserve", argv.count >= 2 {
         var a: [String: Any] = ["url": argv[1]]
         if argv.count == 4, let lo = Double(argv[2]), let hi = Double(argv[3]) { a["delay"] = [lo, hi] }
         let r = try Client.send("reserve", a)
-        print(String(format: "%.1f", r["wait"] as? Double ?? 0))
-        exit(0)
+        Out.data(String(format: "%.1f", r["wait"] as? Double ?? 0))
+        Out.end(0)
     }
     // `safari --ext OP [JSON]` sends one raw op to the extension (debugging the bridge).
     if argv.first == "--ext", argv.count >= 2 {
         var a: [String: Any] = ["op": argv[1]]
         if argv.count > 2, let d = argv[2].data(using: .utf8), let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] { a["args"] = o }
         let r = try Client.send("ext", a)
-        print(r["text"] as? String ?? "")
-        exit(r["ok"] as? Bool == true ? 0 : 1)
+        Out.data(r["text"] as? String ?? "")
+        Out.end(r["ok"] as? Bool == true ? 0 : 1)
     }
+    Out.json = CLI.wantsJSON(argv)
     let (tool, args, out) = try CLI.parse(argv)
     if tool == "help" {
-        print(args["text"] as? String ?? CLI.help)
-        exit(0)
+        Out.data(args["text"] as? String ?? CLI.help)
+        Out.end(0)
     }
-    if tool == "downloads" { exit(Downloads.run(args)) }
-    if tool == "pdf" { exit(Pdf.run(args, out: out)) }
-    if tool == "state" { exit(State.run(args)) }
-    if tool == "crawl" { exit(Crawl.run(args, out: out)) }
-    exit(Client.run(tool, args, out: out))
+    if tool == "downloads" { Out.end(Downloads.run(args)) }
+    if tool == "pdf" { Out.end(Pdf.run(args, out: out)) }
+    if tool == "state" { Out.end(State.run(args)) }
+    if tool == "crawl" { Out.end(Crawl.run(args, out: out)) }
+    Out.end(Client.run(tool, args, out: out))
 } catch let u as Usage {
-    FileHandle.standardError.write(Data(("safari: " + u.msg + "\n").utf8))
-    exit(2)
+    Out.end(Out.fail("safari: " + u.msg, code: 2, kind: "usage"))
 } catch let f as Client.Failure {
-    FileHandle.standardError.write(Data((f.msg + "\n").utf8))
-    exit(1)
+    Out.end(Out.fail(f.msg))
 }

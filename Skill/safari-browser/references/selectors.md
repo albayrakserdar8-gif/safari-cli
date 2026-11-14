@@ -39,9 +39,9 @@ Refs inside frames (`f1e4`) cannot be `el`: js runs in the top page.
 `resize` sets the viewport, and only in a window that holds nothing but your tabs, so the user's windows keep their size:
 
 ```bash
-T=$(safari open URL --window --id-only)   # a separate window
-safari $T resize 390 844                  # → t7 viewport 390x844
-safari $T shot
+safari open URL --window --id-only   # → t7, in a separate window
+safari t7 resize 390 844            # → t7 viewport 390x844
+safari t7 shot
 ```
 
 ## Cleaning up
@@ -50,4 +50,4 @@ safari $T shot
 
 ## Several agents at once
 
-Each agent should name its tab: `safari t5 read`. In a script, `export SAFARI_TAB=t5` makes t5 the tab for every command that names none; an explicit tab id still wins.
+Each agent should name its tab: `safari t5 read`. `SAFARI_TAB=t5` in the environment makes t5 the tab for every command that names none, where the environment lasts between commands (not in harnesses that start a new shell per call); an explicit tab id still wins.

@@ -416,8 +416,10 @@ enum PageAgent {
       return inn.join('\n')||(q?'no link matches '+qshow(q):'(no links)')}
 
     // One window of a long result. The continuation note starts with \x1e: the client prints
-    // such lines to stderr, so data piped to a file stays clean. max_chars 0 = everything.
-    function chunk(body,a){var off=a.offset||0,max=a.max_chars===0?1/0:(a.max_chars||6000),tot=body.length,cut=body.slice(off,off+max);
+    // such lines to stderr, so data piped to a file stays clean; page text cannot carry one.
+    // max_chars 0 = everything.
+    function nox(s){return String(s).replace(/\x1e/g,'')}
+    function chunk(body,a){body=nox(body);var off=a.offset||0,max=a.max_chars===0?1/0:(a.max_chars||6000),tot=body.length,cut=body.slice(off,off+max);
       if(off+max<tot){var nl=cut.lastIndexOf('\n');if(nl>max*0.6)cut=cut.slice(0,nl);cut+='\n\x1e… '+(tot-off-cut.length)+' more chars; --offset '+(off+cut.length)+' (or --max 0, -o FILE)'}
       return cut}
 
@@ -501,7 +503,7 @@ enum PageAgent {
       var body;
       if(a.json)body=JSON.stringify(out.map(function(v){var o={};names.forEach(function(n,i){o[n]=v[i]});return o}));
       else body=[names].concat(out).map(function(v){return v.map(function(c){return String(c).replace(/[\t\r\n]+/g,' ')}).join('\t')}).join('\n');
-      return chunk(body,a)+'\n\x1e'+rows.length+' rows from '+src}
+      return chunk(body,a)+'\n\x1e'+rows.length+' rows from '+nox(src).replace(/\s+/g,' ')}
 
     var VM=60;
     function read(a){
@@ -540,7 +542,7 @@ enum PageAgent {
       // Say what this read left out, so the model does not go looking for it with js.
       if(so&&so.off)cut+='\n(+'+so.off+' controls off-screen: --full or -q)';
       var de=document.documentElement;
-      return(document.title?clip(document.title,80)+' | ':'')+location.href.slice(0,200)+' | scroll '+Math.round(scrollY)+'/'+Math.max(0,de.scrollHeight-innerHeight)+(document.readyState==='complete'?'':' | still loading')+'\n'+cut}
+      return(document.title?nox(clip(document.title,80))+' | ':'')+location.href.slice(0,200)+' | scroll '+Math.round(scrollY)+'/'+Math.max(0,de.scrollHeight-innerHeight)+(document.readyState==='complete'?'':' | still loading')+'\n'+cut}
 
     function deep(x,y){var e=document.elementFromPoint(x,y);while(e&&e.shadowRoot){var n=e.shadowRoot.elementFromPoint(x,y);if(!n||n===e)break;e=n}return e}
     function inside(el,c){for(;c;c=c.parentNode||c.host)if(c===el)return true;return false}
@@ -798,9 +800,9 @@ enum PageAgent {
       if(a.del!=null){if(st.getItem(a.del)==null)throw new Error('no '+area+'Storage key '+JSON.stringify(a.del));st.removeItem(a.del);return'deleted '+JSON.stringify(a.del)}
       if(a.key!=null&&a.value!=null){st.setItem(a.key,a.value);return'set '+JSON.stringify(a.key)+' ('+a.value.length+' chars)'}
       if(a.key!=null){var v=st.getItem(a.key);if(v==null)throw new Error('no '+area+'Storage key '+JSON.stringify(a.key)+(keys.length?'; keys: '+keys.slice(0,20).join(', '):''));
-        var m=a.max_chars==null?6000:a.max_chars;return m>0&&v.length>m?v.slice(0,m)+'\n\u001e… '+(v.length-m)+' more chars (--max 0 for all)':v}
+        v=nox(v);var m=a.max_chars==null?6000:a.max_chars;return m>0&&v.length>m?v.slice(0,m)+'\n\u001e… '+(v.length-m)+' more chars (--max 0 for all)':v}
       if(!keys.length)return'(no '+area+'Storage keys on '+location.host+')';
-      return keys.map(function(k){return k+' = '+clip(st.getItem(k),120)}).join('\n')+'\n\u001e'+keys.length+' '+area+'Storage key'+(keys.length===1?'':'s')+' on '+location.host}
+      return keys.map(function(k){return nox(k+' = '+clip(st.getItem(k),120))}).join('\n')+'\n\u001e'+keys.length+' '+area+'Storage key'+(keys.length===1?'':'s')+' on '+location.host}
     // Without the extension: the page's own cookies (no HttpOnly, no domain or expiry). Same reply as the extension's op.
     function cookies(a){var all=document.cookie?document.cookie.split(/;\s*/).map(function(p){var i=p.indexOf('=');return{name:i<0?'':p.slice(0,i),value:i<0?p:p.slice(i+1)}}):[];
       var gone='=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/',hs=location.hostname.split('.');

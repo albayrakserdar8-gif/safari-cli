@@ -106,7 +106,7 @@ Ajana doğrudan söylemen yeterli:
 | `T read`, `T text`, `T links` | Ref'li öğeler, markdown olarak sayfa, bağlantılar; `-q` ile arama (`-q '/regex/i'` de olur), `--diff` ile yalnızca değişen |
 | `T table [--rows CSS] [--json]` | Bir tabloyu ya da kart listesini TSV/JSON olarak verir; her satırın bağlantısı ve `data-id`'si de eklenir; `--rows` verilmezse tekrar eden kartları kendisi bulur |
 | `T crawl [--next METİN] [--pages N]` | Sayfalı bir listenin her sayfasında `table` çalıştırır, "Sonraki"yi izler; sonuçları birleştirir, tekrarları atar |
-| `rate [SİTE [S\|off]]` | Site başına sayfa yüklemeleri arası saniye (`rate example.com 8-14`); kalıcıdır |
+| `rate [SİTE [S\|off\|reset]]` | Site başına sayfa yüklemeleri arası saniye (`rate example.com 8-14`); kalıcıdır; `reset` engel sayfasından sonraki bekletmeyi bitirir |
 | `T click R`, `dblclick`, `hover`, `fill`, `type`, `select`, `key`, `scroll`, `wait`, `upload`, `drop`, `dialog` | Sayfada işlem yapar (`drop` dosyaları bir bırakma alanına bırakır) |
 | `T locator R`, `T highlight R` | R için sayfa yüklemelerinden sonra da geçerli bir CSS seçici; senin ekranında R'nin çevresine çerçeve |
 | `T js KOD [R]` | Sayfada JavaScript çalıştırır (async işlev gövdesi, 15 sn sınırı; `-` stdin'den okur); koddan sonra verilen öğe kodda `el` olur |
@@ -121,7 +121,9 @@ Ajana doğrudan söylemen yeterli:
 | `T logs` | Konsol ve ağ kayıtları; `--id` ile yanıt gövdesi |
 | `downloads [--wait]` | Safari'nin listesinden son indirmeler; `--wait` bitmelerini bekler, sonra kaydedilen yolları yazar |
 
-Sonuçlar stdout'a gider; hatalar stderr'e, çıkış kodu 1 ile (yanlış kullanımda 2). Uzun sonuçlar kırpılır (`--max N`, hepsi için `--max 0`); `… N more chars; --offset K` gibi notlar ve satır sayıları stderr'e gider, böylece yönlendirilen veri temiz kalır. `-o DOSYA`, `read`, `text`, `links`, `table` ve `js` sonucunun tamamını dosyaya yazar.
+Sonuçlar stdout'a gider; hatalar stderr'e, çıkış kodu 1 ile (yanlış kullanımda 2). Uzun sonuçlar kırpılır (`--max N`, hepsi için `--max 0`); `… N more chars; --offset K` gibi notlar ve satır sayıları stderr'e gider, böylece yönlendirilen veri temiz kalır. stderr ile stdout aynı boruya gidiyorsa (komutları bir betikten çalıştıran ajan ortamları), notlar verinin ardından `note: ` önekiyle gelir. `-o DOSYA`, `read`, `text`, `links`, `table` ve `js` sonucunun tamamını dosyaya yazar.
+
+`--json` her komutla çalışır: stdout'a tek bir JSON nesnesi yazar, stderr'e hiçbir şey yazmaz; çıkış kodu aynı kalır. Nesnede `ok`, sekme kimliği, sekmenin `url`'i (`title` çoğunlukla sayfa yükleyen çağrılardan sonra, `nav` sayfa yüklendiyse), `text` ve `notes` bulunur; hata durumunda `kind` (`gone`, `timeout`, `check`, `blocked`, `offline`, `noanswer`, `dialog`, `usage` ya da `error`) ve `error`. `table` ve `crawl` satırları `rows` içinde verir. Bu Kasım 2026'da değişti: `table --json` ve `crawl --json` eskiden çıplak bir dizi yazıyordu; `jq '.[]'` artık `jq '.rows[]'` olur (`-o DOSYA` ile dosyada yine dizi durur).
 
 Nasıl davranır:
 
@@ -132,8 +134,8 @@ Nasıl davranır:
 - **Girdi.** Tıklama ve yazma varsayılan olarak sayfa içi olaylardır: Safari arka planda kalır, imleç sende kalır. `--os`, sayfa içi olayları yok sayan siteler için gerçek fare/klavye olayı gönderir ve Safari'yi kısa süre öne getirir.
 - **İletişim kutuları.** `alert` onaylanır; `confirm`/`prompt`, önceden `dialog` ya da `click --answer` ile yanıt verilmediyse reddedilir. Her biri sonuçta bildirilir. Yalnızca safari'nin çalıştığı sekmeler etkilenir; kendi gezinmende kutular normal çıkar.
 - **Ekran görüntüsü.** Safari başka bir masaüstündeyse ya da tam ekrandaysa yaklaşık bir saniye öne getirilir, sonra önceki uygulamaya dönülür.
-- **Bot doğrulamaları.** `open`, `go` ve `wait --load` doğrulama sayfalarını (Cloudflare "Just a moment…"/"Bir dakika lütfen", PerimeterX, captcha) tanır ve kendiliğinden geçmeleri için en çok 20 sn bekler; sonuç gerçek sayfayı anlatır. Geçmeyen bir doğrulama, sekmeyi adıyla anan bir hatadır: sekmeyi göster, çöz, sonra `wait --load`.
-- **Hız sınırı.** `safari rate SİTE 8-14` (ya da `go --delay 8-14`) bir sitedeki sayfa yüklemelerini aralıklandırır. Daemon zaman dilimi dağıtır, her komut kendi dilimini kendisi bekler; böylece aynı sitedeki birkaç ajan sıraya girer ve daemon serbest kalır. Bir bot doğrulaması ya da 429/503 yanıtı o siteyi oturum boyunca yavaşlatır (kural yoksa 4-8 sn, varsa iki katı).
+- **Bot doğrulamaları.** `open`, `go` ve `wait --load` doğrulama sayfalarını (Cloudflare "Just a moment…"/"Bir dakika lütfen", PerimeterX, captcha) tanır ve kendiliğinden geçmeleri için en çok 20 sn bekler; sonuç gerçek sayfayı anlatır. Geçmeyen bir doğrulama, sekmeyi adıyla anan bir hatadır: sekmeyi göster, çöz, sonra `wait --load`. Engel sayfası (Cloudflare'in "Sorry, you have been blocked" sayfası, HTTP 403 ile "Access denied") doğrulama değildir: `go`, `open`, `wait --load` ve böyle bir sayfa yükleyen `click` ya da `js` hemen `blocked` hatası verir; o sitenin sonraki yüklemeleri ve yenilemeleri 15 dakika reddedilir (`safari rate SİTE reset` bunu bitirir; geri ve ileri yine çalışır). safari engelleri aşmaya çalışmaz: parmak izi değiştirmez, yeniden denemez.
+- **Hız sınırı.** `safari rate SİTE 8-14` (ya da `go --delay 8-14`) bir sitedeki sayfa yüklemelerini aralıklandırır. Daemon zaman dilimi dağıtır, her komut kendi dilimini kendisi bekler; böylece aynı sitedeki birkaç ajan sıraya girer ve daemon serbest kalır. Kuralı olmayan bir sitede yüklemeler arasında 2-4 sn bırakılır (ilk yükleme hemen gider; `localhost` ve `127.*` muaftır, `--delay 0` bunu atlar). Bir bot doğrulaması ya da 429/503 yanıtı o siteyi oturum boyunca yavaşlatır (kural yoksa 4-8 sn, varsa iki katı).
 
 ## Kaynak kullanımı
 
@@ -141,7 +143,7 @@ Tek bir Mac'te ölçüldü:
 
 | | |
 |---|---|
-| Skill | yaklaşık 1.680 token, yalnızca tarayıcı işlerinde yüklenir; sekiz `references/` dosyası (her biri 400-850 token) yalnızca iş gerektirince okunur (MCP sürümü her oturumda yaklaşık 875 token araç şeması gönderiyordu, skill'i de ayrıca) |
+| Skill | yaklaşık 1.760 token, yalnızca tarayıcı işlerinde yüklenir; dokuz `references/` dosyası (her biri 400-850 token) yalnızca iş gerektirince okunur (MCP sürümü her oturumda yaklaşık 875 token araç şeması gönderiyordu, skill'i de ayrıca) |
 | Varsayılan `read` | yaklaşık 500 token (Wikipedia ana sayfa), 1.100 (Hacker News) |
 | Çağrı süresi | `read` 7–60 ms, işlemler 170–470 ms, `shot` 0,9–2,1 sn; komut başına yaklaşık 10 ms daha, daemon'u başlatan ilk komutta 0,2 sn |
 | Bellek | Boşta 9 MB, kullanımdan sonra yaklaşık 34 MB |
@@ -196,6 +198,8 @@ Dokuzuncu tur (Kasım 2026) safari'yi dört görevde playwright-cli ile karşıl
 
 Onuncu tur (Kasım 2026) görev turu değil, kodun baştan sona gözden geçirilmesiydi. Bu turda gerçek Safari'yi yerel test sayfalarıyla süren canlı bir regresyon betiği (134 kontrol: okuma, işlem, iletişim kutuları ve çerçeveler, `wait`, `js`, loglar, depolama, çerezler, `state`, `route` ve yaşam döngüsü, `challenge.html` ile `captcha.html`) ve saf fonksiyonlar için `safari --selftest` eklendi. İlk koşular üç gerçek hata buldu ve düzeltildi: üst sayfada verilen bir iletişim kutusu yanıtı alt çerçevelerde kurulu kalıyor, sonraki bir çerçeve `confirm`'ü kabul ediyordu; `fill`'den hemen sonraki `click` zamanlayıcının değişikliğini beklemeden dönüyordu; `js` bayat bir route kopyasını yerinde bırakıyordu. Aynı turda düz route'lara etiket ve 37 dakikalık kira eklendi (hiçbir daemon'un yenilemediği kopya istekleri değiştirmeyi bırakır) ve eklenti yeniden bağlandığında sekme kimlikleri sayfadaki handle ile korunur oldu.
 
+On birinci tur (Kasım 2026) iki oturumdan çıktı. Kabuk komutlarını bir JavaScript REPL'inden çalıştıran bir ortamdaki ajanlar (stderr stdout'a karışıyor, sıfır olmayan çıkış kodu hata olarak fırlatılıyor, her çağrı yeni bir kabuk) notları verinin ortasında buldu ve hata türünü metinden çıkarmak zorunda kaldı; sıralı ve işaretli notlar, her komutta `--json` ve `references/scripting.md` bundan doğdu. cimri.com'da bir Cloudflare engel sayfası geçecek bir doğrulama sanıldı: safari 20 sn bekleyip kullanıcıdan çözmesini istedi, bir tıklamadan sonra ise hiçbir sorun bildirmedi. Engel sayfaları artık hemen hata verir ve siteyi bekletir, kuralı olmayan sitelere 2-4 sn aralık uygulanır ve `go`, `cimri.com/arama?q=a:b` gibi bir adrese `https://` ekler. Bunları `make test` ve yeni `make test-live` kontrolleri (`Tests/blocked.html`, karışık çıktı, `--json`) kapsıyor; o zamandan beri gerçek sitelerde ajan turu yapılmadı.
+
 Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenmedi.
 
 ## Sınırlar
@@ -214,7 +218,9 @@ Sınama tek bir Mac'te (macOS 27) yapıldı, geniş bir site yelpazesinde denenm
 - Safari'nin çerez deposunu adlandırmadığı bir gizli pencerede `cookies` yalnızca sayfanın okuyabildiği çerezleri görür (HttpOnly yok).
 - Safari web uygulamaları (Dock'a Ekle) sürülmez. Her biri eklentinin kendi kopyasını çalıştırır, safari bu kopyaları kullanmaz; `safari status` onları yok sayılan olarak sayar.
 - Data: adresleri (Tab Sleeper gibi eklentilerin uyuyan sekmeleri) eklentilerden gizlenir, bu yüzden `tabs` onları boş listeler.
-- Bot doğrulamaları başlık ve işaretlemeleriyle tanınır; başkaları fark edilmeden geçer. Hız sınırı `go`, `open` ve `crawl` için geçerlidir; sayfa yükleyen tıklamalar için değil.
+- Bot doğrulamaları ve engel sayfaları başlık ve işaretlemeleriyle tanınır; başkaları fark edilmeden geçer. Hız sınırı ve engel sayfasından sonraki bekletme `go`, `open` ve `crawl` için geçerlidir, sayfa yükleyen tıklamalar için değil; bekletme yalnızca daemon çalıştığı sürece sürer. safari engelleri aşmaz; bir site tarayıcıyı engellediğinde ne yapılacağına kullanıcı karar verir.
+- `main.js` (konsol ve ağ kancaları, iletişim kutusu yerine geçenler, kaydedici, route kopyaları) yalnızca safari'nin çalıştığı sayfalarda değil, gezdiğin her sayfada çalışır. Tuttuğu veri sınırlıdır (önizlemeler, 4000 karakterlik gövdeler); iletişim kutuları ve route'lar yalnızca safari'nin dokunduğu sekmelerde devreye girer.
+- Düz bir route'un sayfadaki kopyası, çöken ya da öldürülen bir daemon'dan sonra da yaşar: kirası bitene (en çok 37 dk) ya da sekmeye bir sonraki safari çağrısına kadar, bir taklidin eşleştiği fetch/XHR istekleri `__smcp_m=…` işaretini taşımaya devam eder ve yönlendirme kuralı kalktığı için bu işaretle gerçek siteye gider.
 - `text` kipi bağlantı metinlerini ve veri tablosu hücrelerini kırpar (200 karakter, 60 satır); karmaşık tablolarda düzen bozulabilir. Sayfa düzeni için kullanılan tablolar metin olarak okunur.
 - Her isteğin yanıt gövdesini okumak ve `--os` olmadan gerçek (güvenilir) girdi, Safari'nin Web Inspector protokolünü gerektirir; kendi Safari'nde bunu yalnızca Apple imzalı uygulamalar kullanabilir. Apple'ın `safaridriver --mcp`'si bunu sekmelerini ve çerezlerini görmeyen ayrı, temiz bir oturumda sunar.
 

@@ -14,8 +14,8 @@ enum CLI {
         ("read", "[T] read [-q Q] [--all] [--full] [--diff] [--ref R] [--sel CSS] [--max N] [--offset K] [-o FILE]"),
         ("text", "[T] text [-q Q] [--diff] [--ref R] [--sel CSS] [--max N] [--offset K] [-o FILE]   page as markdown"),
         ("links", "[T] links [-q Q] [--ref R] [--sel CSS] [--max N] [--offset K] [-o FILE]"),
-        ("table", "[T] table [--sel CSS|--ref R] [--rows CSS] [--json] [--max N] [--offset K] [-o FILE]   rows as TSV"),
-        ("crawl", "T crawl [--next TEXT] [--pages N (5)] [--delay S] [--sel CSS|--rows CSS] [--json] [-o FILE]   from this page on: table, next page, repeat"),
+        ("table", "[T] table [--sel CSS|--ref R] [--rows CSS] [--max N] [--offset K] [-o FILE]   rows as TSV"),
+        ("crawl", "T crawl [--next TEXT] [--pages N (5)] [--delay S] [--sel CSS|--rows CSS] [-o FILE]   from this page on: table, next page, repeat"),
         ("click", "[T] click R [--right] [--answer accept|dismiss|TEXT] [--os]   (dblclick, hover alike)"),
         ("dblclick", "[T] dblclick R [--os]"),
         ("hover", "[T] hover R [--os]"),
@@ -47,7 +47,7 @@ enum CLI {
         ("close", "T close | close --agents   (--agents: every agent tab not on screen)"),
         ("resize", "[T] resize W H               viewport size, in a window of agent tabs only (open --window)"),
         ("downloads", "downloads [--wait] [--timeout S]   recent downloads; --wait until one finishes"),
-        ("rate", "rate [SITE [S|off]]          pace page loads per site (S: seconds, e.g. 10 or 8-14)"),
+        ("rate", "rate [SITE [S|off|reset]]    pace page loads per site (S: seconds, e.g. 10 or 8-14; reset ends a hold)"),
         ("status", "status                       daemon and extension state"),
         ("stop", "stop                         stop the daemon"),
     ]
@@ -57,7 +57,8 @@ enum CLI {
         safari: drive the user's Safari. T = tab id (t3), R = ref from read (e12, f1e5).
         Elements can also be given as --sel CSS or --xy X,Y. Without T: the last tab used.
         --max N caps output (read/text/links/table 6000, js 4000; 0 = all); -o FILE writes it all.
-        Notes such as "… N more chars" go to stderr.
+        Notes such as "… N more chars" go to stderr (merged into stdout: after the data, as "note: …").
+        --json (any verb): one JSON object on stdout (ok, kind, tab, url, text or rows, notes), nothing on stderr.
 
         """ + verbs.filter { !["dblclick", "hover", "uncheck"].contains($0.name) }.map { "  safari " + $0.usage }.joined(separator: "\n")
     }
@@ -73,7 +74,7 @@ enum CLI {
         "--all": "all", "--full": "full", "--diff": "diff", "--os": "os", "--gone": "gone",
         "--private": "private", "--net": "net", "--errors": "errors", "--warn": "warn",
         "--new": "new", "--clear": "clear", "--right": "right", "--id-only": "idonly", "--wait": "wait",
-        "--json": "json", "--load": "load", "--window": "window", "--agents": "agents", "--hide": "hide", "--submit": "submit", "--block": "block", "--doc": "doc", "--global": "global", "--list": "list", "--stop": "stop",
+        "--load": "load", "--window": "window", "--agents": "agents", "--hide": "hide", "--submit": "submit", "--block": "block", "--doc": "doc", "--global": "global", "--list": "list", "--stop": "stop",
     ]
     /// Options each verb takes.
     private static let allowed: [String: Set<String>] = {
@@ -82,8 +83,8 @@ enum CLI {
         return [
             "tabs": [], "open": ["private", "window", "idonly", "delay"], "downloads": ["wait", "timeout"], "status": [], "stop": [], "show": [], "close": ["agents"], "resize": [], "route": ["status", "body", "ctype", "block", "list", "to", "hq", "hs", "delay", "doc", "global"], "unroute": [], "storage": ["del", "clear", "max_chars"], "cookies": ["del", "clear", "max_chars", "domain"], "state": [], "pdf": ["out"], "drop": ["ref", "selector", "xy", "text"], "record": ["stop"], "locator": ["ref", "selector", "xy"], "highlight": ["ref", "selector", "xy", "secs", "hide"], "go": ["delay"],
             "read": page.union(["all", "full", "out"]), "text": page.union(["out"]), "links": page.union(["out"]),
-            "table": ["ref", "selector", "rows", "json", "max_chars", "offset", "out"],
-            "crawl": ["selector", "rows", "json", "next", "pages", "delay", "out"], "rate": [],
+            "table": ["ref", "selector", "rows", "max_chars", "offset", "out"],
+            "crawl": ["selector", "rows", "next", "pages", "delay", "out"], "rate": [],
             "click": el.union(["answer", "right"]), "drag": ["ref", "selector", "xy", "to"], "dblclick": el.union(["answer"]), "hover": el,
             "fill": el.union(["submit"]), "check": ["ref", "selector", "xy"], "uncheck": ["ref", "selector", "xy"], "type": el.union(["submit"]), "select": el, "key": el, "scroll": el,
             "wait": ["ref", "selector", "gone", "timeout", "load"], "upload": el.subtracting(["os"]), "dialog": [],
@@ -96,8 +97,19 @@ enum CLI {
     static func isRef(_ s: String) -> Bool { s.wholeMatch(of: #/(f\d+)?e\d+/#) != nil }
     static func isTab(_ s: String) -> Bool { s.wholeMatch(of: #/t\d+/#) != nil }
 
+    /// `--json` anywhere before `--`: every verb takes it (`Out.envelope`).
+    static func wantsJSON(_ argv: [String]) -> Bool { argv.prefix { $0 != "--" }.contains("--json") }
+
     /// Returns the tool and its arguments; `help` comes back as tool "help" with the text.
     static func parse(_ argv: [String]) throws -> (tool: String, args: [String: Any], out: String?) {
+        guard wantsJSON(argv) else { return try parseVerb(argv) }
+        let cut = argv.firstIndex(of: "--") ?? argv.endIndex
+        var (tool, args, out) = try parseVerb(argv[..<cut].filter { $0 != "--json" } + argv[cut...])
+        if tool != "help" { args["json"] = true }
+        return (tool, args, out)
+    }
+
+    private static func parseVerb(_ argv: [String]) throws -> (tool: String, args: [String: Any], out: String?) {
         var rest = argv
         var tab: String?
         if let f = rest.first, isTab(f) { tab = f; rest.removeFirst() }
@@ -386,7 +398,6 @@ enum CLI {
             try noMore()
             for k in ["ref", "selector", "rows"] { if let v = o[k] { args[k] = v } }
             if args["ref"] != nil, args["selector"] != nil { throw bad("give --ref or --sel, not both") }
-            if f.contains("json") { args["json"] = true }
             try int("max_chars")
             try int("offset")
             outAll()
@@ -394,7 +405,6 @@ enum CLI {
         case "crawl":
             try noMore()
             for k in ["selector", "rows", "next"] { if let v = o[k] { args[k] = v } }
-            if f.contains("json") { args["json"] = true }
             try int("pages")
             if let p = args["pages"] as? Int, p < 1 || p > 100 { throw bad("--pages must be 1-100") }
             try delay()
@@ -403,7 +413,7 @@ enum CLI {
             guard pos.count <= 2 else { throw bad("rate takes a site and seconds") }
             if let s = pos.first { args["site"] = s }
             if pos.count == 2 {
-                guard pos[1] == "off" || Rate.Rule(pos[1]) != nil else { throw bad("give seconds, e.g. 10 or 8-14, or off") }
+                guard pos[1] == "off" || pos[1] == "reset" || Rate.Rule(pos[1]) != nil else { throw bad("give seconds, e.g. 10 or 8-14, off or reset") }
                 args["range"] = pos[1]
             }
             return ("rate", args, nil)

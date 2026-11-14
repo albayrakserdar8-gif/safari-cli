@@ -73,7 +73,7 @@ final class Bridge {
         let box = Box()
         let id: Int = try q.sync {
             // On `q` already, so not `downReason`, which takes the queue itself.
-            guard let c = conns.first else { throw ToolError("The Safari CLI Bridge extension is not connected: " + reason(apps: apps.count) + ".") }
+            guard let c = conns.first else { throw ToolError("The Safari CLI Bridge extension is not connected: " + reason(apps: apps.count) + ".", kind: "offline") }
             seq += 1
             pending[seq] = (sem, box, c)
             var m = args
@@ -84,9 +84,9 @@ final class Bridge {
         }
         if sem.wait(timeout: .now() + timeout) == .timedOut {
             q.sync { _ = pending.removeValue(forKey: id) }
-            throw ToolError("Safari did not answer in time; the page may be showing a dialog.")
+            throw ToolError("Safari did not answer in time; the page may be showing a dialog.", kind: "noanswer")
         }
-        guard let r = box.value else { throw ToolError("The Safari CLI Bridge extension disconnected during the call (Safari restarted or updated it); try again.") }
+        guard let r = box.value else { throw ToolError("The Safari CLI Bridge extension disconnected during the call (Safari restarted or updated it); try again.", kind: "offline") }
         if let e = r["err"] as? String { throw ToolError(e) }
         return r
     }

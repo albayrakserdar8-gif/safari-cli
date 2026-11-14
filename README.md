@@ -104,7 +104,7 @@ Just ask the agent:
 | `T read`, `T text`, `T links` | Controls with refs, page as markdown, links; `-q` to search (`-q '/regex/i'` too), `--diff` for changes only |
 | `T table [--rows CSS] [--json]` | A table or list of cards as TSV/JSON, with each row's link and `data-id`; without `--rows` it finds repeated cards itself |
 | `T crawl [--next TEXT] [--pages N]` | `table` on each page of a paged list, following "Next", merged and deduplicated |
-| `rate [SITE [S\|off]]` | Seconds between page loads per site (`rate example.com 8-14`), saved |
+| `rate [SITE [S\|off\|reset]]` | Seconds between page loads per site (`rate example.com 8-14`), saved; `reset` ends a hold after a block page |
 | `T click R`, `dblclick`, `hover`, `fill`, `type`, `select`, `key`, `scroll`, `wait`, `upload`, `drop`, `dialog` | Act on the page (`drop` drops files on a drop zone) |
 | `T locator R`, `T highlight R` | A CSS selector for R that lasts across page loads; a box around R in your view |
 | `T js CODE [R]` | Run JavaScript in the page (async function body, 15 s limit; `-` reads stdin); an element after the code is `el` |
@@ -119,7 +119,9 @@ Just ask the agent:
 | `T logs` | Console and network logs, with response bodies by `--id` |
 | `downloads [--wait]` | Recent downloads from Safari's list; `--wait` until they finish, then the saved paths |
 
-Results go to stdout; errors to stderr with exit status 1 (2 for wrong usage). Long results are capped (`--max N`, `--max 0` for all); notes such as `… N more chars; --offset K` and row counts go to stderr, so piped data stays clean. `-o FILE` writes the whole result of `read`, `text`, `links`, `table` and `js` to a file.
+Results go to stdout; errors to stderr with exit status 1 (2 for wrong usage). Long results are capped (`--max N`, `--max 0` for all); notes such as `… N more chars; --offset K` and row counts go to stderr, so piped data stays clean. When stderr and stdout are the same pipe (agent harnesses that run commands from a script), the notes come after the data, marked `note: `. `-o FILE` writes the whole result of `read`, `text`, `links`, `table` and `js` to a file.
+
+`--json` works with every verb: one JSON object on stdout and nothing on stderr, with the same exit status. It holds `ok`, the tab id, its `url` (`title` mainly after a call that loaded a page, `nav` when one did), the `text` and the `notes`; on failure `kind` (`gone`, `timeout`, `check`, `blocked`, `offline`, `noanswer`, `dialog`, `usage` or `error`) and `error`. `table` and `crawl` put their rows in `rows`. This changed in November 2026: `table --json` and `crawl --json` used to print a bare array, so `jq '.[]'` becomes `jq '.rows[]'` (with `-o FILE` the file still holds the array).
 
 How it behaves:
 
@@ -130,8 +132,8 @@ How it behaves:
 - **Input.** By default clicks and typing are in-page events: Safari stays in the background and you keep your cursor. `--os` sends real mouse/keyboard events for sites that ignore in-page events; it briefly brings Safari to the front.
 - **Dialogs.** `alert` is accepted, `confirm`/`prompt` are dismissed unless `dialog` or `click --answer` sets an answer first. Each one is reported in the result. Only tabs safari works in are affected; your own browsing keeps normal dialogs.
 - **Screenshots.** If Safari is on another Space or full screen, it is brought forward for about a second, then the previous app comes back.
-- **Bot checks.** `open`, `go` and `wait --load` recognise check pages (Cloudflare "Just a moment…", PerimeterX, captchas) and wait up to 20 s for them to pass by themselves; the result then describes the real page. A check that stays is an error naming the tab, so you can show it and solve it, then `wait --load`.
-- **Pacing.** `safari rate SITE 8-14` (or `go --delay 8-14`) spaces page loads on a site. The daemon hands out time slots and the command waits for its own, so several agents on one site queue up and the daemon stays free. A bot check or a 429/503 answer slows the site down for the session (4-8 s without a rule, else double).
+- **Bot checks.** `open`, `go` and `wait --load` recognise check pages (Cloudflare "Just a moment…", PerimeterX, captchas) and wait up to 20 s for them to pass by themselves; the result then describes the real page. A check that stays is an error naming the tab, so you can show it and solve it, then `wait --load`. A block page (Cloudflare's "Sorry, you have been blocked", "Access denied" with HTTP 403) is not a check: `go`, `open`, `wait --load`, and a `click` or `js` that loads one, fail at once with `blocked`, and further loads and reloads of that site are refused for 15 minutes (`safari rate SITE reset` ends that; back and forward still work). safari does not try to get around blocks: no fingerprint changes, no retries.
+- **Pacing.** `safari rate SITE 8-14` (or `go --delay 8-14`) spaces page loads on a site. The daemon hands out time slots and the command waits for its own, so several agents on one site queue up and the daemon stays free. A site without a rule gets 2-4 s between loads (the first load goes at once; `localhost` and `127.*` are exempt, `--delay 0` skips it). A bot check or a 429/503 answer slows the site down for the session (4-8 s without a rule, else double).
 
 ## Resource use
 
@@ -139,7 +141,7 @@ Measured on one Mac:
 
 | | |
 |---|---|
-| Skill | about 1,680 tokens, loaded only for browser tasks; eight `references/` files (400-850 tokens each) are read only when a task needs them (the MCP version sent about 875 tokens of tool schemas every session, plus its skill) |
+| Skill | about 1,760 tokens, loaded only for browser tasks; nine `references/` files (400-850 tokens each) are read only when a task needs them (the MCP version sent about 875 tokens of tool schemas every session, plus its skill) |
 | Default `read` | about 500 tokens (Wikipedia home), 1,100 (Hacker News) |
 | Call time | `read` 7–60 ms, actions 170–470 ms, `shot` 0.9–2.1 s; about 10 ms more per command, 0.2 s for the first one that starts the daemon |
 | Memory | 9 MB idle, about 34 MB after use |
@@ -192,6 +194,8 @@ A ninth round (November 2026) compared safari with playwright-cli on four tasks,
 
 A tenth round (November 2026) was a pass over the code rather than a task round. It added a live regression script that drives the real Safari through the local test pages (134 checks: reading, acting, dialogs and frames, `wait`, `js`, logs, storage, cookies, `state`, `route` and its lifecycle, `challenge.html` and `captcha.html`) and `safari --selftest` for the pure functions. Its first runs found three real faults, now fixed: a dialog answer given on the top page stayed armed in child frames, so a later frame `confirm` was accepted; a click right after `fill` returned before a timer's change; and `js` left a stale route copy in place. The same pass gave plain routes a tag and a 37-minute lease, so a copy no daemon renews stops changing requests, and made an extension reconnect keep tab ids through the handle in the page.
 
+An eleventh round (November 2026) came from two sessions. Agents in a harness that runs shell commands from a JavaScript REPL (stderr merged into stdout, a non-zero exit thrown as an error, a new shell per call) got notes in the middle of the data and had to parse error kinds from text; this led to the ordered, marked notes, `--json` on every verb and `references/scripting.md`. On cimri.com, a Cloudflare block page was taken for a check that would pass: safari waited 20 s and asked the user to solve it, and after a click it reported nothing wrong. Block pages now fail at once and hold the site, unruled sites get the 2-4 s pace, and `go` adds `https://` to an address like `cimri.com/arama?q=a:b`. These are covered by `make test` and by new `make test-live` checks (`Tests/blocked.html`, merged output, `--json`); no agent round has run on real sites since.
+
 This was tested on one Mac (macOS 27), not across a wide range of sites.
 
 ## Limits
@@ -210,7 +214,9 @@ This was tested on one Mac (macOS 27), not across a wide range of sites.
 - In a private window whose cookie store Safari does not name, `cookies` sees only cookies the page can read (no HttpOnly).
 - Safari web apps (Add to Dock) are not driven. Each runs its own copy of the extension, which safari leaves alone; `safari status` counts them as ignored.
 - Data: URLs (sleeping tabs of extensions like Tab Sleeper) are hidden from extensions, so `tabs` lists them blank.
-- Bot checks are recognised by their titles and markup; others pass unnoticed. Pacing covers `go`, `open` and `crawl`, not clicks that load a page.
+- Bot checks and block pages are recognised by their titles and markup; others pass unnoticed. Pacing and the hold after a block page cover `go`, `open` and `crawl`, not clicks that load a page; the hold lasts only as long as the daemon. safari does not get around blocks; when a site blocks the browser, the user decides what happens next.
+- `main.js` (console and network hooks, dialog overrides, the recorder, route copies) runs on every page you visit, not only pages safari works in. What it keeps is bounded (previews, 4000-char bodies), and dialogs and routes act only in tabs safari has touched.
+- A plain route's page copy outlives a daemon that crashed or was killed: until its lease ends (at most 37 min) or the next safari call to the tab, fetch/XHR that a mock matches still carry its `__smcp_m=…` marker, and with the redirect rule gone they reach the real site with it.
 - `text` mode trims link text and data-table cells (200 chars, 60 rows); complex tables may lose layout. Tables used for page layout are read as text.
 - Reading response bodies of every request, and real (trusted) input without `--os`, would need Safari's Web Inspector protocol, which only Apple-signed apps may use with your own Safari. Apple's `safaridriver --mcp` offers it in a separate, clean session without your tabs or cookies.
 

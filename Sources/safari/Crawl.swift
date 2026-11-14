@@ -21,7 +21,7 @@ enum Crawl {
 
     static func run(_ args: [String: Any], out: String?) -> Int32 {
         signal(SIGPIPE, SIG_IGN)
-        guard let tab = args["tab"] as? String else { return fail("safari: crawl needs a tab id") }
+        guard let tab = args["tab"] as? String else { return Out.fail("safari: crawl needs a tab id") }
         let pages = args["pages"] as? Int ?? 5
         let json = args["json"] as? Bool == true
         var tableArgs: [String: Any] = ["tab": tab, "max_chars": 0]
@@ -33,19 +33,30 @@ enum Crawl {
         var seen = Set<String>()
         var visited = Set<String>()
         var status: Int32 = 0
+        var failure = ""
+        var failureKind = "error"
+        var pagesDone = 0
 
-        func note(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
+        let note = Out.note
+        /// The crawl stops here; what it has so far is still the result. With --json the message
+        /// is the envelope's error, otherwise a note.
+        func failed(_ m: String, kind: String = "error") {
+            failure = m
+            failureKind = kind
+            status = 1
+            if !Out.json { note(m) }
+        }
 
         do {
             // A page that adds no new rows (a "Next" link back to the same content) does not count;
             // two of them in a row end the crawl.
             var p = 0, loads = 0, empty = 0
+            defer { pagesDone = p }
             while p < pages && loads < pages + 3 {
                 loads += 1
                 let r = try Client.send("table", tableArgs)
                 guard r["ok"] as? Bool == true else {
-                    note("safari: page \(p + 1): " + Client.split(r["text"] as? String ?? "").data)
-                    status = 1
+                    failed("safari: page \(p + 1): " + Client.split(r["text"] as? String ?? "").data, kind: r["kind"] as? String ?? "error")
                     break
                 }
                 let data = Client.split(r["text"] as? String ?? "").data
@@ -91,19 +102,16 @@ enum Crawl {
                 let (waited, _) = try Client.pace("navigate", &go)
                 let g = try Client.send("navigate", go)
                 guard g["ok"] as? Bool == true else {
-                    note("safari: " + Client.split(g["text"] as? String ?? "").data)
-                    status = 1
+                    failed("safari: " + Client.split(g["text"] as? String ?? "").data, kind: g["kind"] as? String ?? "error")
                     break
                 }
                 let line = Client.split(g["text"] as? String ?? "").data
                 note("→ " + line + (waited >= 0.5 ? " (waited \(String(format: "%.1f", waited)) s)" : ""))
             }
         } catch let f as Client.Failure {
-            note(f.msg)
-            status = 1
+            failed(f.msg, kind: f.kind)
         } catch {
-            note("safari: \(error)")
-            status = 1
+            failed("safari: \(error)")
         }
 
         let text: String
@@ -113,20 +121,25 @@ enum Crawl {
             text = ([header ?? []] + rows).map { $0.joined(separator: "\t") }.joined(separator: "\n")
         }
         let count = json ? objs.count : rows.count
+        if Out.json {
+            Out.fields["tab"] = tab
+            Out.fields["pages"] = pagesDone
+        }
         if let out {
             let path = (out as NSString).expandingTildeInPath
             do { try Data((text + "\n").utf8).write(to: URL(fileURLWithPath: path)) } catch {
-                return fail("safari: cannot write \(path): \(error.localizedDescription)")
+                return Out.fail("safari: cannot write \(path): \(error.localizedDescription)", tab: tab)
             }
-            print("wrote \(count) rows → \(path)")
+            if Out.json {
+                Out.fields["file"] = path
+                Out.fields["chars"] = text.unicodeScalars.count
+            } else { Out.data("wrote \(count) rows → \(path)") }
+        } else if Out.json {
+            Out.fields["rows"] = objs
         } else if count > 0 || header != nil {
-            print(text)
+            Out.data(text)
         }
+        if status != 0, Out.json { return Out.fail(failure, kind: failureKind, tab: tab) }
         return status
-    }
-
-    private static func fail(_ msg: String) -> Int32 {
-        FileHandle.standardError.write(Data((msg + "\n").utf8))
-        return 1
     }
 }

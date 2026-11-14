@@ -3,12 +3,17 @@ import Foundation
 
 /// Sends one command to the daemon, starting it when needed, and prints the result.
 enum Client {
-    struct Failure: Error { let msg: String }
+    struct Failure: Error {
+        let msg: String
+        var kind = "error"
+    }
 
     static func run(_ tool: String, _ args: [String: Any], out: String? = nil) -> Int32 {
         signal(SIGPIPE, SIG_IGN)
         var args = args
-        let idOnly = args.removeValue(forKey: "idonly") != nil
+        let idOnly = args.removeValue(forKey: "idonly") != nil && !Out.json
+        // `--json` is the client's; only table takes it too (rows as a JSON array).
+        if tool != "table" { args["json"] = nil }
         do {
             let (waited, site) = try pace(tool, &args)
             var r = try send(tool, args)
@@ -17,11 +22,11 @@ enum Client {
                 let note = " (waited \(String(format: "%.1f", waited)) s: pacing \(site))"
                 if let nl = t.firstIndex(of: "\n") { r["text"] = t[..<nl] + note + t[nl...] } else { r["text"] = t + note }
             }
-            return show(r, tab: args["tab"] as? String, out: out, idOnly: idOnly)
+            return show(r, tab: args["tab"] as? String, out: out, idOnly: idOnly, rows: tool == "table")
         } catch let f as Failure {
-            return fail(f.msg)
+            return Out.fail(f.msg, kind: f.kind, tab: args["tab"] as? String)
         } catch {
-            return fail("safari: \(error)")
+            return Out.fail("safari: \(error)", tab: args["tab"] as? String)
         }
     }
 
@@ -36,9 +41,15 @@ enum Client {
         if let delay { ra["delay"] = delay }
         if let fallback { ra["fallback"] = fallback }
         let r = try send("reserve", ra)
+        // The site showed a block page a moment ago: loading it again would only extend the block.
+        if let held = r["held"] as? Double {
+            let site = r["site"] as? String ?? "the site"
+            throw Failure(msg: "safari: \(site) blocked this browser; its loads are held for \(Int((held / 60).rounded(.up))) more min. Do not retry; tell the user (safari rate \(site) reset ends the hold).", kind: "blocked")
+        }
         guard let w = r["wait"] as? Double, w > 0 else { return (0, "") }
         let site = r["site"] as? String ?? ""
-        if w > 20 { FileHandle.standardError.write(Data("safari: waiting \(Int(w.rounded())) s for the next slot on \(site)\n".utf8)) }
+        // Only for someone watching a terminal; the result line says how long it waited.
+        if w > 20, isatty(2) != 0 { Out.err("safari: waiting \(Int(w.rounded())) s for the next slot on \(site)") }
         Thread.sleep(forTimeInterval: w)
         return (w, site)
     }
@@ -79,7 +90,7 @@ enum Client {
     }
 
     /// Splits a result into data and notes: lines starting with \u{1E} (continuation hints,
-    /// row counts) go to stderr, so piping or `-o` keeps the data clean.
+    /// row counts) are notes (`Out.note`), so piping or `-o` keeps the data clean.
     static func split(_ text: String) -> (data: String, notes: [String]) {
         guard text.contains("\u{1E}") else { return (text, []) }
         var data: [Substring] = [], notes: [String] = []
@@ -120,13 +131,15 @@ enum Client {
         defer { argv.forEach { free($0) } }
         var pid = pid_t()
         if posix_spawn(&pid, exe, &fa, &at, argv, environ) != 0 {
-            fputs("safari: could not start the daemon: \(String(cString: strerror(errno)))\n", stderr)
+            Out.err("safari: could not start the daemon: \(String(cString: strerror(errno)))")
         }
     }
 
-    private static func show(_ r: [String: Any], tab: String?, out: String?, idOnly: Bool = false) -> Int32 {
+    private static func show(_ r: [String: Any], tab: String?, out: String?, idOnly: Bool = false, rows: Bool = false) -> Int32 {
         var text = r["text"] as? String ?? ""
         let images = r["img"] as? [String] ?? []
+        let tab = r["tab"] as? String ?? tab
+        if Out.json { for k in ["tab", "url", "title", "nav"] { Out.fields[k] = r[k] } }
         if !images.isEmpty {
             var paths: [String] = []
             for (i, b64) in images.enumerated() {
@@ -136,27 +149,37 @@ enum Client {
                     try d.write(to: url)
                     paths.append(url.path)
                 } catch {
-                    return fail("safari: cannot write \(url.path): \(error.localizedDescription)")
+                    return Out.fail("safari: cannot write \(url.path): \(error.localizedDescription)", tab: tab)
                 }
             }
-            text = paths.joined(separator: " ") + (text.isEmpty ? "" : " " + text)
+            if Out.json { Out.fields["files"] = paths } else { text = paths.joined(separator: " ") + (text.isEmpty ? "" : " " + text) }
         }
-        guard r["ok"] as? Bool == true else { return fail(split(text).data) }
+        guard r["ok"] as? Bool == true else { return Out.fail(split(text).data, kind: r["kind"] as? String ?? "error", tab: tab) }
         let (data, notes) = split(text)
         text = data
-        defer { for n in notes { FileHandle.standardError.write(Data((n + "\n").utf8)) } }
         // `-o FILE` for text results: the whole result into the file, one line here.
         if images.isEmpty, let out {
             let path = (out as NSString).expandingTildeInPath
             do { try Data((text.hasSuffix("\n") ? text : text + "\n").utf8).write(to: URL(fileURLWithPath: path)) } catch {
-                return fail("safari: cannot write \(path): \(error.localizedDescription)")
+                return Out.fail("safari: cannot write \(path): \(error.localizedDescription)", tab: tab)
             }
-            print("wrote \(text.unicodeScalars.count) chars → \(path)")
+            if Out.json {
+                Out.fields["file"] = path
+                Out.fields["chars"] = text.unicodeScalars.count
+            } else { Out.data("wrote \(text.unicodeScalars.count) chars → \(path)") }
+            notes.forEach(Out.note)
+            return 0
+        }
+        if Out.json {
+            // table: the rows themselves, not their text.
+            if rows, let list = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [Any] { Out.fields["rows"] = list } else { Out.fields["text"] = text }
+            notes.forEach(Out.note)
             return 0
         }
         // `open --id-only`: just the new tab id, for scripts.
         if idOnly, let m = text.firstMatch(of: #/t\d+/#) { text = String(m.output) }
-        if !text.isEmpty { print(text) }
+        if !text.isEmpty { Out.data(text) }
+        notes.forEach(Out.note)
         return 0
     }
 
@@ -169,10 +192,5 @@ enum Client {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let ms = Int(Date().timeIntervalSince1970 * 1000) % 100_000_000
         return dir.appendingPathComponent("shot-\(tab ?? "t")-\(ms)\(count > 1 ? "-\(index + 1)" : "").jpg")
-    }
-
-    private static func fail(_ msg: String) -> Int32 {
-        FileHandle.standardError.write(Data((msg.hasSuffix("\n") ? msg : msg + "\n").utf8))
-        return 1
     }
 }
